@@ -215,10 +215,17 @@ def compare_to_baseline(
             for key in actual_hardware
             if actual_hardware[key] != baseline.hardware_profile.model_dump(mode="json")[key]
         )
-        raise ValueError(
-            "result hardware profile does not match baseline; differing fields: "
-            + ", ".join(differing)
+        message = "result hardware profile does not match baseline; differing fields: " + ", ".join(
+            differing
         )
+        if "gpu" in differing:
+            # A missing GPU telemetry extra changes the profile without any hardware
+            # change, and that is the likeliest cause of a gpu-only mismatch.
+            message += (
+                "; note that a missing nvidia-ml-py (the 'gpu' extra) is reported as no GPU, "
+                "so run `just setup` and use the just recipes, which install extras"
+            )
+        raise ValueError(message)
     baseline_p50 = baseline.summary.p50_seconds
     current_p50 = result.summary.p50_seconds
     delta = current_p50 - baseline_p50

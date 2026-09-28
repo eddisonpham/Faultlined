@@ -53,7 +53,7 @@ Source: [01-scaffolding-instructions.md](01-scaffolding-instructions.md) §3.
 - [x] Structured logs, correlation IDs across components, metric naming, resource telemetry (degrades without GPU) — JSON logs + correlation across API/queue/worker; host telemetry with nullable per-field fallback and optional GPU; **runtime metrics emitted at call sites** (queue depth, queue/run time, stage duration, failures, ingest counters) to a JSONL sink; [conventions](../observability/conventions.md), `src/data_engine/observability/metrics.py`
 
 **Handoff**
-- [ ] Repo-wide review accepted; `HANDOFF.md` complete; clean-clone run verified — review verdict is accept-with-follow-ups and the handoff is complete; **live-Postgres verification is done** (isolated `just pg-up` cluster: 94 passed, 0 skipped, 92.33% coverage); **clean-clone run and history secrets scan remain outstanding**
+- [x] Repo-wide review accepted; `HANDOFF.md` complete; clean-clone run verified — review verdict is accept-with-follow-ups and the handoff is complete; **live-Postgres verification, clean-clone run, and history-wide secrets scan are all done** (isolated `just pg-up` cluster; clean clone at `02e5925` runs setup/ci/bench green; no credential in any of the 15 commits); it surfaced the `--all-extras` defect now fixed
 
 ## 2. MVP
 

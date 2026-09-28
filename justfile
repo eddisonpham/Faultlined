@@ -12,33 +12,33 @@ setup:
 
 # Format and apply safe lint fixes
 fmt:
-    uv run ruff format .
-    uv run ruff check --fix .
+    uv run --all-extras ruff format .
+    uv run --all-extras ruff check --fix .
 
 # Lint + format check (no writes)
 lint:
-    uv run ruff check .
-    uv run ruff format --check .
+    uv run --all-extras ruff check .
+    uv run --all-extras ruff format --check .
 
 # Strict type-check of all package modules
 typecheck:
-    uv run mypy
+    uv run --all-extras mypy
 
 # Fast tests + coverage gate (unit/integration/contract/e2e; excludes slow+gpu)
 test:
-    uv run pytest -m "not slow and not gpu" --cov --cov-report=term-missing
+    uv run --all-extras pytest -m "not slow and not gpu" --cov --cov-report=term-missing
 
 # All tests including slow and gpu-marked ones
 test-all:
-    uv run pytest --cov
+    uv run --all-extras pytest --cov
 
 # Run benchmarks and compare against committed baselines (phase 06)
 bench *ARGS:
-    uv run python -m benchmarks.harness {{ARGS}}
+    uv run --all-extras python -m benchmarks.harness {{ARGS}}
 
 # Run the platform locally (API + workers)
 run:
-    uv run de dev
+    uv run --all-extras de dev
 
 # Repository hygiene (structure, links, ADRs, secret patterns)
 hygiene:
@@ -46,15 +46,15 @@ hygiene:
 
 # Start an isolated local PostgreSQL for tests (gitignored var/pgdata, no admin, no password)
 pg-up:
-    uv run python scripts/dev_postgres.py up
+    uv run --all-extras python scripts/dev_postgres.py up
 
 # Stop the isolated local PostgreSQL started by pg-up
 pg-down:
-    uv run python scripts/dev_postgres.py down
+    uv run --all-extras python scripts/dev_postgres.py down
 
 # Report whether the isolated local PostgreSQL is running
 pg-status:
-    uv run python scripts/dev_postgres.py status
+    uv run --all-extras python scripts/dev_postgres.py status
 
 # Everything CI runs
 ci: lint typecheck test hygiene

@@ -47,13 +47,13 @@ See [implementation status](implementation/status.md), [failure modes](testing/f
 2. **Hardware matching is exact.** A baseline only compares on a byte-identical CPU/RAM/GPU/OS/disk profile; on a different machine the harness refuses to compare. Revisit with evidence before gating CI.
 3. **Postgres path is now verified.** `just pg-up` starts an isolated cluster in gitignored `var/pgdata` on port 55432 using local trust auth, so the full suite runs with nothing skipped and the DSN holds no credential. The owner's system PostgreSQL on 5432 is untouched and its superuser password remains unknown; that instance is still unverified.
 4. **Crash consistency:** artifact publication and DB catalog writes are separate transactions; worker crash recovery, retries, leases, and orphan GC remain future work.
-5. **Clean-clone review and history secrets scan are not performed.** Current-tree hygiene passes; no `.env` was opened.
+5. **Clean-clone validation and the history-wide secrets scan are done** (2026-09-28). A clean clone runs `just setup`, `just ci` (95 passed) and `just bench` green; 15 commits contain no credential, `.env` was never tracked, and the only DSN in history is the `USER:PASSWORD` placeholder. No `.env` was opened. This surfaced the `--all-extras` defect: `uv run` pruned the GPU extra, so a fresh clone reported no GPU and `just bench` refused to compare.
 
 ## 7. Highest-priority next steps
 
 1. **Owner green flag → run the baseline runbook in [§13](#13-baseline-runbook-owner-green-flag-required).**
 2. Optionally verify the slice against the owner's own system PostgreSQL (port 5432) by putting its DSN in `.env`; the isolated `just pg-up` cluster already covers this.
-3. Validate a clean clone end-to-end and run a history-wide secrets scan; then repeat the review and consider `scaffold-complete`.
+3. ~~Clean-clone validation and secrets scan~~ — done 2026-09-28. The stage criteria are now all evidenced; the owner may consider `scaffold-complete`.
 4. MVP engineering order: real MCAP/LeRobot reader on a fixed subset → rule-based validation/quarantine → Parquet metadata index → durable job lifecycle/recovery → deterministic LeRobot v3 dataset build.
 
 ## 8. Open architectural questions
@@ -70,7 +70,7 @@ Harness and schema v2 are implemented and tested; `synthetic-episode-ingest` mea
 
 ## 10. Testing status
 
-Latest local gates: `just fmt && just lint && just typecheck && just test && just hygiene && uv lock --check` passed; **94 passed, 0 skipped, 92.33% coverage** against the isolated Postgres cluster, hygiene clean, lock current. A Starlette/httpx `TestClient` deprecation warning is non-blocking and deferred. Live DB verification is done (`just pg-up`); the clean-clone run and the history-wide secrets scan have not. Repeat all gates after any change.
+Latest local gates: `just fmt && just lint && just typecheck && just test && just hygiene && uv lock --check` passed; **95 passed, 0 skipped, 92.34% coverage** against the isolated Postgres cluster, hygiene clean, lock current. A Starlette/httpx `TestClient` deprecation warning is non-blocking and deferred. Live DB verification, clean-clone validation, and the history-wide secrets scan are all done. Repeat all gates after any change.
 
 ## 11. Observability status
 

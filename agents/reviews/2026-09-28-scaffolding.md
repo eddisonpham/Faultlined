@@ -53,6 +53,13 @@
 
 All seven original findings are resolved and gated. The single remaining blocker is an authorization decision, not an engineering gap: publishing a measured baseline. Because that baseline must be produced by a deliberate owner-approved run, the **Benchmarking** and **Handoff** criteria in [the definition of done](../spec/definition-of-done.md) stay unticked, the stage stays at Scaffolding, and `scaffold-complete` must not be tagged.
 
-Residual gaps: live-Postgres verification and the green flag are now closed (2026-09-28) — `just pg-up` runs an
-isolated trust-auth cluster so the suite is 94 passed / 0 skipped, and the authorized baseline is committed.
-Still open: clean-clone validation and the history-wide secrets scan.
+Residual gaps: none outstanding. All four are closed as of 2026-09-28 — live-Postgres verification
+(`just pg-up`, isolated trust-auth cluster), the authorized benchmark baseline, clean-clone validation, and the
+history-wide secrets scan.
+
+Clean-clone validation found one real defect. `just setup` installs the `gpu` extra, but every other recipe runs
+`uv run`, which resolves the project *without* extras and prunes it again. A fresh clone therefore reported no GPU,
+the hardware profile stopped matching the committed baseline, and `just bench` refused to compare with a bare
+`differing fields: gpu`. Every `uv run` in the justfile now passes `--all-extras`; the harness also names this
+cause in the mismatch message. Verified from a wiped venv in a clean clone: setup, ci (95 passed), and bench all
+succeed and the extra survives. The same run also showed a stale DSN taking 6m36s to fail, now bounded to 20s.
