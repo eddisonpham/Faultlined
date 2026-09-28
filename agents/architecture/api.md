@@ -1,0 +1,92 @@
+# API and Interfaces
+
+Style decisions: ADR [0009](../decisions/0009-api-style.md) (FastAPI, HTTP+JSON, OpenAPI). Contract artifact:
+OpenAPI JSON committed at `docs/api/openapi.json` and drift-checked in CI (MVP criterion). All endpoints are under
+`/api/v1` unless noted.
+
+## Resource model
+
+| Resource | Key fields | Notes |
+|---|---|---|
+| `job` | id, type, state, priority, attempts, idempotency_key, parent_job_id, payload, created/started/finished | Types: `ingest`, `validate`, `index`, `build`, `workload`, `gc` |
+| `episode` | id, source_hash, format (mcap/lerobot), state (ingested/valid/quarantined), metadata, artifact hashes | State transitions from validation |
+| `validation_result` | id, episode_id, profile_hash, passed, reason_codes[] | Immutable per (episode, profile_hash) |
+| `validation_profile` | name, version, hash, rules (YAML) | Versioned config artifact |
+| `dataset_build` | id, manifest_hash, state (planned/building/published/failed), selection, config | Content-addressed by manifest hash |
+| `run` | id, workload (type+version), dataset_build_hash, config, env capture, seeds, metrics, state | Spec §9 fields |
+| `artifact` | hash (sha256), kind, size, created_at | Content-addressed (ADR 0006) |
+| `lineage_edge` | from (type+id/hash), to, relation | Relations: `contains`, `derived_from`, `produced_by`, `used_by` |
+| `metric_point` | name, value, unit, labels, ts, source (runtime/benchmark) | Shared schema (ADR 0008) |
+
+## Endpoints (v1)
+
+| Method + path | Purpose | Notes |
+|---|---|---|
+| `POST /api/v1/jobs` | Submit job | `Idempotency-Key` header; returns 202 + job |
+| `GET /api/v1/jobs` | List jobs | Cursor pagination; filters: type, state, since |
+| `GET /api/v1/jobs/{id}` | Job detail | Includes attempts + transitions |
+| `POST /api/v1/jobs/{id}/cancel` | Cancel | Cooperative semantics (data-flow.md §4) |
+| `POST /api/v1/episodes/ingest` | Convenience: submit ingest for source | Creates `ingest` job |
+| `GET /api/v1/episodes` | Search episodes | Metadata predicate query (FR-005); cursor pagination |
+| `GET /api/v1/episodes/{id}` | Episode detail | Includes validation results + metadata |
+| `POST /api/v1/episodes/{id}/revalidate` | Re-validate with profile | FR-003 (no re-ingest) |
+| `GET /api/v1/episodes/{id}/lineage` | Forward lineage | Builds/runs containing this episode |
+| `GET/POST /api/v1/validation-profiles` | Read / register profiles | Profile hash-addressed |
+| `POST /api/v1/builds` | Plan + submit build job | Returns manifest draft hash |
+| `GET /api/v1/builds` | List builds | Filters: manifest hash, state |
+| `GET /api/v1/builds/{id}` | Build detail | |
+| `GET /api/v1/builds/{id}/manifest` | Build manifest | The reproducibility record |
+| `GET /api/v1/builds/{id}/lineage` | Backward lineage | Sources + profile + commit |
+| `POST /api/v1/runs` | Submit workload run | Workload interface only (FR-012) |
+| `GET /api/v1/runs`, `GET /api/v1/runs/{id}` | Run records | Spec §9 fields |
+| `GET /api/v1/artifacts/{hash}` | Artifact metadata / download | Checksum-verified reads |
+| `GET /api/v1/metrics` | Query metric points | Shared runtime/benchmark schema |
+| `GET /api/v1/health` | Liveness + dependency status | DB, disk, worker heartbeat summary |
+| `GET /api/v1/openapi.json` | Contract | Mirrors committed artifact |
+
+## Conventions
+
+- **Pagination:** cursor-based: `?cursor=<opaque>&limit=<n>`; response `{"items": [...], "next_cursor": ...}`;
+  stable ordering by (created_at, id).
+- **Errors:** problem object —
+  `{"type": "about:blank", "title": "...", "status": 4xx, "code": "STABLE_CODE", "detail": "...", "correlation_id": "..."}`
+  with stable machine-readable `code` values (e.g. `VALIDATION_PROFILE_INVALID`, `IDEMPOTENCY_KEY_CONFLICT`,
+  `JOB_NOT_CANCELABLE`, `BUILD_SELECTION_EMPTY`). Codes are part of the contract; add, don't rename.
+- **Idempotency:** `Idempotency-Key` on `POST /jobs` and job-creating endpoints; same key + same payload → original
+  response replayed; same key + different payload → 409 `IDEMPOTENCY_KEY_CONFLICT`.
+- **Versioning:** `/api/v1` prefix; additive changes in place; breaking changes require `/api/v2` + ADR.
+- **Auth stance (v1):** none; server binds `127.0.0.1` by default. Remote exposure is opt-in config and documented as
+  insecure-by-design (single-user local tier). Multi-user auth is deferred (requirements §7) — never home-grown.
+- **Correlation:** clients may send `X-Correlation-Id`; otherwise one is generated and returned in the header.
+
+## Internal interfaces (narrow seams)
+
+**Stage handler protocol** (worker-side; implementer-owned):
+
+```python
+class StageHandler(Protocol):
+    name: JobType                      # "ingest" | "validate" | "index" | "build" | "workload" | "gc"
+    def run(self, ctx: JobContext, payload: Mapping[str, Any]) -> StageResult: ...
+    # ctx: job_id, correlation_id, cancel_token, deadline, logger, metrics, catalog, artifact_store
+    # StageResult: ok(bool), outputs(artifact refs + catalog deltas), reason_code(str | None), metrics
+```
+
+**Workload interface** (models are workloads — FR-012; benchmark-engineer + implementer co-own):
+
+```python
+class Workload(Protocol):
+    name: str
+    version: str
+    resource: Literal["cpu", "gpu_optional", "gpu_required"]
+    def run(self, dataset: DatasetView, config: Mapping[str, Any], ctx: WorkloadContext) -> WorkloadResult: ...
+    # DatasetView: read-only handle over a published dataset build (hash-verified)
+    # WorkloadResult: artifacts, metrics (metric-schema rows), run metadata (seeds, env), success/reason
+```
+
+Rules: workload code imports nothing from `catalog/`, `jobs/`, or `api/` — only the `workloads/` SDK surface; the
+runner owns all provenance capture so a workload cannot forget reproducibility fields. `gpu_required` workloads are
+rejected at admission when no GPU is present (NFR-007), `gpu_optional` declare their fallback behavior in their
+contract.
+
+**Reader protocol** (ingest): `sniff(path) -> bool`, `read(path) -> EpisodeSource` per format; adding a format
+(ROS 2 bag later) means adding one reader + tests — no core changes.

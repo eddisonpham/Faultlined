@@ -1,6 +1,6 @@
 # Architecture
 
-**STATUS: NOT YET WRITTEN.** Files below are created in phases 02–03. Diagrams use Mermaid.
+**STATUS: WRITTEN** (phases 02–03, 2026-09-28). Diagrams use Mermaid. Decisions: [../decisions/](../decisions/) 0003–0010.
 
 | File | Contents |
 |---|---|

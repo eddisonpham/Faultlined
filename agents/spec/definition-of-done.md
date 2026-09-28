@@ -24,7 +24,7 @@ Source: [01-scaffolding-instructions.md](01-scaffolding-instructions.md) §3.
 **Research**
 - [x] Sources recorded in `research/source-log.md` (breadth targets met) — 40 sources / 14 orgs / 13 job postings, [source-log.md](../research/source-log.md)
 - [x] Technologies/patterns classified core / optional / excluded with justification — [technology-matrix.md](../research/technology-matrix.md)
-- [ ] Research sufficient to justify the architecture — TODO(phase 03): confirm no evidence gaps when the architecture is written
+- [x] Research sufficient to justify the architecture — validated against [../architecture/overview.md](../architecture/overview.md) + [../architecture/technology-decision-matrix.md](../architecture/technology-decision-matrix.md); no evidence gaps found in phase 03
 
 **Architecture**
 - [ ] Components, responsibilities, data/control flow documented
@@ -55,39 +55,42 @@ Source: [01-scaffolding-instructions.md](01-scaffolding-instructions.md) §3.
 **Handoff**
 - [ ] Repo-wide review done; `HANDOFF.md` complete; clean-clone run verified
 
-## 2. MVP (seed criteria)
+## 2. MVP
 
-- [ ] Full workflow of the chosen problem runs end-to-end on real (small) robotics data
-- [ ] Job lifecycle: submit, queue, run, retry, timeout, cancel
-- [ ] Dataset/model versioning and lineage recorded
-- [ ] Experiments reproducible from recorded provenance
-- [ ] API contract tests; coverage gate enforced
-- [ ] Minimal UI: jobs, artifacts, status
-- [ ] First real benchmark baseline committed
+Seed criteria refined 2026-09-28 (phase 03) to reference real components per scaffolding instructions §5; original seed
+wording preserved in git history. Rationale recorded with the refinement commit.
 
-## 3. Production Baseline (seed criteria)
+- [ ] Full workflow of the chosen problem runs end-to-end on real (small) robotics data — `ingest → validation → indexing → builds` via `jobs`/`worker`, on a public LeRobot/MCAP subset ([../architecture/data-flow.md](../architecture/data-flow.md) §1–2)
+- [ ] Job lifecycle: submit, queue, run, retry, timeout, cancel — `jobs` state machine with failure-path tests (failure-modes F4, F6, F7)
+- [ ] Dataset/model versioning and lineage recorded — `builds` manifests + `catalog` lineage edges (FR-006–FR-008)
+- [ ] Experiments reproducible from recorded provenance — `workloads` run records + rebuild determinism test (NFR-004)
+- [ ] API contract tests; coverage gate enforced — `api` + committed `docs/api/openapi.json` drift check (ADR 0009)
+- [ ] Minimal UI: jobs, artifacts, status — `frontend` Status/Jobs/Artifacts pages ([../architecture/frontend.md](../architecture/frontend.md))
+- [ ] First real benchmark baseline committed — `benchmarks/` `bench-ingest` baseline per [../benchmarking/methodology.md](../benchmarking/methodology.md)
 
-- [ ] Failure-mode catalog (`testing/`) covered by tests
-- [ ] Observability complete per conventions; dashboards/queries documented
-- [ ] CI runs lint, types, tests, coverage, hygiene, benchmark regression check
-- [ ] Deployment (production-like local) documented; runbooks drafted
-- [ ] UI covers jobs, resources, experiments, versions, failures, benchmarks, artifacts
+## 3. Production Baseline
 
-## 4. Performance / Scaling (seed criteria)
+- [ ] Failure-mode catalog ([../testing/failure-modes.md](../testing/failure-modes.md)) fully `covered` — no row left `planned`
+- [ ] Observability complete per [../observability/conventions.md](../observability/conventions.md); documented log/metric queries for `observability` outputs
+- [ ] CI runs lint, types, tests, coverage, hygiene, benchmark regression check (`.github/workflows/`)
+- [ ] Production-like local tier ([../architecture/deployment.md](../architecture/deployment.md)) documented; runbooks drafted (backup/restore, worker ops)
+- [ ] UI covers jobs, resources, experiments, versions, failures, benchmarks, artifacts (all `frontend` pages)
 
-- [ ] Bottlenecks identified by profiling, each addressed via an experiment record
-- [ ] Scaling curves measured (workers, data size, concurrency)
-- [ ] Requirements' performance targets met or explicitly revised with evidence
+## 4. Performance / Scaling
 
-## 5. Production Hardening (seed criteria)
+- [ ] Bottlenecks identified by profiling (`benchmarks/` + telemetry), each addressed via an experiment record in [../experiments/](../experiments/)
+- [ ] Scaling curves measured (worker slots, data size, concurrency) via `benchmarks/` harness
+- [ ] NFR targets ([requirements.md](requirements.md) §2) met or explicitly revised with evidence
 
-- [ ] Fault injection (worker kill, OOM, network partitions, disk full) with recorded outcomes
-- [ ] Load/soak tests; dependency and secrets audit
-- [ ] Runbooks and troubleshooting final
+## 5. Production Hardening
 
-## 6. Resume / Demo Ready (seed criteria)
+- [ ] Fault injection (worker kill, GPU OOM, disk full, DB restart — failure-modes F5/F9/F10/F12) with recorded outcomes in [../experiments/](../experiments/)
+- [ ] Load/soak tests via `benchmarks/`; dependency and secrets audit (ADR [0002](../decisions/0002-secrets-handling.md))
+- [ ] Runbooks and troubleshooting final ([../architecture/deployment.md](../architecture/deployment.md) + docs/runbooks)
 
-- [ ] README with architecture diagram, quickstart, demo script
+## 6. Resume / Demo Ready
+
+- [ ] README with architecture diagram (from [../architecture/overview.md](../architecture/overview.md)), quickstart, demo script
 - [ ] Every resume metric traces to an experiment record with provenance
-- [ ] Interview Q&A / design-defense doc
-- [ ] Final repo-wide review; clean history
+- [ ] Interview Q&A / design-defense doc (defends [../architecture/trade-offs.md](../architecture/trade-offs.md))
+- [ ] Final repo-wide review ([../reviews/](../reviews/)); clean history

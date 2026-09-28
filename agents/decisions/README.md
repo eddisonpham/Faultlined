@@ -17,3 +17,4 @@ supersede it with a new ADR and update the affected docs.
 | [0007](0007-lineage-and-run-records.md) | Build-thin lineage and run records (MLflow deferred) | accepted |
 | [0008](0008-observability.md) | JSON logs + NVML telemetry + file metrics (OTel deferred) | accepted |
 | [0009](0009-api-style.md) | HTTP+JSON FastAPI API with OpenAPI contracts | accepted |
+| [0010](0010-modular-monolith-and-workers.md) | Modular monolith + out-of-process workers | accepted |
