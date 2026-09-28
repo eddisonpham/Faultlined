@@ -77,6 +77,10 @@ a robot-episode **data engine** (ingest → validate → index/version → curat
 
 | Technology | Purpose | Evidence / source (source-log #) | Relevance to this project | Class | Why justified (or not) |
 |---|---|---|---|---|---|
+| psutil | Cross-platform CPU/RAM/disk/network/process telemetry | *(added; ADR 0013)* | FR-015 host metrics on Windows + Linux | **core** (ADR 0013) | Standard library lacks a consistent Windows/Linux API; mature library, native wheel, easy to mock; one dependency earns its place for required telemetry |
+
+| Technology | Purpose | Evidence / source (source-log #) | Relevance to this project | Class | Why justified (or not) |
+|---|---|---|---|---|---|
 | Structured logging (stdlib `logging` + JSON formatter) | Correlation IDs, job/run/episode IDs in logs | *(seed)*; observability conventions | Scaffolding requirement | **core** | No dependency needed to emit structured JSON; conventions live in `agents/observability/` |
 | structlog / loguru | Logging ergonomics | *(seed)* | Alternative to stdlib | **optional** | Stdlib JSON formatter suffices at our volume; adopt only if logging ergonomics become a measured friction |
 | OpenTelemetry | Traces/spans across components | *(seed)* | Cross-component tracing | **optional** | Correlation-ID propagation is implementable manually now; OTel spans earn their place when there are ≥3 services to trace (currently a monolith + workers) |

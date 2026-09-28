@@ -17,14 +17,13 @@ One entry per component in [overview.md](overview.md)'s component map. Every com
 
 ## 2. Catalog (`catalog/`)
 
-- **Responsibility:** System of record (ADR 0005): episodes, metadata index, validation results, datasets, builds,
-  lineage edges, runs, jobs, artifacts, idempotency keys. Transactional repositories; schema outline in
-  [storage.md](storage.md).
+- **Responsibility:** System of record target (ADR 0005): episodes, metadata index, validation results, datasets, builds,
+  lineage edges, runs, jobs, artifacts, idempotency keys. Phase 05 schema covers jobs, artifacts, episodes, and lineage only;
+  schema outline in [storage.md](storage.md).
 - **Inputs:** typed repository calls from all stages and the API.
 - **Outputs:** rows/records; lineage queries both directions (FR-008).
-- **Dependencies:** PostgreSQL (via connection pool), observability.
-- **Failure behavior:** transaction rollback keeps catalog/artifact consistency (commit artifacts first, then rows);
-  connection loss → retry with backoff, callers surface job-level failure. FR-004, FR-008.
+- **Dependencies:** PostgreSQL (short-lived psycopg connections; pool deferred), observability.
+- **Failure behavior:** each repository operation is transactional; artifact publication and catalog registration are separate operations in this slice (orphan cleanup deferred). Connection loss currently surfaces as a worker/API error; retry/backoff is a target, not implemented. FR-004, FR-008.
 - **Owner:** implementer.
 
 ## 3. Job queue + scheduler (`jobs/`)
@@ -35,31 +34,25 @@ One entry per component in [overview.md](overview.md)'s component map. Every com
 - **Inputs:** job submissions (API/CLI), worker claims/completions/heartbeats, cancel requests, timeout ticks.
 - **Outputs:** job state transitions (all logged with `job_id`), dispatch payloads to workers.
 - **Dependencies:** catalog (jobs table), observability.
-- **Failure behavior:** duplicate submission absorbed by idempotency keys; dispatcher crash → jobs stay claimable;
-  at-least-once stance, handlers idempotent (ADR 0005).
+- **Failure behavior:** duplicate submission absorbed by idempotency keys; worker crash recovery is not yet implemented (no leases/heartbeats); at-least-once stance and idempotent handlers remain the target per ADR 0005.
 - **Owner:** implementer (failure tests: test-engineer).
 
 ## 4. Worker pool (`jobs/worker.py`)
 
-- **Responsibility:** Run stage handlers out-of-process: claim job → execute handler → report result; heartbeat while
-  running; honor cancel/timeout signals; process-parallel for CPU stages, GPU serialization per
-  [compute-orchestration.md](compute-orchestration.md).
+- **Responsibility:** Phase 05: one out-of-process worker loop claims an ingest job, invokes the registered synthetic ingest service, and reports terminal state. Target behavior: process pool, heartbeats, cancel/timeout signaling, process-parallel CPU stages, GPU serialization per [compute-orchestration.md](compute-orchestration.md).
 - **Inputs:** claimed job payloads; handler registry.
 - **Outputs:** stage results (artifacts + catalog rows), structured logs, per-job metrics.
 - **Dependencies:** stage handlers, job queue, artifact store, observability.
-- **Failure behavior:** crash mid-job → heartbeat expiry requeues (at-least-once); OOM/disk-full → job fails with
-  reason code, artifacts of a failed attempt are garbage-collectable (content-addressed orphans). FR-010.
+- **Failure behavior:** handled job exceptions transition to `failed` without exposing exception detail in the API; crash mid-job is not recovered yet (heartbeat leases deferred); OOM/disk-full cleanup remains future work. FR-010 target.
 - **Owner:** implementer.
 
 ## 5. Ingest (`ingest/`)
 
-- **Responsibility:** Register raw episodes (FR-001): readers for MCAP and LeRobot v2/v3 dirs; copy/link bytes into
-  the artifact store (content hash), create episode records; idempotent by source hash.
+- **Responsibility:** Phase 05 implements `SyntheticEpisodeIngestService` for canonical synthetic JSON episodes: write content-addressed bytes and register minimal metadata + `produced_by` lineage. MCAP and LeRobot readers, raw file registration, and duplicate-source policy remain planned (FR-001).
 - **Inputs:** file paths/URLs + source metadata; ingest job payload.
-- **Outputs:** `episode` records (state: `ingested`), artifact entries, per-channel summary for the validator.
-- **Dependencies:** artifact store, catalog, readers (`ingest/readers/`), observability.
-- **Failure behavior:** corrupt/truncated files rejected with reason codes (`INGEST_*`), never partially registered
-  (transaction); duplicates detected by source hash → idempotent success. FR-001.
+- **Outputs:** `episode` records (phase-05 format: `synthetic-json`), artifact entries, minimal task/robot/frame-count/duration metadata. MCAP/LeRobot readers and per-channel summaries are not implemented yet.
+- **Dependencies:** artifact store, catalog; format-specific readers (`ingest/readers/`) are interfaces only so far; observability.
+- **Failure behavior:** API validates synthetic episode structure; worker handler failures transition job to `failed`; content-addressed artifacts are checksum-verified. Corrupt MCAP/LeRobot parsing and duplicate-source ingest policies remain deferred. FR-001 target.
 - **Owner:** implementer.
 
 ## 6. Validation (`validation/`)
@@ -126,7 +119,7 @@ One entry per component in [overview.md](overview.md)'s component map. Every com
   CPU/RAM/disk, degrades without GPU — FR-015), metrics recording shared with the benchmark schema (FR-017).
 - **Inputs:** log calls, timer/counter calls, periodic sampler ticks.
 - **Outputs:** JSON log stream (stdout + file), metrics rows/files per [../benchmarking/metric-schema.md](../benchmarking/metric-schema.md).
-- **Dependencies:** stdlib + pynvml (optional at runtime).
+- **Dependencies:** stdlib + psutil; pynvml optional at runtime (ADRs 0008, 0013).
 - **Failure behavior:** telemetry absence never blocks the pipeline (`gpu_present=false`); log sink failure degrades to
   stderr. ADR 0008.
 - **Owner:** observability-engineer.

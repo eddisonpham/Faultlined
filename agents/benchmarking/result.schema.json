@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/data-engine/benchmark-result-v1.schema.json",
+  "title": "Robot Episode Data Engine Benchmark Result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "run_id", "benchmark", "status", "started_at", "duration_seconds", "config", "provenance", "trials", "summary", "resource_samples", "failure"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "run_id": {"type": "string", "format": "uuid"},
+    "benchmark": {"type": "object", "required": ["name", "version"], "properties": {"name": {"type": "string", "minLength": 1}, "version": {"type": "string", "minLength": 1}}, "additionalProperties": false},
+    "status": {"enum": ["ok", "failed"]},
+    "started_at": {"type": "string", "format": "date-time"},
+    "duration_seconds": {"type": "number", "minimum": 0},
+    "config": {"type": "object"},
+    "provenance": {
+      "type": "object",
+      "required": ["git_commit", "git_dirty", "config_hash", "dataset", "dataset_version", "model", "model_version", "hardware", "software", "seeds", "timestamp_utc", "workload", "workload_version", "system_parameters", "background_load_note", "container_image_digest"],
+      "properties": {
+        "git_commit": {"type": "string", "minLength": 1},
+        "git_dirty": {"type": "boolean"},
+        "config_hash": {"type": "string", "minLength": 1},
+        "dataset": {"type": ["string", "null"]},
+        "dataset_version": {"type": ["string", "null"]},
+        "model": {"type": ["string", "null"]},
+        "model_version": {"type": ["string", "null"]},
+        "hardware": {"type": "object", "required": ["cpu", "logical_cpus", "ram_bytes", "gpu", "disk"], "properties": {"cpu": {"type": "string"}, "logical_cpus": {"type": "integer", "minimum": 1}, "ram_bytes": {"type": "integer", "minimum": 1}, "gpu": {"type": ["object", "null"]}, "disk": {"type": "string"}}},
+        "software": {"type": "object", "required": ["os", "python", "lockfile_hash", "app_version"], "properties": {"os": {"type": "string"}, "python": {"type": "string"}, "lockfile_hash": {"type": "string"}, "app_version": {"type": "string"}}},
+        "seeds": {"type": "array", "items": {"type": "integer"}},
+        "timestamp_utc": {"type": "string", "format": "date-time"},
+        "workload": {"type": "string", "minLength": 1},
+        "workload_version": {"type": "string", "minLength": 1},
+        "system_parameters": {"type": "object"},
+        "background_load_note": {"type": "string"},
+        "container_image_digest": {"type": ["string", "null"]}
+      }
+    },
+    "trials": {"type": "array", "minItems": 1, "items": {"type": "object", "required": ["index", "latency_seconds", "success", "resource_sample_start", "resource_sample_end"], "properties": {"index": {"type": "integer", "minimum": 0}, "latency_seconds": {"type": "number", "minimum": 0}, "success": {"type": "boolean"}, "resource_sample_start": {"type": "integer", "minimum": 0}, "resource_sample_end": {"type": "integer", "minimum": 0}}}},
+    "summary": {"type": "object", "required": ["n", "warmup_count", "p50_seconds", "p95_seconds", "p99_seconds", "mean_seconds", "stddev_seconds", "ci95_mean_seconds", "failure_count"], "properties": {"n": {"type": "integer", "minimum": 1}, "warmup_count": {"type": "integer", "minimum": 0}, "p50_seconds": {"type": "number"}, "p95_seconds": {"type": "number"}, "p99_seconds": {"type": "number"}, "mean_seconds": {"type": "number"}, "stddev_seconds": {"type": "number", "minimum": 0}, "ci95_mean_seconds": {"type": "array", "prefixItems": [{"type": "number"}, {"type": "number"}], "minItems": 2, "maxItems": 2}, "failure_count": {"type": "integer", "minimum": 0}}},
+    "resource_samples": {"type": "array", "items": {"type": "object"}},
+    "failure": {"type": ["object", "null"]}
+  }
+}

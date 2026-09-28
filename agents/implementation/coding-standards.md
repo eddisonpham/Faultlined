@@ -44,7 +44,8 @@ Run from the repository root (`just` is the single task entry point; `uv.lock` p
 | Typecheck (package, strict) | `just typecheck` |
 | Fast tests + coverage | `just test` |
 | Full tests (slow/GPU included) | `just test-all` |
-| Benchmark | `just bench` |
+| Benchmark (compare baseline) | `just bench` |
+| Create/update baseline (one-time, deliberate) | `just bench --write-baseline --baseline benchmarks/baselines/<name>.json` |
 | Run locally | `just run` |
 | Hygiene | `just hygiene` |
 | All CI gates | `just ci` |

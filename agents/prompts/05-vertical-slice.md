@@ -23,3 +23,7 @@ Use `implementer`, `test-engineer`. **Intentionally minimal.**
 
 ## Finish
 Commit in small logical commits. Summarize what works, what is stubbed, and any architecture surprises.
+
+Phase 05 implementation completed 2026-09-28: see [vertical-slice.md](../implementation/vertical-slice.md),
+[implementation/status.md](../implementation/status.md), and commit history. PostgreSQL-backed integration/E2E tests
+skip unless the operator supplies `DE_DATABASE_URL`; do not create or inspect credentials.

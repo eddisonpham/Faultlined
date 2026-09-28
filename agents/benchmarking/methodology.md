@@ -30,4 +30,13 @@ benchmarks/
 ├── baselines/     # committed small JSON baselines per hardware profile
 └── results/       # gitignored raw runs
 ```
-Harness location and CLI: TODO(phase 06).
+
+Harness and CLI: `benchmarks/harness.py`, exposed as `just bench [--baseline PATH]`. The implemented workload,
+`synthetic-episode-ingest`, measures canonical JSON processing with an in-memory catalog and local filesystem artifact
+store (3 warmups, 10 trials); it is **not** a Postgres/API, MCAP, LeRobot, or production throughput benchmark. See
+[metric-schema.md](metric-schema.md) and [backlog.md](backlog.md).
+
+No real baseline is currently committed. `just bench` therefore cannot complete its compare step from a fresh checkout
+until a suitable reviewed baseline exists. `just bench --write-baseline --baseline <path>` writes one deliberately; do
+not run that as part of routine CI or describe its output as an accepted baseline without recording an experiment and
+reviewing provenance. The comparison currently requires an exact match for the recorded CPU, logical CPU count, RAM, GPU descriptor, and OS, then applies a coarse latency-median increase of >20% and >1 ms; this is not a statistical significance test. Comparison correctness still needs independent test and schema review.

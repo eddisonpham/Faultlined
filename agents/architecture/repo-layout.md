@@ -22,8 +22,9 @@ Where every kind of code belongs. Component ↔ directory mapping must stay 1:1 
 │   │   ├── repository.py  migrations/
 │   ├── jobs/                    # components 3–4: queue, scheduler, worker, lifecycle
 │   │   ├── queue.py  contracts.py  state.py
-│   ├── ingest/                  # component 5: readers + registration
-│   │   └── readers/             # base.py; MCAP/LeRobot implementations follow
+│   ├── ingest/                  # component 5: episode ingest service + format readers
+│   │   ├── service.py            # synthetic JSON vertical slice; future format registration
+│   │   └── readers/              # base.py; MCAP/LeRobot implementations follow
 │   ├── validation/              # component 6: profile engine, rules, quarantine
 │   │   └── rules/
 │   ├── indexing/                # component 7: metadata/stats extraction, Parquet export
@@ -33,7 +34,7 @@ Where every kind of code belongs. Component ↔ directory mapping must stay 1:1 
 │   ├── storage/                 # component 10: content-addressed artifact store
 │   │   └── artifacts.py
 │   └── observability/           # component 11: logging context, telemetry, metrics, reason codes
-│       └── reason_codes.py
+│       ├── logging.py  telemetry.py  metrics.py  reason_codes.py
 ├── frontend/                    # component 13 (phase 12); consumes /api/v1 only
 ├── benchmarks/                  # component 14: harness + micro-benchmarks + baselines/
 │   ├── harness.py  baselines/

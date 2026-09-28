@@ -17,21 +17,15 @@ sequenceDiagram
   participant A as Artifact store
   participant C as Catalog
 
-  DE->>API: POST /api/v1/jobs {type: ingest, source, profile} + Idempotency-Key
+  DE->>API: POST /api/v1/jobs {type: ingest, payload.episode} + Idempotency-Key
   API->>C: record job (queued) / return existing on idempotency hit
   API-->>DE: 202 {job_id}
   Q->>W: claim job (SKIP LOCKED)
-  W->>I: run handler
-  I->>A: write raw bytes (content-addressed)
-  I->>C: episode record (ingested) + artifact hash
-  W->>V: run handler (chained job or internal stage)
-  V->>C: validation_result (pass | fail + reason codes), episode state
-  V-->>Q: stage result
-  W->>IX: run handler (on pass)
-  IX->>C: episode_metadata rows
-  IX->>A: Parquet metadata export
-  IX-->>Q: job succeeded
-  W->>C: job state transition + metrics rows
+  W->>I: SyntheticEpisodeIngestService.ingest
+  I->>A: canonicalize JSON + write content-addressed bytes
+  I->>C: episode record + minimal metadata + produced_by lineage
+  W->>C: job succeeded
+  Note over V,IX: Validation and Parquet indexing are target stages, not in the phase-05 slice
 ```
 
 Failed validation does **not** run indexing: the episode lands in `quarantined` with reason codes (FR-002/FR-003),
@@ -56,7 +50,7 @@ sequenceDiagram
   W->>B: materialize
   B->>A: stage LeRobot v3 dir (temp)
   B->>A: hash → atomic publish (build/<manifest_hash>)
-  B->>C: dataset_build + manifest + lineage edges (contains, derived_from)
+  B->>C: dataset_build + manifest + lineage edges (target behavior; not implemented in phase 05)
   B-->>Q: succeeded
   ME->>API: GET /api/v1/builds/{id}/manifest
   API-->>ME: manifest (hash, sources, profile hash, commit, config)

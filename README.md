@@ -38,8 +38,7 @@ only. `just setup` creates `.venv` and syncs the committed `uv.lock` (including 
 without a GPU). `just test` runs the fast suite and enforces the 70% coverage floor. Integration tests requiring a live
 Postgres instance are marked and need `DE_DATABASE_URL` set in your local `.env` or shell.
 
-The current repository stage is **scaffolding**. The package/tooling skeleton exists; API/worker/data-engine vertical-slice logic is built in phase 05. `just bench` and `just run` are being completed in phases 05–06. Host-based development with optional containers is
-recorded in [ADR 0012](agents/decisions/0012-host-based-development.md).
+The current repository stage is **scaffolding (not yet accepted)**. A synthetic JSON API/worker/artifact vertical slice and benchmark/telemetry foundations exist; scope and limitations are recorded in [the handoff](agents/HANDOFF.md). `just run` requires a configured PostgreSQL database. `just bench` runs a synthetic local workload but currently cannot complete baseline comparison from a fresh checkout because no baseline has been authorized or committed. Host-based development with optional containers is recorded in [ADR 0012](agents/decisions/0012-host-based-development.md).
 
 ## Task commands
 
@@ -50,8 +49,8 @@ just lint        # check without writing
 just typecheck   # strict mypy
 just test        # fast tests + coverage gate
 just test-all    # include slow and GPU-marked tests
-just bench       # benchmark harness (phase 06)
-just run         # local API + workers (phase 05)
+just bench       # synthetic harness + comparison; needs a committed baseline (currently absent)
+just run         # local API + worker (requires local PostgreSQL and DE_DATABASE_URL if non-default)
 just hygiene     # relative links, ADRs, secrets, required structure
 just ci          # lint + typecheck + test + hygiene
 ```

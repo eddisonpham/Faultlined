@@ -11,6 +11,7 @@ dependencies = [
     "psycopg[binary]>=3.2",
     "pyarrow>=21",
     "mcap>=1.2",
+    "psutil>=7.0",
 ]
 
 [project.optional-dependencies]
@@ -55,7 +56,11 @@ mypy_path = "src"
 packages = ["data_engine"]
 
 [[tool.mypy.overrides]]
-module = ["pyarrow.*", "mcap.*", "nvidia_ml_py.*", "pynvml.*"]
+module = ["pyarrow.*", "mcap.*", "nvidia_ml_py.*", "pynvml.*", "psutil.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["psutil"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
@@ -68,6 +73,7 @@ testpaths = ["tests"]
 addopts = "-q --strict-markers"
 markers = [
     "unit: pure logic, state machines, validators (fast, no IO)",
+    "contract: API surface and schema contract tests",
     "integration: components with real DB/queue/storage",
     "e2e: full workflow through public interfaces",
     "gpu: requires a CUDA GPU; skips cleanly when absent",
@@ -83,10 +89,7 @@ branch = true
 fail_under = 70
 omit = [
     "src/data_engine/jobs/contracts.py",
-    "src/data_engine/jobs/queue.py",
-    "src/data_engine/catalog/repository.py",
     "src/data_engine/ingest/readers/base.py",
-    "src/data_engine/storage/artifacts.py",
     "src/data_engine/workloads/sdk.py",
 ]
 exclude_also = [

@@ -3,6 +3,8 @@
 Read `CLAUDE.md`, `agents/benchmarking/methodology.md` (binding), `agents/observability/conventions.md`, `agents/experiments/*`,
 `agents/implementation/vertical-slice.md`. Use `benchmark-engineer` and `observability-engineer`.
 
+Implementation review status (2026-09-28): schema, statistics, provenance, synthetic harness, telemetry, and metric primitives exist. The baseline and first measured experiment remain intentionally absent; do not claim this phase complete until acceptance criteria are evidenced. Current blockers are tracked in [the scaffolding review](../reviews/2026-09-28-scaffolding.md).
+
 ## Observability
 1. Structured JSON logging with the required fields; `correlation_id` propagated API → queue → worker → storage; job/episode IDs.
 2. Metrics per naming conventions (base units, low-cardinality labels). Start with only signals that inform a decision:

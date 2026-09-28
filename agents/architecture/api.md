@@ -20,6 +20,9 @@ OpenAPI JSON committed at `docs/api/openapi.json` and drift-checked in CI (MVP c
 
 ## Endpoints (v1)
 
+**Phase-05 implemented subset:** `POST /api/v1/jobs`, `GET /api/v1/jobs/{id}`, `GET /api/v1/episodes/{id}`, and
+`GET /api/v1/health`. Remaining endpoints in the table are architecture targets, not implemented yet.
+
 | Method + path | Purpose | Notes |
 |---|---|---|
 | `POST /api/v1/jobs` | Submit job | `Idempotency-Key` header; returns 202 + job |
@@ -28,7 +31,7 @@ OpenAPI JSON committed at `docs/api/openapi.json` and drift-checked in CI (MVP c
 | `POST /api/v1/jobs/{id}/cancel` | Cancel | Cooperative semantics (data-flow.md §4) |
 | `POST /api/v1/episodes/ingest` | Convenience: submit ingest for source | Creates `ingest` job |
 | `GET /api/v1/episodes` | Search episodes | Metadata predicate query (FR-005); cursor pagination |
-| `GET /api/v1/episodes/{id}` | Episode detail | Includes validation results + metadata |
+| `GET /api/v1/episodes/{id}` | Episode detail | Includes metadata + lineage edges (phase 05 slice); validation results join in later MVP work |
 | `POST /api/v1/episodes/{id}/revalidate` | Re-validate with profile | FR-003 (no re-ingest) |
 | `GET /api/v1/episodes/{id}/lineage` | Forward lineage | Builds/runs containing this episode |
 | `GET/POST /api/v1/validation-profiles` | Read / register profiles | Profile hash-addressed |

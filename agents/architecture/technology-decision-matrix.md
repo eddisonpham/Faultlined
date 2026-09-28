@@ -83,7 +83,7 @@ Deferral entry: C++/Rust **deferred until** profiling shows reader/decoder-bound
 
 | Option | IR | TN | P | LF | CX | MT | RR | Weighted | Verdict |
 |---|---|---|---|---|---|---|---|---|---|
-| **Stdlib JSON logs + pynvml telemetry + file metrics** | 4 | 5 | 4 | 5 | 5 | 5 | 3 | **4.60** | **chosen** — ADR [0008](../decisions/0008-observability.md) |
+| **Stdlib JSON logs + psutil host telemetry + optional pynvml + file metrics** | 4 | 5 | 4 | 5 | 4 | 5 | 3 | **4.45** | **chosen** — ADRs [0008](../decisions/0008-observability.md), [0013](../decisions/0013-cross-platform-resource-telemetry.md) |
 | OTel + Prometheus + Grafana now | 5 | 2 | 4 | 3 | 2 | 3 | 5 | 3.15 | veto (TN<3): 1 process + workers, nothing to scrape/trace yet; deferred |
 | structlog / loguru now | 3 | 3 | 4 | 5 | 4 | 4 | 3 | 3.80 | optional later; stdlib JSON formatter covers current needs |
 

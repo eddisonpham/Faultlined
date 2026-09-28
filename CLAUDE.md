@@ -62,4 +62,4 @@ Never commit large data, model weights, or `.env`.
 
 ## Current stage
 
-Scaffolding. Update this line when `agents/spec/definition-of-done.md` advances.
+Scaffolding (reviewed 2026-09-28; not accepted — see [review](agents/reviews/2026-09-28-scaffolding.md) and [handoff](agents/HANDOFF.md)). Update only after all DoD criteria are evidenced.

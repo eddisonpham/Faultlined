@@ -28,9 +28,7 @@ Scored matrix: [../architecture/technology-decision-matrix.md](../architecture/t
   [../observability/conventions.md](../observability/conventions.md) (timestamp, level, logger, event, correlation IDs:
   `ingest_id`/`job_id`/`run_id`/`episode_id`, component, message + structured extras). Correlation IDs flow through job
   payloads and HTTP middleware (trace-context style `X-Correlation-Id`).
-- **Resource telemetry:** `pynvml` for GPU utilization/VRAM (feature-detected — absent GPU logs `gpu_present=false` and
-  continues), stdlib for CPU/RAM/disk via `psutil`-free platform calls where practical (dependency decision recorded in
-  [../research/technology-matrix.md](../research/technology-matrix.md) if `psutil` is added).
+- **Resource telemetry:** `psutil` for cross-platform CPU/RAM/disk/network/process metrics; optional `pynvml` for GPU utilization/VRAM. GPU/driver absence logs `gpu_present=false` and continues. The psutil choice is recorded in superseding-detail ADR [0013](0013-cross-platform-resource-telemetry.md).
 - **Metrics:** named per [../benchmarking/metric-schema.md](../benchmarking/metric-schema.md) conventions; runtime
   counters/timers persisted as metric rows (same schema as benchmarks) so runtime and benchmark data compare in one place.
 

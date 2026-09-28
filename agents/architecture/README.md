@@ -1,6 +1,6 @@
 # Architecture
 
-**STATUS: WRITTEN** (phases 02–03, 2026-09-28). Diagrams use Mermaid. Decisions: [../decisions/](../decisions/) 0003–0010.
+**STATUS: WRITTEN** (phases 02–03; implementation reconciled in phases 05–06, 2026-09-28). Diagrams use Mermaid. Decisions: [../decisions/](../decisions/) 0003–0013.
 
 | File | Contents |
 |---|---|

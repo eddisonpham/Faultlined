@@ -33,8 +33,8 @@ test-all:
     uv run pytest --cov
 
 # Run benchmarks and compare against committed baselines (phase 06)
-bench:
-    uv run python -m benchmarks.harness
+bench *ARGS:
+    uv run python -m benchmarks.harness {{ARGS}}
 
 # Run the platform locally (API + workers)
 run:

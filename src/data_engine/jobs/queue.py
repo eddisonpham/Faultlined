@@ -1,15 +1,25 @@
-"""Queue interface; Postgres-backed implementation follows in phase 05."""
+"""Job queue facade over the Postgres-backed catalog."""
 
-from typing import Protocol
+from __future__ import annotations
 
-from data_engine.jobs.state import Job, JobType
+from typing import Any
+
+from data_engine.catalog.repository import PostgresCatalog
+from data_engine.config import Settings
 
 
-class JobQueue(Protocol):
-    """Submission and claim contract for job workers."""
+class PostgresJobQueue:
+    def __init__(self, settings: Settings | None = None) -> None:
+        self.catalog = PostgresCatalog(settings)
 
     def submit(
-        self, job_type: JobType, payload: dict[str, object], idempotency_key: str | None = None
-    ) -> Job: ...
+        self,
+        job_type: str,
+        payload: dict[str, Any],
+        idempotency_key: str | None,
+        correlation_id: str,
+    ) -> tuple[dict[str, Any], bool]:
+        return self.catalog.submit_job(job_type, payload, idempotency_key, correlation_id)
 
-    def claim(self, worker_id: str) -> Job | None: ...
+    def claim(self) -> dict[str, Any] | None:
+        return self.catalog.claim_job()
