@@ -1,0 +1,57 @@
+# Secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+*.egg-info/
+dist/
+build/
+
+# Node
+node_modules/
+.next/
+.vite/
+
+# Rust / C++
+target/
+cmake-build-*/
+
+# Data, artifacts, models (never commit; small test fixtures go in tests/fixtures/)
+data/
+artifacts/
+runs/
+.cache/
+*.ckpt
+*.pt
+*.pth
+*.safetensors
+*.onnx
+*.engine
+
+# Benchmark raw outputs (baselines are committed elsewhere; see agents/benchmarking/)
+benchmarks/results/
+
+# Editors / OS
+.idea/
+.vscode/
+.DS_Store
+
+# Claude Code local state
+.claude/settings.local.json
+
+# Freebuff local state
+.freebuff/
