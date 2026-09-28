@@ -23,6 +23,7 @@ DEFAULT_PORT = 55432
 ROLE = "data_engine"
 DATABASE = "data_engine"
 BINARIES = ("initdb", "pg_ctl", "psql")
+CREATE_BREAKAWAY_FROM_JOB = 0x01000000
 
 
 def port() -> int:
@@ -85,30 +86,50 @@ def start(bin_dir: Path) -> None:
     if is_listening():
         print(f"PostgreSQL already listening on port {port()}")
         return
-    # Detach so the server outlives the invoking shell. Without this, a Ctrl+C or a
-    # killed parent tears down the whole cluster: console control events reach the
-    # server's children (0xC000013A). CREATE_NEW_PROCESS_GROUP is ignored when
-    # DETACHED_PROCESS is set, so it must not be combined with it.
+    # The server must outlive the invoking shell. On Windows, a killed parent tears the
+    # cluster down via the server's children (0xC000013A). Console flags do not help:
+    # a process launched from a job object stays in that job, and killing the job kills
+    # the server regardless of DETACHED_PROCESS or CREATE_NEW_CONSOLE. Only
+    # CREATE_BREAKAWAY_FROM_JOB escapes it, and it works only when the parent job permits
+    # breakaway, so fall back to an ordinary detached child if it is refused.
     kwargs: dict[str, object] = {}
     if os.name == "nt":
-        kwargs["creationflags"] = subprocess.DETACHED_PROCESS | subprocess.CREATE_NO_WINDOW
+        kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP | CREATE_BREAKAWAY_FROM_JOB
     else:
         kwargs["start_new_session"] = True
     log = (DATA_DIR / "server.log").open("a", encoding="utf-8")
+    command = [
+        str(bin_dir / ("postgres.exe" if os.name == "nt" else "postgres")),
+        "-D",
+        str(DATA_DIR),
+        "-p",
+        str(port()),
+    ]
     try:
-        subprocess.Popen(
-            [
-                str(bin_dir / ("postgres.exe" if os.name == "nt" else "postgres")),
-                "-D",
-                str(DATA_DIR),
-                "-p",
-                str(port()),
-            ],
-            stdout=log,
-            stderr=subprocess.STDOUT,
-            stdin=subprocess.DEVNULL,
-            **kwargs,  # type: ignore[arg-type]
-        )
+        try:
+            subprocess.Popen(
+                command,
+                stdout=log,
+                stderr=subprocess.STDOUT,
+                stdin=subprocess.DEVNULL,
+                **kwargs,  # type: ignore[arg-type]
+            )
+        except OSError:
+            if not kwargs:
+                raise
+            # The parent job forbids breakaway; run as a plain detached child instead.
+            kwargs = (
+                {"start_new_session": True}
+                if os.name != "nt"
+                else {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
+            )
+            subprocess.Popen(
+                command,
+                stdout=log,
+                stderr=subprocess.STDOUT,
+                stdin=subprocess.DEVNULL,
+                **kwargs,  # type: ignore[arg-type]
+            )
     finally:
         log.close()
 

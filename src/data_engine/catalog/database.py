@@ -59,10 +59,17 @@ CREATE TABLE IF NOT EXISTS lineage_edges (
 def connect(settings: Settings | None = None) -> Iterator[Connection[dict[str, object]]]:
     """Open a short-lived connection; never log the DSN or credentials."""
     configured = settings or load_settings()
+    # Bound the connect phase: libpq's default retries a refused or unroutable host for
+    # minutes, which turns a stale DSN into an apparent hang rather than a fast error.
     with psycopg.connect(
-        configured.database_url.get_secret_value(), row_factory=dict_row
+        configured.database_url.get_secret_value(),
+        row_factory=dict_row,
+        connect_timeout=CONNECT_TIMEOUT_SECONDS,
     ) as connection:
         yield connection
+
+
+CONNECT_TIMEOUT_SECONDS = 5
 
 
 def initialize_schema(settings: Settings | None = None) -> None:
