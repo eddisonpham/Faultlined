@@ -3,6 +3,12 @@
 # just imports local .env into each recipe's process environment; the application reads environment variables only.
 set dotenv-load := true
 
+# just defaults to `sh -cu` on Windows, which resolves via PATH. A PowerShell prompt
+# that has Git's `bin` but not `usr\bin` on PATH cannot find it, and every recipe then
+# fails with "could not find the shell". Point it at Git Bash explicitly. On a machine
+# where Git lives elsewhere, change this path (it is not read from an env var).
+set windows-shell := ['C:\Program Files\Git\bin\bash.exe', '-uc']
+
 default:
     @just --list
 

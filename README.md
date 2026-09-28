@@ -13,7 +13,9 @@ See [agents/spec/problem.md](agents/spec/problem.md) and [agents/architecture/ov
 
 ## Quickstart
 
-1. Clone the repository and open Git Bash in its root.
+1. Clone the repository. On Windows, install [Git for Windows](https://gitforwindows.org/): the justfile runs
+   recipes through Git Bash, and a PowerShell prompt without it fails with `could not find the shell`.
+   You can then use `just` from PowerShell or Git Bash.
 2. Start an isolated local PostgreSQL for tests. This creates a cluster in gitignored `var/pgdata` on port
    `55432`; it does not touch any system PostgreSQL install and needs no administrator rights and no password.
 
