@@ -3,7 +3,9 @@
 Classification: **core** (project cannot credibly work without it), **optional** (adopt only when a measured need appears),
 **excluded** (considered and rejected — say why). A technology appearing in a job posting is not a justification.
 
-Seed list verified 2026-09-28 against [source-log.md](source-log.md); all cells filled. Additions beyond the seed list are
+Seed list verified 2026-09-28 against [source-log.md](source-log.md); all cells filled. **Classes finalized 2026-09-28 to
+match ADRs 0004–0009** (scored decision matrix: [../architecture/technology-decision-matrix.md](../architecture/technology-decision-matrix.md));
+key rows carry their ADR in the Class column. Additions beyond the seed list are
 marked *(added)*. Classes reflect the architecture planned for the selected problem ([../spec/problem.md](../spec/problem.md)):
 a robot-episode **data engine** (ingest → validate → index/version → curate → serve) on the captured hardware
 ([../spec/environment.md](../spec/environment.md): single 8 GB GPU laptop, Windows/Git Bash, **no Docker**, 24-core CPU).
@@ -12,8 +14,8 @@ a robot-episode **data engine** (ingest → validate → index/version → curat
 
 | Technology | Purpose | Evidence / source (source-log #) | Relevance to this project | Class | Why justified (or not) — not keyword stuffing |
 |---|---|---|---|---|---|
-| LeRobot dataset format (v3) | Curated episode storage: Parquet + MP4, metadata with episode boundaries/tasks/normalization | #34, #35 | Primary **curated** format in and out of the engine; public datasets (OXE, LeRobot hub) are available in it | **core** | The de-facto standard for robot-learning data; adopting it gives interop + demo data for free. Inventing a format would be the classic anti-pattern flagged in #23 |
-| MCAP | Raw multimodal log container (append-only, indexed, serialization-agnostic) | #20, #36 | Primary **raw-ingest** format (episodes as sensor logs); default ROS 2 log format | **core** | Crash-safe append-only writes and indexed reads fit ingestion; ecosystem readers in 6 languages (#36) |
+| LeRobot dataset format (v3) | Curated episode storage: Parquet + MP4, metadata with episode boundaries/tasks/normalization | #34, #35 | Primary **curated** format in and out of the engine; public datasets (OXE, LeRobot hub) are available in it | **core** (ADR 0006) | The de-facto standard for robot-learning data; adopting it gives interop + demo data for free. Inventing a format would be the classic anti-pattern flagged in #23 |
+| MCAP | Raw multimodal log container (append-only, indexed, serialization-agnostic) | #20, #36 | Primary **raw-ingest** format (episodes as sensor logs); default ROS 2 log format | **core** (ADR 0006) | Crash-safe append-only writes and indexed reads fit ingestion; ecosystem readers in 6 languages (#36) |
 | ROS 2 bags | Robotics recording format | #36 (MCAP is default ROS 2 log format) | Source systems record .bag; the engine must accept them | **optional** | Support a reader adapter after MVP; ROS 2 bag files increasingly *are* MCAP, so the marginal need is shrinking |
 | Foxglove | Robotics data visualization / observability platform | #20, #21, #22 | Users will want to eyeball raw episodes | **optional** | Adopt as a *viewer* integration later; its data platform is a competitor/complement, not a dependency |
 | Rerun | Multimodal viewer + data layer (chunked Arrow storage) | #23, #38 | Candidate viewer and, longer-term, storage-backend reference | **optional** | Its column-chunk design (#23) directly informs our storage layout; adopting the SDK as a viewer is cheap, adopting .rrd as *the* store would cede the LeRobot/OXE ecosystem |
@@ -42,17 +44,17 @@ a robot-episode **data engine** (ingest → validate → index/version → curat
 | Slurm | HPC batch scheduler | *(seed)* | Not applicable | **excluded** | Designed for cluster/HPC queues; no cluster here |
 | Airflow / Prefect / Dagster | General workflow orchestration | *(seed)* | Could run the pipeline DAGs | **excluded** | A general-purpose orchestrator would gut the project: the ingestion DAG lifecycle (submit, queue, retry, timeout, cancel) *is* our engineering deliverable (spec §4). Dependency weight unjustified at this stage |
 | Temporal | Durable workflow execution | *(seed)* | Retry/durable-execution semantics | **excluded** | Powerful but heavy (server + SDKs + workflow determinism rules); MVP retry/timeout/cancel semantics are implementable directly against Postgres with tests |
-| Postgres-backed job queue | Job lifecycle: submit/queue/run/retry/timeout/cancel | *(seed)*; MVP criteria | The engine's scheduler core | **core** | Exactly the lifecycle we must build; Postgres is already the catalog — one store, transactional job state, no broker |
+| Postgres-backed job queue | Job lifecycle: submit/queue/run/retry/timeout/cancel | *(seed)*; MVP criteria | The engine's scheduler core | **core** (ADR 0005) | Exactly the lifecycle we must build; Postgres is already the catalog — one store, transactional job state, no broker |
 | Celery / RQ | Task queue with workers | *(seed)* | Worker pool alternative | **excluded** | Requires a broker (Redis/RabbitMQ) — extra moving part with no gain over a small Postgres-backed worker pool we can test deterministically |
 | Docker | Containerization / delivery | *(seed)*; environment | Production-like deployment tier | **optional** | Not installed locally (environment.md); provide Dockerfile/compose in a later phase as *optional* delivery, never required for dev/test |
-| GitHub Actions | CI | *(seed)*; `.github/workflows/` exists | Runs fmt/lint/type/test/hygiene | **core** | Already seeded; required by definition-of-done; zero runtime cost |
+| GitHub Actions | CI | *(seed)*; `.github/workflows/` exists | Runs fmt/lint/type/test/hygiene | **core** (ADR 0004) | Already seeded; required by definition-of-done; zero runtime cost |
 
 ## Storage / data
 
 | Technology | Purpose | Evidence / source (source-log #) | Relevance to this project | Class | Why justified (or not) |
 |---|---|---|---|---|---|
-| PostgreSQL | Catalog: episodes, datasets, lineage, jobs, runs | *(added)*; #27 (lineage needs a queryable store), #14 (lineage) | System of record | **core** | The catalog/lineage/job-lifecycle needs transactional metadata; SQLite would be defensible but Postgres is the credible industry default and runs fine locally |
-| Parquet / PyArrow | Columnar storage + zero-copy analytics | #23, #34 | Episode metadata tables, benchmark metrics, curated extracts | **core** | Columnar + sparse multi-rate data is the industry consensus (#23); LeRobot v3 *is* Parquet+MP4 (#34) |
+| PostgreSQL | Catalog: episodes, datasets, lineage, jobs, runs | *(added)*; #27 (lineage needs a queryable store), #14 (lineage) | System of record | **core** (ADR 0005) | The catalog/lineage/job-lifecycle needs transactional metadata; SQLite would be defensible but Postgres is the credible industry default and runs fine locally |
+| Parquet / PyArrow | Columnar storage + zero-copy analytics | #23, #34 | Episode metadata tables, benchmark metrics, curated extracts | **core** (ADR 0006) | Columnar + sparse multi-rate data is the industry consensus (#23); LeRobot v3 *is* Parquet+MP4 (#34) |
 | S3-compatible object storage (MinIO) | Artifact/blob store at scale | #14, #31 (object storage as task interchange) | Later: artifacts on object storage | **optional** | Local filesystem first (228 GB NVMe); add MinIO/S3 tier when multi-machine or size demands — OSMO shows the interchange pattern we'd follow |
 | DuckDB | Ad-hoc SQL over Parquet lake | *(seed)* | Analyst-style queries over episode metadata; demo-able | **optional** | Nice query ergonomics for the curation UI; adopt when the catalog's SQL stops being enough |
 | DVC | Git-based data versioning | *(seed)* | Versioning datasets | **excluded** | DVC is built around git + pointers for ML repos; our versioning is a *catalog* problem (content-addressed builds with lineage) over large binaries, where DVC's model fits poorly |
@@ -66,8 +68,8 @@ a robot-episode **data engine** (ingest → validate → index/version → curat
 |---|---|---|---|---|---|
 | PyTorch | Training/eval workloads consume datasets | #23 (dataloader on .rrd), #9 | Future workload-side integration | **optional** | The engine may *serve* tensors to a torch DataLoader later; not needed for the data-engine core. Models are workloads (CLAUDE.md) |
 | PyTorch DDP/FSDP | Distributed training | *(seed)* | Training-scale concerns | **excluded** | Training infra is explicitly not our product; 1 GPU anyway |
-| MLflow | Experiment tracking, model registry, lineage | #27 | Experiment/run records | **optional** | Run/lineage records are part of the problem we're building (we own the schema per observability conventions); adopt MLflow as a *backend* only if our thin records prove insufficient — decision deferred to MVP, tracked in backlog |
-| Weights & Biases | Hosted experiment tracking | *(seed)* | External tracker | **optional** | Hosted SaaS conflicts with reproducible local-first scaffolding; same deferral as MLflow |
+| MLflow | Experiment tracking, model registry, lineage | #27 | Experiment/run records | **optional** (deferred per ADR 0007) | Run/lineage records are part of the problem we're building (we own the schema per observability conventions); adopt MLflow as a *backend* only if our thin records prove insufficient — decision deferred to MVP, tracked in backlog |
+| Weights & Biases | Hosted experiment tracking | *(seed)* | External tracker | **excluded** (ADR 0007) | Hosted SaaS conflicts with local-first reproducibility; rejected as the tracker of record. Revisit only via a new ADR |
 | Hugging Face Hub (model/dataset registry) | Publishing curated datasets | #34, #35 | Distribution channel for curated builds | **optional** | Stretch goal; not required by the core loop |
 | NVIDIA DCGM / NVML (`pynvml`) | GPU utilization/VRAM telemetry | *(seed)*; environment (RTX 5060 present) | Resource telemetry required by definition-of-done | **core** | The only lightweight way to read GPU metrics on this box; `pynvml` degrades gracefully when no GPU — exactly the required behavior |
 
@@ -86,7 +88,7 @@ a robot-episode **data engine** (ingest → validate → index/version → curat
 
 | Technology | Purpose | Evidence / source (source-log #) | Relevance to this project | Class | Why justified (or not) |
 |---|---|---|---|---|---|
-| FastAPI | HTTP API for the platform | *(seed)* | The platform's API surface | **core** | Standard, typed (Pydantic), testable via OpenAPI contract tests — fits the "API contract tests" MVP criterion with one framework |
+| FastAPI | HTTP API for the platform | *(seed)* | The platform's API surface | **core** (ADR 0009) | Standard, typed (Pydantic), testable via OpenAPI contract tests — fits the "API contract tests" MVP criterion with one framework |
 | gRPC / protobuf | RPC + schema'd streaming | *(seed)* | Streaming ingest APIs | **excluded** | HTTP/JSON + file-based artifact exchange covers current needs; MCAP already handles serialized streams (#36). Trigger: real-time streaming ingest requirement |
 | NVIDIA Triton | Model serving | *(seed)* | Inference serving | **excluded** | Serving/optimization is scope-guarded (CLAUDE.md); Triton is a workload we might *submit to*, never our core |
 
@@ -104,10 +106,10 @@ a robot-episode **data engine** (ingest → validate → index/version → curat
 
 | Technology | Purpose | Evidence / source (source-log #) | Relevance to this project | Class | Why justified (or not) |
 |---|---|---|---|---|---|
-| Python (3.14) | Implementation language | #34, #35, #38 (ecosystem is Python-first); environment | Entire backend/worker/bench stack | **core** | The robotics-ML data ecosystem is Python; the problem is I/O- and orchestration-bound, not hot-loop-bound |
+| Python (3.14) | Implementation language | #34, #35, #38 (ecosystem is Python-first); environment | Entire backend/worker/bench stack | **core** (ADR 0004) | The robotics-ML data ecosystem is Python; the problem is I/O- and orchestration-bound, not hot-loop-bound |
 | C++ | Performance-critical paths | *(seed)*; #36 (MCAP has C++ core) | Only if a measured hot path demands | **excluded** (for now) | No measured hot path; also no g++ on the captured toolchain (environment.md). Re-benchmark before considering |
 | Rust | Structural/perf justification | *(seed)*; #36, #38 (Rust SDKs exist) | Possible for throughput-critical readers | **excluded** (for now) | PyArrow/MCAP Python readers cover expected throughput; a second language adds build complexity for unmeasured gain. Trigger: profiling shows reader-bound bottleneck (record in experiments/) |
-| uv | Python packaging/venv/runner | *(seed)*; #33 (RoboLab uses uv) | One-command setup/fmt/lint/test | **core** | Fast, Windows-friendly, lockfile-based reproducibility; matches how modern robotics repos ship (#33) |
+| uv | Python packaging/venv/runner | *(seed)*; #33 (RoboLab uses uv) | One-command setup/fmt/lint/test | **core** (ADR 0004) | Fast, Windows-friendly, lockfile-based reproducibility; matches how modern robotics repos ship (#33) |
 | docker-compose | Local multi-service runs | *(seed)* | Production-like tier | **optional** | With Docker absent locally it stays a documented optional tier |
 
 ## Resume-keyword stuffing call-outs
@@ -122,5 +124,6 @@ benchmarking). The matrix above records the *trigger* that would make each of th
 
 - Every seed-list technology has a row; none left at "considered" without a class.
 - *(added)* rows: PostgreSQL, Postgres-backed job queue (seed wording kept), MuJoCo, PyArrow (folded into Parquet row).
-- Classifications assume the selected problem in [problem-candidates.md](problem-candidates.md). If another candidate is
-  chosen (owner approves ADR 0003), re-verify rows tagged: Isaac Lab, PyTorch, gRPC, DVC/lakeFS.
+- Classes finalized against ADRs 0004–0009 after the owner accepted ADR 0003 (problem: robot episode data engine).
+  Deferral triggers for optional/excluded rows are recorded in the ADRs and
+  [../architecture/technology-decision-matrix.md](../architecture/technology-decision-matrix.md).
