@@ -58,6 +58,15 @@ def test_health_route_returns_ok_without_database() -> None:
 
 
 @pytest.mark.contract
+def test_root_points_a_first_visitor_somewhere_useful() -> None:
+    """The platform has no web UI yet, so `/` must not be a blank 404."""
+    body = _client().get("/").json()
+    assert body["service"] == "faultlined"
+    assert body["docs"] == "/docs"
+    assert body["endpoints"]["submit_job"] == "POST /api/v1/jobs"
+
+
+@pytest.mark.contract
 def test_get_job_and_episode_resources() -> None:
     client = _client()
     job = client.get("/api/v1/jobs/job-1")

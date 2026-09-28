@@ -39,6 +39,26 @@ def create_app(
     app.state.catalog = app_catalog
     install_error_handling(app)
 
+    @app.get("/")
+    def root() -> dict[str, object]:
+        """Point a first-time visitor somewhere useful.
+
+        The platform has no web UI yet (frontend is a later stage), so a bare `/`
+        would otherwise be a blank 404 in the browser.
+        """
+        return {
+            "service": "faultlined",
+            "description": "Local-first robot episode data engine. API only; no web UI yet.",
+            "docs": "/docs",
+            "openapi": "/openapi.json",
+            "health": "/api/v1/health",
+            "endpoints": {
+                "submit_job": "POST /api/v1/jobs",
+                "get_job": "GET /api/v1/jobs/{job_id}",
+                "get_episode": "GET /api/v1/episodes/{episode_id}",
+            },
+        }
+
     @app.get("/api/v1/health")
     def health() -> dict[str, str]:
         if initialize_database:
