@@ -1,8 +1,14 @@
 # Frontend — Scope and API Boundary
 
-Visual design and framework selection happen in phase 12 ([../prompts/12-frontend-design.md](../prompts/12-frontend-design.md));
-this document freezes **what** the UI covers and **how** it talks to the engine. Style mandate (spec §4): clean,
-restrained, technically credible — a purpose-built engineering tool, not a generic dashboard.
+Visual design happens in phase 12 ([../prompts/12-frontend-design.md](../prompts/12-frontend-design.md)); the
+*mechanism* was settled for MVP in [ADR 0014](../decisions/0014-minimal-ui-server-rendered.md): server-rendered
+HTML plus vanilla-JS polling, no framework and no build step. Style mandate (spec §4): clean, restrained,
+technically credible — a purpose-built engineering tool, not a generic dashboard.
+
+**Implemented in stage 2 so far:** Status/Overview, Jobs (list + detail), Artifacts, at `/ui`, `/ui/jobs`,
+`/ui/jobs/{id}`, `/ui/artifacts`. Polling re-requests the same page with `X-Fragment: 1` and swaps the returned
+HTML, so Python stays the only renderer. Episodes, Failures, Datasets & Builds, Runs, and Benchmarks remain
+stage-3 work.
 
 ## Scope
 

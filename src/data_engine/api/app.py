@@ -4,16 +4,86 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import datetime
 from typing import Any, cast
 from uuid import uuid4
 
-from fastapi import FastAPI, Header, Request, Response
+from fastapi import FastAPI, Header, HTTPException, Request, Response
+from fastapi.responses import HTMLResponse
 
 from data_engine.api.errors import install_error_handling
-from data_engine.api.schemas import EpisodeResponse, JobResponse, SubmitJobRequest
+from data_engine.api.schemas import (
+    ArtifactListResponse,
+    EpisodeResponse,
+    JobListResponse,
+    JobResponse,
+    StatusResponse,
+    SubmitJobRequest,
+)
 from data_engine.catalog.database import initialize_schema
 from data_engine.catalog.repository import PostgresCatalog
 from data_engine.config import Settings, load_settings
+from data_engine.jobs.state import JobState
+from data_engine.observability.telemetry import sample_resources
+from data_engine.web import (
+    artifacts_fragment,
+    artifacts_page,
+    job_detail_page,
+    jobs_fragment,
+    jobs_page,
+    status_fragment,
+    status_page,
+    stylesheet,
+)
+
+
+def _parse_state(state: str | None) -> JobState | None:
+    if state is None:
+        return None
+    try:
+        return JobState(state)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=f"unknown job state: {state}") from exc
+
+
+def _status_model(catalog: PostgresCatalog) -> dict[str, Any]:
+    sample = sample_resources()
+    return {
+        "status": "ok",
+        "queue_depth": {state.value: catalog.count_jobs(state) for state in JobState},
+        "artifact_count": catalog.count_artifacts(),
+        "episode_count": catalog.count_episodes(),
+        "resources": {
+            "cpu_percent": sample.cpu_percent,
+            "memory_used_bytes": sample.memory_used_bytes,
+            "memory_available_bytes": sample.memory_available_bytes,
+            "disk_free_bytes": sample.disk_free_bytes,
+            "gpu_present": sample.gpu_present,
+            "gpu_memory_total_bytes": sample.gpu_memory_total_bytes,
+        },
+    }
+
+
+def _parse_cursor(before: str | None) -> datetime | None:
+    if before is None:
+        return None
+    try:
+        return datetime.fromisoformat(before)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=f"invalid cursor: {before}") from exc
+
+
+def _job_summary(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": row["id"],
+        "type": row["type"],
+        "state": row["state"],
+        "correlation_id": row["correlation_id"],
+        "error": row.get("error"),
+        "created_at": row["created_at"],
+        "started_at": row.get("started_at"),
+        "finished_at": row.get("finished_at"),
+    }
 
 
 def create_app(
@@ -91,6 +161,94 @@ def create_app(
         if row is None:
             raise KeyError(job_id)
         return row
+
+    @app.get("/api/v1/jobs", response_model=JobListResponse)
+    def list_jobs(
+        request: Request,
+        state: str | None = None,
+        type: str | None = None,
+        limit: int = 50,
+        before: str | None = None,
+    ) -> dict[str, Any]:
+        """Newest-first page of jobs for the Jobs UI.
+
+        Cursor-based: pass the last item's ``created_at`` back as ``before``. The UI
+        never asks for every row.
+        """
+        catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
+        parsed_state = _parse_state(state)
+        parsed_before = _parse_cursor(before)
+        rows = catalog_for_request.list_jobs(
+            state=parsed_state, job_type=type, limit=min(limit, 200), before=parsed_before
+        )
+        items = [_job_summary(row) for row in rows]
+        next_before = rows[-1]["created_at"] if len(rows) == min(limit, 200) else None
+        return {"items": items, "next_before": next_before}
+
+    @app.get("/api/v1/artifacts", response_model=ArtifactListResponse)
+    def list_artifacts(
+        request: Request, limit: int = 50, before: str | None = None
+    ) -> dict[str, Any]:
+        """Newest-first page of content-addressed artifacts with their referencing episodes."""
+        catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
+        rows = catalog_for_request.list_artifacts(
+            limit=min(limit, 200), before=_parse_cursor(before)
+        )
+        next_before = rows[-1]["created_at"] if len(rows) == min(limit, 200) else None
+        return {"items": rows, "next_before": next_before}
+
+    @app.get("/api/v1/status", response_model=StatusResponse)
+    def status(request: Request) -> dict[str, Any]:
+        """Health, queue depth by state, entity counts, and host telemetry."""
+        catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
+        return _status_model(catalog_for_request)
+
+    @app.get("/ui/faultlined.css")
+    def ui_stylesheet() -> Response:
+        return Response(stylesheet(), media_type="text/css; charset=utf-8")
+
+    @app.get("/ui", response_class=HTMLResponse)
+    def ui_status(request: Request, x_fragment: str | None = Header(default=None)) -> HTMLResponse:
+        """Status/Overview page. The X-Fragment header returns just the polling body."""
+        catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
+        model = _status_model(catalog_for_request)
+        if x_fragment:
+            return HTMLResponse(status_fragment(model))
+        return HTMLResponse(status_page(model))
+
+    @app.get("/ui/jobs", response_class=HTMLResponse)
+    def ui_jobs(
+        request: Request,
+        state: str | None = None,
+        x_fragment: str | None = Header(default=None),
+    ) -> HTMLResponse:
+        catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
+        rows = catalog_for_request.list_jobs(state=_parse_state(state), limit=50)
+        summaries = {"items": [_job_summary(row) for row in rows]}
+        if x_fragment:
+            return HTMLResponse(jobs_fragment(summaries))
+        return HTMLResponse(jobs_page(summaries, state))
+
+    @app.get("/ui/jobs/{job_id}", response_class=HTMLResponse)
+    def ui_job_detail(job_id: str, request: Request) -> HTMLResponse:
+        catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
+        job = catalog_for_request.get_job(job_id)
+        if job is None:
+            return HTMLResponse(
+                '<!doctype html><p>No such job. <a href="/ui/jobs">Back to jobs</a></p>',
+                status_code=404,
+            )
+        return HTMLResponse(job_detail_page(job))
+
+    @app.get("/ui/artifacts", response_class=HTMLResponse)
+    def ui_artifacts(
+        request: Request, x_fragment: str | None = Header(default=None)
+    ) -> HTMLResponse:
+        catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
+        items = {"items": catalog_for_request.list_artifacts(limit=50)}
+        if x_fragment:
+            return HTMLResponse(artifacts_fragment(items))
+        return HTMLResponse(artifacts_page(items))
 
     @app.get("/api/v1/episodes/{episode_id}", response_model=EpisodeResponse)
     def get_episode(episode_id: str, request: Request) -> dict[str, Any]:

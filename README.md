@@ -56,9 +56,9 @@ The current repository stage is **scaffolding (not yet accepted)**. A synthetic 
 
 ## Try it
 
-`just run` starts the API on `http://127.0.0.1:8000` and a worker beside it. There is **no web UI** at this
-stage — the frontend is later work — so use the interactive API docs at `http://127.0.0.1:8000/docs`, or
-`http://127.0.0.1:8000/` for a pointer. In another terminal:
+`just run` starts the API on `http://127.0.0.1:8000` and a worker beside it. Open `http://127.0.0.1:8000/ui` for the Status, Jobs, and Artifacts pages
+(server-rendered, polling every 3-5 s), or `http://127.0.0.1:8000/docs` for the interactive API docs. In another
+terminal:
 
 ```bash
 # health check

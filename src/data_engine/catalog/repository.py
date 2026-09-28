@@ -171,6 +171,81 @@ class PostgresCatalog:
             return 0
         return cast(int, row["total"])
 
+    def list_jobs(
+        self,
+        *,
+        state: JobState | None = None,
+        job_type: str | None = None,
+        limit: int = 50,
+        before: datetime | None = None,
+    ) -> list[dict[str, Any]]:
+        """Newest-first job page, cursor-based on ``created_at``.
+
+        The UI never asks for every row, so this is bounded and returns an optional
+        ``next_before`` cursor for the following page.
+        """
+        clauses: list[str] = []
+        params: list[Any] = []
+        if state is not None:
+            clauses.append("state = %s")
+            params.append(state.value)
+        if job_type is not None:
+            clauses.append("type = %s")
+            params.append(job_type)
+        if before is not None:
+            clauses.append("created_at < %s")
+            params.append(before)
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        params.append(limit)
+        with connect(self.settings) as connection:
+            rows = connection.execute(
+                f"""SELECT id, type, state, correlation_id, error,
+                          created_at, started_at, finished_at
+                    FROM jobs {where}
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT %s""",
+                params,
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def list_artifacts(
+        self, *, limit: int = 50, before: datetime | None = None
+    ) -> list[dict[str, Any]]:
+        """Newest-first artifact page with the episodes that reference each artifact."""
+        params: list[Any] = []
+        clause = ""
+        if before is not None:
+            clause = "WHERE a.created_at < %s"
+            params.append(before)
+        params.append(limit)
+        with connect(self.settings) as connection:
+            rows = connection.execute(
+                f"""SELECT a.hash, a.size_bytes, a.created_at,
+                           coalesce(
+                               (SELECT jsonb_agg(e.id) FROM episodes e
+                                WHERE e.artifact_hash = a.hash),
+                               '[]'::jsonb
+                           ) AS episode_ids
+                    FROM artifacts a
+                    {clause}
+                    ORDER BY a.created_at DESC, a.hash DESC
+                    LIMIT %s""",
+                params,
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def count_artifacts(self) -> int:
+        """Total artifacts stored; feeds the Status page."""
+        with connect(self.settings) as connection:
+            row = connection.execute("SELECT count(*) AS total FROM artifacts").fetchone()
+        return cast(int, row["total"]) if row else 0
+
+    def count_episodes(self) -> int:
+        """Total registered episodes; feeds the Status page."""
+        with connect(self.settings) as connection:
+            row = connection.execute("SELECT count(*) AS total FROM episodes").fetchone()
+        return cast(int, row["total"]) if row else 0
+
     def get_job(self, job_id: str) -> dict[str, Any] | None:
         with connect(self.settings) as connection:
             row = connection.execute("SELECT * FROM jobs WHERE id = %s", (job_id,)).fetchone()

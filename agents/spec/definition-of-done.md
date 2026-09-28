@@ -65,7 +65,7 @@ wording preserved in git history. Rationale recorded with the refinement commit.
 - [ ] Dataset/model versioning and lineage recorded — `builds` manifests + `catalog` lineage edges (FR-006–FR-008)
 - [ ] Experiments reproducible from recorded provenance — `workloads` run records + rebuild determinism test (NFR-004)
 - [ ] API contract tests; coverage gate enforced — `api` + committed `docs/api/openapi.json` drift check (ADR 0009)
-- [ ] Minimal UI: jobs, artifacts, status — `frontend` Status/Jobs/Artifacts pages ([../architecture/frontend.md](../architecture/frontend.md))
+- [x] Minimal UI: jobs, artifacts, status — `frontend` Status/Jobs/Artifacts pages at `/ui` (server-rendered + vanilla polling, [ADR 0014](../decisions/0014-minimal-ui-server-rendered.md)); episodes/failures/builds/runs/benchmarks pages remain stage-3 work per [../architecture/frontend.md](../architecture/frontend.md) — `frontend` Status/Jobs/Artifacts pages ([../architecture/frontend.md](../architecture/frontend.md))
 - [ ] First real benchmark baseline committed — `benchmarks/` `bench-ingest` baseline per [../benchmarking/methodology.md](../benchmarking/methodology.md)
 
 ## 3. Production Baseline

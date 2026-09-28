@@ -65,3 +65,52 @@ class EpisodeResponse(BaseModel):
     metadata: dict[str, Any]
     lineage: list[LineageEdgeResponse] = Field(default_factory=list)
     created_at: Any
+
+
+class JobSummary(BaseModel):
+    """Row in the jobs list; the full payload is available on the detail endpoint."""
+
+    id: str
+    type: str
+    state: str
+    correlation_id: str
+    error: dict[str, Any] | None = None
+    created_at: Any
+    started_at: Any = None
+    finished_at: Any = None
+
+
+class JobListResponse(BaseModel):
+    items: list[JobSummary]
+    next_before: Any | None = None
+
+
+class ArtifactSummary(BaseModel):
+    hash: str
+    size_bytes: int
+    created_at: Any
+    episode_ids: list[str] = Field(default_factory=list)
+
+
+class ArtifactListResponse(BaseModel):
+    items: list[ArtifactSummary]
+    next_before: Any | None = None
+
+
+class ResourceSample(BaseModel):
+    cpu_percent: float | None = None
+    memory_used_bytes: int | None = None
+    memory_available_bytes: int | None = None
+    disk_free_bytes: int | None = None
+    gpu_present: bool = False
+    gpu_memory_total_bytes: int | None = None
+
+
+class StatusResponse(BaseModel):
+    """Backs the Status page: health, queue depth, and host telemetry."""
+
+    status: str
+    queue_depth: dict[str, int]
+    artifact_count: int
+    episode_count: int
+    resources: ResourceSample

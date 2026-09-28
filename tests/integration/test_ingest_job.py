@@ -79,3 +79,64 @@ def test_worker_processes_ingest_and_registers_episode(tmp_path: Path) -> None:
     # The episode is content-addressed, so a persistent database accumulates one edge per
     # job that produced it. Assert membership, not position, or this fails on the second run.
     assert job["id"] in [edge["to_ref"] for edge in episode["lineage"]]
+
+
+@pytest.mark.integration
+def test_list_jobs_filters_paginates_and_counts() -> None:
+    settings = _settings()
+    initialize_schema(settings)
+    catalog = PostgresCatalog(settings)
+
+    first_id = f"list-{uuid.uuid4()}"
+    catalog.submit_job("ingest", {"episode": _episode()}, first_id, "test-correlation")
+    catalog.submit_job(
+        "ingest", {"episode": _episode()}, f"list-{uuid.uuid4()}", "test-correlation"
+    )
+
+    newest_first = catalog.list_jobs(limit=50)
+    assert len(newest_first) >= 2
+    assert [r["id"] for r in newest_first][:2] == sorted(
+        [r["id"] for r in newest_first][:2],
+        key=lambda i: catalog.get_job(i)["created_at"],
+        reverse=True,
+    )
+
+    # Cursor paging must not repeat a row already returned.
+    first_page = catalog.list_jobs(limit=1)
+    assert len(first_page) == 1
+    second_page = catalog.list_jobs(limit=1, before=first_page[0]["created_at"])
+    assert second_page and second_page[0]["id"] != first_page[0]["id"]
+
+    queued = catalog.list_jobs(state=JobState.QUEUED, limit=200)
+    assert all(r["state"] == JobState.QUEUED.value for r in queued)
+    assert catalog.count_jobs(JobState.QUEUED) >= len(queued)
+    assert catalog.count_artifacts() >= 0
+    assert catalog.count_episodes() >= 0
+
+
+@pytest.mark.integration
+def test_list_artifacts_reports_referencing_episodes(tmp_path: Path) -> None:
+    settings = _settings().model_copy(update={"artifact_root": tmp_path})
+    initialize_schema(settings)
+    catalog = PostgresCatalog(settings)
+    worker = IngestWorker(settings)
+
+    submitted = []
+    for _ in range(3):
+        job, _ = catalog.submit_job(
+            "ingest", {"episode": _episode()}, f"artifacts-{uuid.uuid4()}", "test-correlation"
+        )
+        submitted.append(job["id"])
+    for _ in range(50):
+        if worker.process_one() is None:
+            break
+        if all(catalog.get_job(j)["state"] != JobState.QUEUED.value for j in submitted):
+            break
+
+    artifacts = catalog.list_artifacts(limit=200)
+    assert artifacts, "the ingested episode should have written an artifact"
+    row = artifacts[0]
+    assert row["size_bytes"] > 0
+    assert isinstance(row["episode_ids"], list)
+    # The synthetic episode is content-addressed, so every run maps to the same blob.
+    assert row["episode_ids"], "an ingested artifact should reference at least one episode"

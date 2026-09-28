@@ -99,3 +99,19 @@ contract.
 
 **Reader protocol** (ingest): `sniff(path) -> bool`, `read(path) -> EpisodeSource` per format; adding a format
 (ROS 2 bag later) means adding one reader + tests — no core changes.
+
+## Read endpoints added for the MVP UI (stage 2)
+
+Added for the Status / Jobs / Artifacts pages; all are read-only, cursor-paginated, and bounded at
+`limit<=200`. Implemented in `src/data_engine/api/app.py` with queries in
+`src/data_engine/catalog/repository.py`; see [ADR 0014](../decisions/0014-minimal-ui-server-rendered.md).
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/api/v1/jobs` | Newest-first job page. Filters: `state`, `type`. Cursor: `before` (ISO timestamp). Returns `items` + `next_before`. |
+| GET | `/api/v1/artifacts` | Newest-first artifact page with `episode_ids` per row. Cursor: `before`. |
+| GET | `/api/v1/status` | Health, `queue_depth` by job state, artifact/episode counts, and host telemetry. |
+
+The UI pages themselves live under `/ui` and are not part of the versioned API surface. They poll the
+same read model by re-requesting their own page with `X-Fragment: 1`, which returns only the polling body
+so Python remains the single renderer.
