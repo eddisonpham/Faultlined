@@ -1,0 +1,1 @@
+"""Fast pure-logic tests."""

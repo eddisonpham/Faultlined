@@ -65,8 +65,10 @@ OpenAPI JSON committed at `docs/api/openapi.json` and drift-checked in CI (MVP c
 
 ```python
 class StageHandler(Protocol):
-    name: JobType                      # "ingest" | "validate" | "index" | "build" | "workload" | "gc"
+    name: JobType  # "ingest" | "validate" | "index" | "build" | "workload" | "gc"
+
     def run(self, ctx: JobContext, payload: Mapping[str, Any]) -> StageResult: ...
+
     # ctx: job_id, correlation_id, cancel_token, deadline, logger, metrics, catalog, artifact_store
     # StageResult: ok(bool), outputs(artifact refs + catalog deltas), reason_code(str | None), metrics
 ```
@@ -78,7 +80,11 @@ class Workload(Protocol):
     name: str
     version: str
     resource: Literal["cpu", "gpu_optional", "gpu_required"]
-    def run(self, dataset: DatasetView, config: Mapping[str, Any], ctx: WorkloadContext) -> WorkloadResult: ...
+
+    def run(
+        self, dataset: DatasetView, config: Mapping[str, Any], ctx: WorkloadContext
+    ) -> WorkloadResult: ...
+
     # DatasetView: read-only handle over a published dataset build (hash-verified)
     # WorkloadResult: artifacts, metrics (metric-schema rows), run metadata (seeds, env), success/reason
 ```

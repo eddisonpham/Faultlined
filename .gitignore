@@ -30,7 +30,9 @@ node_modules/
 target/
 cmake-build-*/
 
-# Data, artifacts, models (never commit; small test fixtures go in tests/fixtures/)
+# Runtime state, data, artifacts, models (never commit; small test fixtures go in tests/fixtures/)
+var/
+.env
 data/
 artifacts/
 runs/

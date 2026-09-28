@@ -34,9 +34,11 @@ shows decode/read throughput below NFR-001 targets, recorded first as an experim
 - (+) Single toolchain; every command scriptable under Git Bash; contributors and agents can run everything locally.
 - (+) Matches how surveyed teams ship tooling (RoboLab uses uv — #33).
 - (−) If a decoder hot path emerges, we pay a later FFI cost; the trigger keeps the decision honest.
-- (−) Python 3.14 is new — dependency wheel availability must be checked at tooling time (phase 04).
+- (−) Python 3.14 is new — phase 04 verified the locked dependency set resolves and installs on Windows CPython 3.14.5; future dependency additions still require wheel checks.
 
 ## Docs updated
 
 - [../architecture/technology-decision-matrix.md](../architecture/technology-decision-matrix.md) §1, §11
+- [0011](0011-coverage-gate.md) sets the honest initial coverage floor (added in phase 04)
+- [0012](0012-host-based-development.md) records that containers are optional on this machine
 - [../research/technology-matrix.md](../research/technology-matrix.md) (classes: Python/uv/GitHub Actions core; C++/Rust excluded-for-now)

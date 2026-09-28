@@ -1,36 +1,76 @@
-# Robotics ML Infrastructure Platform (project name TBD)
+# Robot Episode Data Engine
 
-An ML infrastructure platform for robotics. The specific problem is selected in scaffolding phase 01
-and recorded in `agents/spec/problem.md`.
+A local-first robotics ML data platform: ingest MCAP / LeRobot episodes, validate and index them, then build reproducible,
+versioned LeRobot datasets with end-to-end lineage. Models are workloads the platform executes — not the product.
+See [agents/spec/problem.md](agents/spec/problem.md) and [agents/architecture/overview.md](agents/architecture/overview.md).
 
-This repository is driven by coding agents (Claude Code) working from persistent context in `agents/`.
+## Requirements
 
-## Getting started (human)
+- Python 3.14, [uv](https://docs.astral.sh/uv/), and [just](https://just.systems/) (task runner).
+- PostgreSQL 17+ running locally. The service is an explicit architecture choice (ADR 0005); Docker is optional and not
+  required. On Windows, install PostgreSQL with its installer and keep the server bound to localhost.
+- Git Bash on Windows is supported. GPU is optional; the core pipeline and tests run CPU-only.
+
+## Quickstart
+
+1. Clone the repository and open Git Bash in its root.
+2. Create a local database named `data_engine` in PostgreSQL.
+3. Create local config from the placeholder template and set your own database URL/password locally:
+
+   ```bash
+   cp .env.example .env
+   # Edit .env locally; never paste credentials into chat or commit them.
+   ```
+
+4. Install and run the gates:
+
+   ```bash
+   just setup
+   just fmt
+   just lint
+   just typecheck
+   just test
+   just hygiene
+   ```
+
+`just` imports a local `.env` into each recipe's process environment; the application itself reads environment variables
+only. `just setup` creates `.venv` and syncs the committed `uv.lock` (including optional GPU telemetry, which degrades
+without a GPU). `just test` runs the fast suite and enforces the 70% coverage floor. Integration tests requiring a live
+Postgres instance are marked and need `DE_DATABASE_URL` set in your local `.env` or shell.
+
+The current repository stage is **scaffolding**. The package/tooling skeleton exists; API/worker/data-engine vertical-slice logic is built in phase 05. `just bench` and `just run` are being completed in phases 05–06. Host-based development with optional containers is
+recorded in [ADR 0012](agents/decisions/0012-host-based-development.md).
+
+## Task commands
 
 ```bash
-git init && git add -A && git commit -m "chore: initial scaffold"
-pip install pre-commit && pre-commit install        # secret scanning + hygiene hooks
-cp .env.example .env                                 # then fill in HF_KEY locally; .env is gitignored
-python scripts/check_repo_hygiene.py                 # should print OK
-claude                                               # start Claude Code in this directory
+just setup       # install locked deps
+just fmt         # format + safe lint fixes
+just lint        # check without writing
+just typecheck   # strict mypy
+just test        # fast tests + coverage gate
+just test-all    # include slow and GPU-marked tests
+just bench       # benchmark harness (phase 06)
+just run         # local API + workers (phase 05)
+just hygiene     # relative links, ADRs, secrets, required structure
+just ci          # lint + typecheck + test + hygiene
 ```
 
-Then run the phase prompts in order, each in a **fresh session** (`/clear` between):
+## Project context
 
-```text
-/phase 01     industry research + problem selection      (you approve the problem)
-/phase 02     requirements + technology evaluation
-/phase 03     architecture                               (you review)
-/phase 04     repo + tooling scaffold
-/phase 05     minimal vertical slice
-/phase 06     benchmark + observability foundations
-/phase 07     repo-wide review + handoff
-```
+- [CLAUDE.md](CLAUDE.md) — agent instructions and non-negotiables.
+- [agents/README.md](agents/README.md) — map of persistent project context.
+- [agents/spec/definition-of-done.md](agents/spec/definition-of-done.md) — stage criteria.
+- [agents/HANDOFF.md](agents/HANDOFF.md) — current status / next steps.
+- Phase prompts are listed in [agents/prompts/README.md](agents/prompts/README.md).
 
-Or paste the file contents from `agents/prompts/` directly. See `agents/prompts/README.md`.
+## Secrets and data
 
-## Things only you can do
+Keep credentials in your shell or a local `.env` file (gitignored). `.env.example` contains placeholders only. Never paste
+a credential into chat, code, logs, Markdown, or Git history. The hygiene script checks for common key patterns. Raw data,
+artifacts, runs, model weights, and `.env` are ignored by Git.
 
-- Keep real credentials in `.env` or your shell only. Never paste them into chat, files, or commits.
-- Tell the agent about your actual hardware if detection is ambiguous (GPU model, VRAM, RAM, disk, OS).
-- Approve the problem selection (after `/phase 01`) and the architecture (after `/phase 03`).
+## Workflow
+
+The project followed phases 01–03 (research/problem selection, requirements/technology decisions, architecture), with owner
+approval at both checkpoints. Remaining scaffolding phases are 04–07. See [agents/prompts/README.md](agents/prompts/README.md).

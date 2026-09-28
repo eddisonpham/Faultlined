@@ -1,0 +1,32 @@
+name: ci
+on:
+  push:
+  pull_request:
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - run: uv sync --locked --all-extras
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run mypy
+      - run: uv run pytest -m "not slow and not gpu" --cov --cov-report=term-missing
+      - run: python scripts/check_repo_hygiene.py
+  optional-slow-gpu:
+    if: ${{ vars.RUN_SLOW_GPU_TESTS == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - run: uv sync --locked --all-extras
+      - run: uv run pytest -m "slow or gpu"

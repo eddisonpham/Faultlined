@@ -29,10 +29,10 @@
 - Cancellation at each lifecycle state
 - Disk full / storage unavailable
 
-Maintain the catalog with status per mode in `agents/testing/failure-modes.md` (created in phase 05).
+Maintain the catalog with status per mode in [failure-modes.md](failure-modes.md) (drafted in phase 03; add test references as features land).
 
 ## Coverage
-- Target and tooling: set by phase 04 in an ADR. Enforced in CI. Ratchet upward only; lowering requires an ADR.
+- 70% total branch coverage floor, enforced by pytest-cov in CI; ratchet upward only; lowering requires an ADR (ADR 0011).
 - Branch coverage preferred where the tool supports it. Coverage is a floor, not a goal.
 
 ## Fixtures

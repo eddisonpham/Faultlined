@@ -13,7 +13,7 @@ environment variables only.
 | **Optional cloud** | Deferred. Trigger: multi-machine or S3-scale need (technology-matrix) | A new ADR must define it (OSMO-style backends are the reference pattern, #31) |
 
 Containerization is **deferred**, not banned: a Dockerfile may be added as an *optional* delivery artifact when a
-container runtime exists (decision matrix §10), never as a dev prerequisite.
+container runtime exists (ADR [0012](../decisions/0012-host-based-development.md)), never as a dev prerequisite.
 
 ## Processes
 
@@ -27,8 +27,9 @@ container runtime exists (decision matrix §10), never as a dev prerequisite.
 
 ## Configuration
 
-Precedence: **environment variables > `.env` file (local, gitignored) > defaults**. Keys (`.env.example` holds
-placeholders only):
+Application settings read process environment variables only (per project secrets policy); the `just` task runner loads a
+local `.env` into recipe process environments, or operators may export variables in their shell. Defaults apply when unset.
+Keys (`.env.example` holds placeholders only):
 
 | Var | Meaning | Default |
 |---|---|---|

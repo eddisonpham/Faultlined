@@ -11,8 +11,7 @@ Read `CLAUDE.md`, `agents/architecture/*` (especially `repo-layout.md`), all ADR
    threshold that is honest for a skeleton and record the ratchet policy in an ADR.
 3. One entry point for each of: `setup`, `fmt`, `lint`, `typecheck`, `test`, `bench`, `run` (Makefile/justfile/task runner — pick the simplest).
 4. Config: typed settings loaded from files + environment; `.env.example` updated (placeholders only); `HF_KEY` is read from the environment only.
-5. Containers: Dockerfile(s) and compose for the production-like local deployment described in `deployment.md`
-   (GPU access optional and off by default).
+5. Containers: Dockerfile(s)/compose only where the selected deployment tier and machine support them. Host-based dev was accepted by owner in phase 03; ADR 0012 records that Docker is optional and is not a clean-clone prerequisite on this machine.
 6. CI (`.github/workflows/`): lint, typecheck, tests + coverage gate, hygiene script; separate optional job for slow/GPU tests.
    Keep `.pre-commit-config.yaml` in sync with the chosen tools.
 7. Add tests for `scripts/check_repo_hygiene.py` using the project's test runner.

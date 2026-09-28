@@ -46,7 +46,7 @@ a robot-episode **data engine** (ingest → validate → index/version → curat
 | Temporal | Durable workflow execution | *(seed)* | Retry/durable-execution semantics | **excluded** | Powerful but heavy (server + SDKs + workflow determinism rules); MVP retry/timeout/cancel semantics are implementable directly against Postgres with tests |
 | Postgres-backed job queue | Job lifecycle: submit/queue/run/retry/timeout/cancel | *(seed)*; MVP criteria | The engine's scheduler core | **core** (ADR 0005) | Exactly the lifecycle we must build; Postgres is already the catalog — one store, transactional job state, no broker |
 | Celery / RQ | Task queue with workers | *(seed)* | Worker pool alternative | **excluded** | Requires a broker (Redis/RabbitMQ) — extra moving part with no gain over a small Postgres-backed worker pool we can test deterministically |
-| Docker | Containerization / delivery | *(seed)*; environment | Production-like deployment tier | **optional** | Not installed locally (environment.md); provide Dockerfile/compose in a later phase as *optional* delivery, never required for dev/test |
+| Docker | Containerization / delivery | *(seed)*; environment | Production-like deployment tier | **optional** (ADR 0012) | Not installed locally (environment.md); Dockerfile/compose deferred as optional delivery, never required for dev/test |
 | GitHub Actions | CI | *(seed)*; `.github/workflows/` exists | Runs fmt/lint/type/test/hygiene | **core** (ADR 0004) | Already seeded; required by definition-of-done; zero runtime cost |
 
 ## Storage / data

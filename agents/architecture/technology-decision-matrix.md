@@ -102,7 +102,7 @@ Deferral entry: **deferred until phase 12** — UI *scope and API boundary* are 
 
 | Option | IR | TN | P | LF | CX | MT | RR | Weighted | Verdict |
 |---|---|---|---|---|---|---|---|---|---|
-| **No containers now; host tooling** | 3 | 4 | 4 | 5 | 5 | 4 | 2 | **4.05** | **chosen**; Dockerfile deferred |
+| **No containers now; host tooling** | 3 | 4 | 4 | 5 | 5 | 4 | 2 | **4.05** | **chosen** — ADR [0012](../decisions/0012-host-based-development.md) |
 | Docker + docker-compose required | 5 | 2 | 3 | 1 | 2 | 4 | 4 | 2.70 | veto (LF<3): no container runtime on the dev box (environment.md) |
 | Podman | 3 | 2 | 3 | 2 | 2 | 3 | 2 | 2.30 | veto (LF<3): same wall |
 

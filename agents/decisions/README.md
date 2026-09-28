@@ -18,3 +18,5 @@ supersede it with a new ADR and update the affected docs.
 | [0008](0008-observability.md) | JSON logs + NVML telemetry + file metrics (OTel deferred) | accepted |
 | [0009](0009-api-style.md) | HTTP+JSON FastAPI API with OpenAPI contracts | accepted |
 | [0010](0010-modular-monolith-and-workers.md) | Modular monolith + out-of-process workers | accepted |
+| [0011](0011-coverage-gate.md) | Initial coverage gate and ratchet policy | accepted |
+| [0012](0012-host-based-development.md) | Host-based local development; containers are optional | accepted |

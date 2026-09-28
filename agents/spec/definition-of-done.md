@@ -40,7 +40,7 @@ Source: [01-scaffolding-instructions.md](01-scaffolding-instructions.md) §3.
 - [ ] Standards, methodology, conventions, known limitations, rejected approaches, current experiments all in `agents/`
 
 **Engineering tooling**
-- [ ] Format, lint, type-check, test, coverage gate, local dev, env config, CI, containerization (where appropriate)
+- [ ] Format, lint, type-check, test, coverage gate, local dev, env config, CI; containers optional per [ADR 0012](../decisions/0012-host-based-development.md) / machine availability
 - [ ] One command each for: setup, fmt, lint, typecheck, test, bench, run
 
 **Vertical slice**

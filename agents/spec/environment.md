@@ -18,7 +18,8 @@ Implications for the project (recorded so architecture respects them):
 
 - Single consumer-grade 8 GB GPU: benchmarks and workloads must fit a small VRAM budget and degrade gracefully to CPU.
 - Windows-first development: scripts and tooling must run under Git Bash on Windows (POSIX-ish), avoid Linux-only assumptions
-  (no `lscpu`/`free`; no Docker socket). WSL2 was not probed — TODO(phase 04) verify if it exists before choosing containerization.
+  (no `lscpu`/`free`; no Docker socket). WSL2 was not detected or evaluated; host-based development is accepted in ADR 0012,
+  so WSL2 is not a phase-04 prerequisite.
 - No container runtime means local dev runs directly on the host toolchains; Docker is an optional delivery tier only.
 - Python 3.14 is very new — dependency wheels must be checked for compatibility when scaffolding tooling.
 

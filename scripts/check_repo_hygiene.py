@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Repository hygiene: required structure, relative Markdown links, ADR numbering, secret patterns."""
+"""Check repo structure, Markdown links, ADRs, and secret patterns."""
 
 from __future__ import annotations
 
@@ -15,10 +15,23 @@ REQUIRED = [
     ".env.example",
     "agents/README.md",
     "agents/HANDOFF.md",
-    *(f"agents/{d}" for d in (
-        "spec", "architecture", "research", "implementation", "testing",
-        "benchmarking", "observability", "experiments", "reviews", "decisions", "roles", "prompts",
-    )),
+    *(
+        f"agents/{d}"
+        for d in (
+            "spec",
+            "architecture",
+            "research",
+            "implementation",
+            "testing",
+            "benchmarking",
+            "observability",
+            "experiments",
+            "reviews",
+            "decisions",
+            "roles",
+            "prompts",
+        )
+    ),
 ]
 
 SECRET_PATTERNS = {
@@ -31,8 +44,19 @@ SECRET_PATTERNS = {
 }
 
 SKIP_DIRS = {
-    ".git", "node_modules", ".venv", "venv", "__pycache__", "target", "dist", "build",
-    ".mypy_cache", ".ruff_cache", ".pytest_cache", ".next", "htmlcov",
+    ".git",
+    "node_modules",
+    ".venv",
+    "venv",
+    "__pycache__",
+    "target",
+    "dist",
+    "build",
+    ".mypy_cache",
+    ".ruff_cache",
+    ".pytest_cache",
+    ".next",
+    "htmlcov",
 }
 SKIP_FILES = {".env", ".env.local"}  # gitignored local secrets are never scanned or read
 MAX_SCAN_BYTES = 2_000_000

@@ -3,48 +3,53 @@
 Where every kind of code belongs. Component ↔ directory mapping must stay 1:1 with
 [components.md](components.md) and [../implementation/status.md](../implementation/status.md).
 
-## Tree (target state; phases 04+ create the code)
+## Tree (current state after phase 04; phases 05+ fill business logic)
 
 ```text
 .
 ├── CLAUDE.md / README.md
-├── agents/                      # all persistent project context (docs, ADRs, specs) — never code
-├── pyproject.toml               # uv-managed; single package below
+├── agents/                      # persistent project context (docs, ADRs, specs) — never application code
+├── pyproject.toml               # uv-managed project, tools, markers, coverage gate
+├── uv.lock                      # committed dependency lock
+├── .python-version              # Python 3.14 selection for uv
+├── justfile                     # one entry point for setup/fmt/lint/typecheck/test/bench/run
 ├── src/data_engine/
-│   ├── config.py                # env-based settings (deployment.md)
+│   ├── config.py                # environment-based settings
 │   ├── cli.py                   # CLI entry points (component 12)
-│   ├── api/                     # component 1: FastAPI app, routers, schemas (Pydantic = contract)
-│   │   ├── app.py  routers/  schemas/  errors.py
+│   ├── api/                     # component 1: FastAPI app, routers, schemas
+│   │   └── app.py
 │   ├── catalog/                 # component 2: repositories, models, migrations
-│   │   ├── models.py  repositories/  migrations/
+│   │   ├── repository.py  migrations/
 │   ├── jobs/                    # components 3–4: queue, scheduler, worker, lifecycle
-│   │   ├── queue.py  scheduler.py  worker.py  state.py  retry.py
+│   │   ├── queue.py  contracts.py  state.py
 │   ├── ingest/                  # component 5: readers + registration
-│   │   ├── service.py  readers/{mcap.py,lerobot.py,base.py}
-│   ├── validation/              # component 6: profile engine, rules, reason codes
-│   │   ├── profiles.py  rules/  quarantine.py
-│   ├── indexing/                # component 7: metadata/stats extraction, parquet export
-│   ├── builds/                  # component 8: selection queries, planner, exporter, manifests
-│   │   ├── selection.py  planner.py  export_lerobot.py  manifest.py
+│   │   └── readers/             # base.py; MCAP/LeRobot implementations follow
+│   ├── validation/              # component 6: profile engine, rules, quarantine
+│   │   └── rules/
+│   ├── indexing/                # component 7: metadata/stats extraction, Parquet export
+│   ├── builds/                  # component 8: selection, planner, exporter, manifests
 │   ├── workloads/               # component 9: workload SDK + runner + registry
-│   │   ├── sdk.py  runner.py  registry.py
+│   │   └── sdk.py
 │   ├── storage/                 # component 10: content-addressed artifact store
-│   │   ├── artifacts.py  layout.py  gc.py
-│   └── observability/           # component 11: logging context, telemetry, metrics
-│       ├── logging.py  telemetry.py  metrics.py  reason_codes.py
+│   │   └── artifacts.py
+│   └── observability/           # component 11: logging context, telemetry, metrics, reason codes
+│       └── reason_codes.py
 ├── frontend/                    # component 13 (phase 12); consumes /api/v1 only
 ├── benchmarks/                  # component 14: harness + micro-benchmarks + baselines/
-│   ├── harness.py  bench_ingest.py  bench_validate.py  bench_query.py  bench_build.py
+│   ├── harness.py  baselines/
 ├── tests/
 │   ├── unit/  integration/  contract/  e2e/
-│   └── fixtures/                # tiny real-format fixtures (MCAP/LeRobot) — the only data committed
-├── docs/api/openapi.json        # committed API contract (drift-checked in CI)
-├── scripts/                     # repo tooling (check_repo_hygiene.py; one-command wrappers)
-└── .github/workflows/           # CI (fmt, lint, types, tests, coverage, hygiene, bench-regression)
+│   └── fixtures/                # tiny real-format fixtures — the only committed data
+├── docs/api/                    # committed OpenAPI contract (phase 05)
+├── scripts/                     # repository tooling (check_repo_hygiene.py)
+├── .env.example                 # safe placeholders; local .env is gitignored
+├── .github/workflows/           # CI (fmt, lint, types, tests, coverage, hygiene)
+└── .pre-commit-config.yaml      # pre-commit hooks (secrets, ruff, mypy, hygiene)
 ```
 
 Naming: package `data_engine` (the product: "robot episode data engine"); CLI `de`. Runtime state (`var/`, `.env`)
-is gitignored ([../spec/environment.md](../spec/environment.md) constraints apply to all tooling).
+is gitignored. Host-based local development and optional containers are recorded in
+[ADR 0012](../decisions/0012-host-based-development.md).
 
 ## Dependency direction rules
 
@@ -56,11 +61,11 @@ workloads (user/model code) ──► workloads/sdk ONLY
 catalog / storage / observability ──► (stdlib + drivers; no upward imports)
 ```
 
-- **No cycles.** Enforced by an import-linter check in CI (or a lightweight test if the tool proves heavy — decide at
-  phase 04, record in implementation docs).
+- **No cycles.** No import-linter dependency added in phase 04: the package is a small modular monolith with no feature
+  modules yet. Enforce boundaries in review/tests; add a lightweight import check only when modules exist to violate them.
 - `api/` contains no business logic; `catalog/` contains no orchestration; `jobs/` knows nothing about formats.
 - Readers/plugins extend via registries (`ingest/readers/`, `validation/rules/`, `workloads/registry.py`) — adding a
-  format/rule/workload touches its own module + tests only (api.md internal interfaces).
+  format/rule/workload touches its own module + tests only ([api.md](api.md) internal interfaces).
 
 ## Where new code belongs (cheat sheet)
 
