@@ -11,8 +11,15 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from pydantic import ValidationError
+
 from benchmarks.provenance import ROOT, collect_provenance
-from benchmarks.schema import BenchmarkResult, Trial
+from benchmarks.schema import (
+    BaselineDocument,
+    BaselineHardwareProfile,
+    BenchmarkResult,
+    Trial,
+)
 from benchmarks.statistics import summarize
 from data_engine.ingest.service import SyntheticEpisodeIngestService
 from data_engine.observability.telemetry import sample_resources
@@ -21,6 +28,11 @@ from data_engine.storage.artifacts import FileArtifactStore
 BASELINE_DIR = ROOT / "benchmarks" / "baselines"
 RESULTS_DIR = ROOT / "benchmarks" / "results"
 DEFAULT_BASELINE = BASELINE_DIR / "synthetic-ingest-windows.json"
+
+
+class BaselineFormatError(ValueError):
+    """A baseline file is missing, unreadable, or does not match the baseline schema."""
+
 
 SYNTHETIC_EPISODE: dict[str, Any] = {
     "task": "bench_pick_place",
@@ -135,47 +147,78 @@ def validate_result_file(path: Path) -> BenchmarkResult:
     return BenchmarkResult.model_validate(data)
 
 
+def _hardware_profile(result: BenchmarkResult) -> dict[str, Any]:
+    return BaselineHardwareProfile(
+        cpu=result.provenance.hardware.cpu,
+        logical_cpus=result.provenance.hardware.logical_cpus,
+        ram_bytes=result.provenance.hardware.ram_bytes,
+        disk=result.provenance.hardware.disk,
+        gpu=result.provenance.hardware.gpu,
+        os=result.provenance.software.os,
+    ).model_dump(mode="json")
+
+
 def baseline_document(result: BenchmarkResult) -> dict[str, Any]:
     return {
         "schema_version": 1,
         "benchmark": result.benchmark.model_dump(),
-        "hardware_profile": {
-            "cpu": result.provenance.hardware.cpu,
-            "logical_cpus": result.provenance.hardware.logical_cpus,
-            "ram_bytes": result.provenance.hardware.ram_bytes,
-            "disk": result.provenance.hardware.disk,
-            "gpu": result.provenance.hardware.gpu.model_dump()
-            if result.provenance.hardware.gpu
-            else None,
-            "os": result.provenance.software.os,
-        },
-        "summary": result.summary.model_dump(),
+        "hardware_profile": _hardware_profile(result),
+        "summary": result.summary.model_dump(mode="json"),
         "config": result.config,
         "source_run_id": str(result.run_id),
     }
 
 
+def load_baseline(path: Path) -> BaselineDocument:
+    """Parse and validate a committed baseline, reporting the file and the offending field.
+
+    Raises BaselineFormatError (a ValueError) rather than KeyError/ValidationError so a
+    malformed baseline reads as a baseline problem, not a harness bug.
+    """
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError as exc:
+        raise BaselineFormatError(
+            f"baseline {path} does not exist. Create one deliberately with "
+            "`just bench --write-baseline --baseline <path>` after an authorized measurement."
+        ) from exc
+    except json.JSONDecodeError as exc:
+        raise BaselineFormatError(
+            f"baseline {path} is not valid JSON: {exc.msg} (line {exc.lineno})"
+        ) from exc
+    try:
+        return BaselineDocument.model_validate(raw)
+    except ValidationError as exc:
+        problems = "; ".join(
+            f"{'.'.join(str(part) for part in error['loc']) or '<root>'}: {error['msg']}"
+            for error in exc.errors()
+        )
+        raise BaselineFormatError(
+            f"baseline {path} does not match the baseline schema: {problems}"
+        ) from exc
+
+
 def compare_to_baseline(
     result: BenchmarkResult, baseline_path: Path = DEFAULT_BASELINE
 ) -> dict[str, Any]:
-    baseline = json.loads(baseline_path.read_text(encoding="utf-8"))
-    expected = baseline["benchmark"]
-    if result.benchmark.name != expected["name"] or result.benchmark.version != expected["version"]:
+    baseline = load_baseline(baseline_path)
+    if (
+        result.benchmark.name != baseline.benchmark.name
+        or result.benchmark.version != baseline.benchmark.version
+    ):
         raise ValueError("result benchmark name/version does not match baseline")
-    expected_hardware = baseline["hardware_profile"]
-    actual_hardware = {
-        "cpu": result.provenance.hardware.cpu,
-        "logical_cpus": result.provenance.hardware.logical_cpus,
-        "ram_bytes": result.provenance.hardware.ram_bytes,
-        "disk": result.provenance.hardware.disk,
-        "gpu": result.provenance.hardware.gpu.model_dump()
-        if result.provenance.hardware.gpu
-        else None,
-        "os": result.provenance.software.os,
-    }
-    if actual_hardware != expected_hardware:
-        raise ValueError("result hardware profile does not match baseline")
-    baseline_p50 = float(baseline["summary"]["p50_seconds"])
+    actual_hardware = _hardware_profile(result)
+    if actual_hardware != baseline.hardware_profile.model_dump(mode="json"):
+        differing = sorted(
+            key
+            for key in actual_hardware
+            if actual_hardware[key] != baseline.hardware_profile.model_dump(mode="json")[key]
+        )
+        raise ValueError(
+            "result hardware profile does not match baseline; differing fields: "
+            + ", ".join(differing)
+        )
+    baseline_p50 = baseline.summary.p50_seconds
     current_p50 = result.summary.p50_seconds
     delta = current_p50 - baseline_p50
     percent = (delta / baseline_p50) if baseline_p50 else 0.0

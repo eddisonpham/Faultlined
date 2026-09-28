@@ -86,6 +86,28 @@ class BenchmarkFailure(StrictModel):
     message: str = Field(min_length=1)
 
 
+class BaselineHardwareProfile(StrictModel):
+    """Hardware identity a baseline is valid for; compared exactly before any timing check."""
+
+    cpu: str = Field(min_length=1)
+    logical_cpus: int = Field(ge=1)
+    ram_bytes: int = Field(gt=0)
+    disk: str = Field(min_length=1)
+    gpu: GPUInfo | None
+    os: str = Field(min_length=1)
+
+
+class BaselineDocument(StrictModel):
+    """Committed baseline file: a small, validated slice of one benchmark result."""
+
+    schema_version: Literal[1] = 1
+    benchmark: BenchmarkIdentity
+    hardware_profile: BaselineHardwareProfile
+    summary: ResultSummary
+    config: dict[str, Any]
+    source_run_id: UUID
+
+
 class BenchmarkResult(StrictModel):
     schema_version: Literal[2]
     run_id: UUID

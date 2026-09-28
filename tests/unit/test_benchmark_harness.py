@@ -5,7 +5,9 @@ from uuid import uuid4
 
 import pytest
 from benchmarks.harness import (
+    BaselineFormatError,
     compare_to_baseline,
+    load_baseline,
     persist_result,
     run_benchmark,
     validate_result_file,
@@ -195,8 +197,71 @@ def test_baseline_comparison_rejects_other_hardware(tmp_path: Path) -> None:
     changed_payload = _result().model_dump(mode="json")
     changed_payload["provenance"]["hardware"]["logical_cpus"] += 1
     changed = BenchmarkResult.model_validate(changed_payload)
-    with pytest.raises(ValueError, match="hardware profile"):
+    with pytest.raises(ValueError, match="logical_cpus"):
         compare_to_baseline(changed, baseline_path)
+
+
+@pytest.mark.unit
+def test_missing_baseline_explains_how_to_create_one(tmp_path: Path) -> None:
+    with pytest.raises(BaselineFormatError) as error:
+        compare_to_baseline(_result(), tmp_path / "absent.json")
+    message = str(error.value)
+    assert "does not exist" in message
+    assert "--write-baseline" in message
+
+
+@pytest.mark.unit
+def test_malformed_baseline_json_reports_file_and_position(tmp_path: Path) -> None:
+    baseline_path = tmp_path / "baseline.json"
+    baseline_path.write_text("{not json", encoding="utf-8")
+    with pytest.raises(BaselineFormatError) as error:
+        compare_to_baseline(_result(), baseline_path)
+    assert "not valid JSON" in str(error.value)
+    assert str(baseline_path) in str(error.value)
+
+
+@pytest.mark.unit
+def test_baseline_missing_required_field_names_the_field(tmp_path: Path) -> None:
+    baseline_path = write_baseline(_result(), tmp_path / "baseline.json")
+    document = json.loads(baseline_path.read_text(encoding="utf-8"))
+    del document["hardware_profile"]
+    baseline_path.write_text(json.dumps(document), encoding="utf-8")
+
+    with pytest.raises(BaselineFormatError) as error:
+        compare_to_baseline(_result(), baseline_path)
+    message = str(error.value)
+    assert "does not match the baseline schema" in message
+    assert "hardware_profile" in message
+
+
+@pytest.mark.unit
+def test_baseline_with_wrong_field_type_is_rejected(tmp_path: Path) -> None:
+    baseline_path = write_baseline(_result(), tmp_path / "baseline.json")
+    document = json.loads(baseline_path.read_text(encoding="utf-8"))
+    document["summary"]["p50_seconds"] = "fast"
+    baseline_path.write_text(json.dumps(document), encoding="utf-8")
+
+    with pytest.raises(BaselineFormatError) as error:
+        compare_to_baseline(_result(), baseline_path)
+    assert "p50_seconds" in str(error.value)
+
+
+@pytest.mark.unit
+def test_baseline_rejects_unknown_fields(tmp_path: Path) -> None:
+    baseline_path = write_baseline(_result(), tmp_path / "baseline.json")
+    document = json.loads(baseline_path.read_text(encoding="utf-8"))
+    document["unexpected"] = True
+    baseline_path.write_text(json.dumps(document), encoding="utf-8")
+
+    with pytest.raises(BaselineFormatError, match="unexpected"):
+        compare_to_baseline(_result(), baseline_path)
+
+
+@pytest.mark.unit
+def test_written_baseline_round_trips_through_validation(tmp_path: Path) -> None:
+    baseline_path = write_baseline(_result(0.01), tmp_path / "baseline.json")
+    assert load_baseline(baseline_path).benchmark.name == "test-bench"
+    assert compare_to_baseline(_result(0.01), baseline_path)["regression"] is False
 
 
 @pytest.mark.unit
