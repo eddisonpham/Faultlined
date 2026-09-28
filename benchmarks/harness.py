@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 import time
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -314,7 +315,12 @@ def main(argv: list[str] | None = None) -> None:
             )
         )
         raise SystemExit(1)
-    comparison = compare_to_baseline(result, args.baseline)
+    try:
+        comparison = compare_to_baseline(result, args.baseline)
+    except BaselineFormatError as exc:
+        print(f"benchmark comparison skipped: {exc}", file=sys.stderr)
+        print(f"raw result preserved at {output}", file=sys.stderr)
+        raise SystemExit(1) from exc
     print(
         json.dumps(
             {

@@ -265,6 +265,55 @@ def test_written_baseline_round_trips_through_validation(tmp_path: Path) -> None
 
 
 @pytest.mark.unit
+def test_main_reports_missing_baseline_without_traceback(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from benchmarks import harness
+
+    result = _result(0.01)
+
+    def _fake_persist(_result: BenchmarkResult, directory: Path | None = None) -> Path:
+        return tmp_path / "r.json"
+
+    monkeypatch.setattr(harness, "_ingest_microbenchmark", lambda: result)
+    monkeypatch.setattr(harness, "persist_result", _fake_persist)
+    monkeypatch.setattr(harness, "RESULTS_DIR", tmp_path)
+
+    with pytest.raises(SystemExit) as exit_info:
+        harness.main(["--baseline", str(tmp_path / "absent.json")])
+
+    assert exit_info.value.code == 1
+    captured = capsys.readouterr()
+    assert "comparison skipped" in captured.err
+    assert "does not exist" in captured.err
+    assert "Traceback" not in captured.err
+
+
+@pytest.mark.unit
+def test_main_refuses_to_write_baseline_from_failed_result(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from benchmarks import harness
+
+    payload = _result().model_dump(mode="json")
+    payload["trials"][0]["success"] = False
+    payload["summary"]["failure_count"] = 1
+    payload["status"] = "failed"
+    payload["failure"] = {"type": "TrialFailure", "message": "one trial failed"}
+    failed = BenchmarkResult.model_validate(payload)
+
+    def _fake_persist(_result: BenchmarkResult, directory: Path | None = None) -> Path:
+        return tmp_path / "r.json"
+
+    monkeypatch.setattr(harness, "_ingest_microbenchmark", lambda: failed)
+    monkeypatch.setattr(harness, "persist_result", _fake_persist)
+
+    with pytest.raises(SystemExit, match="failed benchmark result"):
+        harness.main(["--write-baseline", "--baseline", str(tmp_path / "b.json")])
+    assert not (tmp_path / "b.json").exists()
+
+
+@pytest.mark.unit
 def test_failed_trial_result_is_consistent_and_invalid_success_is_rejected() -> None:
     payload = _result().model_dump(mode="json")
     payload["trials"][1]["success"] = False
