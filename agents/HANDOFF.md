@@ -85,13 +85,15 @@ JSON logs and correlation IDs flow across the current API → persisted job → 
 
 ## 13. Baseline runbook (owner green flag required)
 
+**Status: executed 2026-09-28 with owner authorization.** Baseline written at commit `f7ffbeb` (clean tree); verify pass reported no regression. One defect was found and fixed in this runbook while executing it: the command originally wrote a SHA-named file, but `DEFAULT_BASELINE` in `benchmarks/harness.py` is the fixed path `synthetic-ingest-windows.json`, so a SHA-named file would never be read by bare `just bench` and step 4 would have failed. Always write the default path, or pass the same `--baseline` to both invocations.
+
 Do not start until the owner authorizes a measured baseline. Preconditions: a committed, clean tree; the machine you
 will measure on must stay idle; nothing else heavy may run during the measurement.
 
 ```bash
 just ci                                  # 1. all gates green before measuring
 git status --short                       # 2. must be empty (provenance records dirty state)
-just bench --write-baseline --baseline benchmarks/baselines/synthetic-ingest-$(git rev-parse --short HEAD).json
+just bench --write-baseline             # 3. writes benchmarks/baselines/synthetic-ingest-windows.json (the fixed default)
 just bench                               # 4. re-run: must now compare and report no regression
 ```
 

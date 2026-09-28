@@ -1,10 +1,10 @@
 # Benchmark Backlog
 
-Planned metrics and workloads. No real benchmark baseline or experiment has been committed yet. Move a metric to an experiment record only after collecting a result with complete provenance and a reviewed baseline where applicable.
+Planned metrics and workloads. One baseline is committed (B-001, [EXP-0001](../experiments/0001-synthetic-ingest-baseline.md)); the rest are unmeasured. Move a metric to an experiment record only after collecting a result with complete provenance and a reviewed baseline where applicable.
 
 | ID | Benchmark / metric | Question it answers | Metrics | Status |
 |---|---|---|---|---|
-| B-001 | Synthetic episode ingest microbenchmark | What is the local overhead of canonicalizing one small synthetic JSON episode and writing it to the filesystem artifact store? | Per-trial latency P50/P95/P99, mean, standard deviation, bootstrap CI; failure count; host samples | Harness implemented (`synthetic-episode-ingest`); baseline not measured/committed; catalog is in-memory, so this is not DB/API/MCAP throughput |
+| B-001 | Synthetic episode ingest microbenchmark | What is the local overhead of canonicalizing one small synthetic JSON episode and writing it to the filesystem artifact store? | Per-trial latency P50/P95/P99, mean, standard deviation, bootstrap CI; failure count; host samples | Baseline measured and committed 2026-09-28 (P50 0.6084 ms, 10 trials, 0 failures); catalog is in-memory, so this is not DB/API/MCAP throughput. Caveat: ~24% run-to-run spread at a 199-byte payload makes it a regression tripwire, not a performance target |
 | B-002 | MCAP streaming ingest throughput | Can one worker sustain the provisional 50 MB/s target on local NVMe for realistic robot episodes? | MB/s, CPU/RAM, disk read/write, failure rate | Not implemented; requires a versioned controlled MCAP fixture and real reader |
 | B-003 | LeRobot directory ingest | What are parse and registration costs for a real LeRobot v3 episode dataset? | Episodes/s, latency percentiles, CPU/RAM/disk, failure rate | Not implemented; requires reader and fixed dataset subset |
 | B-004 | API enqueue-to-worker-start queue time | How long does an accepted job wait before execution at varying queue depth? | Queue-time P50/P95/P99, enqueue throughput, failure rate | `jobs_queue_depth` and `jobs_queue_time_seconds` are emitted to the JSONL sink, but nothing aggregates them into a benchmark result and no baseline exists; retries/leases are not implemented |
@@ -18,4 +18,4 @@ Planned metrics and workloads. No real benchmark baseline or experiment has been
 
 ## Current harness boundaries
 
-`benchmarks/harness.py` runs three warmups and ten measured trials for a synthetic in-memory catalog plus real local filesystem artifact store. It preserves raw trial latencies and host resource snapshots. The checked-in baseline directory intentionally contains only `.gitkeep`; `just bench` currently needs a reviewed baseline file and otherwise fails after writing an ignored raw result. Do not treat the unit test invoking this function as a published performance result.
+`benchmarks/harness.py` runs three warmups and ten measured trials for a synthetic in-memory catalog plus real local filesystem artifact store. It preserves raw trial latencies and host resource snapshots. `DEFAULT_BASELINE` is the fixed path `benchmarks/baselines/synthetic-ingest-windows.json`; a baseline is committed there and `just bench` compares against it. Raw per-run results stay ignored under `benchmarks/results/`, so a committed baseline's `source_run_id` resolves only on the measuring machine. Do not treat the unit test invoking this function as a published performance result.

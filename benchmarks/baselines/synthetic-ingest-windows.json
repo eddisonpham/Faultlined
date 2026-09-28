@@ -1,0 +1,42 @@
+{
+  "benchmark": {
+    "name": "synthetic-episode-ingest",
+    "version": "1.0.0"
+  },
+  "config": {
+    "database": "in-memory benchmark catalog; production filesystem artifact store",
+    "payload_bytes": 199,
+    "trials": 10,
+    "warmups": 3,
+    "workers": 1
+  },
+  "hardware_profile": {
+    "cpu": "Intel64 Family 6 Model 198 Stepping 2, GenuineIntel",
+    "disk": "C:\\",
+    "gpu": {
+      "driver": "available",
+      "memory_total_bytes": 8546942976,
+      "model": "NVIDIA GPU (NVML)"
+    },
+    "logical_cpus": 24,
+    "os": "Windows-11-10.0.26200-SP0",
+    "ram_bytes": 33752997888
+  },
+  "schema_version": 1,
+  "source_run_id": "4e98cf6f-6e2a-4325-ae6c-32366141653e",
+  "summary": {
+    "ci95_mean_seconds": [
+      0.00048622000613249836,
+      0.0006314700236544013
+    ],
+    "failure_count": 0,
+    "mean_seconds": 0.0005741300119552761,
+    "n": 10,
+    "p50_seconds": 0.0006084000342525542,
+    "p95_seconds": 0.0006720999954268336,
+    "p99_seconds": 0.0006720999954268336,
+    "stddev_seconds": 0.00012720303087317885,
+    "warmup_count": 3,
+    "warmup_failure_count": 0
+  }
+}

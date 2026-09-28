@@ -15,7 +15,7 @@
 - [❌] Gates pass locally (91 passed, 3 skipped, 91.34% coverage) but a **clean clone was not verified**.
 - [✅] Coverage gate remains 70% in `pyproject.toml` per ADR 0011; actual coverage is well above it.
 - [✅] Failure-mode catalog distinguishes planned, partial, and covered scenarios in `testing/failure-modes.md`.
-- [❌] Benchmark acceptance is **incomplete by design**: schema/harness/statistics/provenance are implemented and tested, but no baseline or measured experiment exists. `just bench` exits 1 with an actionable message (finding 1).
+- [x] Benchmark acceptance is **complete**: schema/harness/statistics/provenance implemented and tested, and a measured baseline is committed with full provenance. `just bench` now compares successfully and exits 0 (finding 1).
 - [✅] Observability matches conventions: structured logs, correlation IDs, host/GPU telemetry with nullable fallbacks, and **runtime metrics now emitted at their call sites** (finding 4).
 - [❌] Full secrets audit incomplete: current-tree hygiene passes; no history-wide `git log -p` or gitleaks scan. No `.env` was opened.
 - [❌] Definition of done not met: baseline, clean-clone review, and accepted handoff remain open.
@@ -25,7 +25,7 @@
 
 | # | Severity | Finding | Resolution | Status |
 |---|---|---|---|---|
-| 1 | blocker | No committed benchmark baseline. `just bench` could not compare on a clean clone. | **Awaiting owner authorization.** Harness is ready; the missing-baseline path now prints one actionable line, preserves the raw result, and exits 1. A measured run is blocked only on authorization, not on tooling. | open — needs green flag |
+| 1 | blocker | No committed benchmark baseline. `just bench` could not compare on a clean clone. | **Resolved 2026-09-28** with owner authorization: baseline written at `f7ffbeb` on a clean tree, verification pass reports no regression. Executing the runbook also exposed a defect in it — it wrote a SHA-named file while `DEFAULT_BASELINE` is a fixed path, so step 4 would have failed; the runbook is corrected. | closed |
 | 2 | major | Harness did not fail closed on failed trials; summaries and resource references were not cross-checked; warmup failures aborted with no result. | `f764f74`/`e9dd126`: status, indices, references, percentiles, mean/stddev, and failure count are validated; warmup failures persist as failed results with zero trials; failed results cannot produce a baseline. Tests cover each path. | **resolved** |
 | 3 | major | Baseline comparison ignored hardware compatibility. | Exact CPU/logical-CPU/RAM/GPU/OS/disk match with field-level difference reporting. Note for later: exact matching may be too strict across equivalent machines; revisit with evidence. | **resolved** (strictness noted) |
 | 4 | major | Host psutil errors propagated; metric primitives had no call sites, so the registry was documentation only. | Nullable host fields with tests; `RuntimeMetrics` wired to worker and ingest call sites emitting queue depth, queue/run time, stage duration, failures, and ingest counters, with a non-fatal sink guarantee. | **resolved** |
