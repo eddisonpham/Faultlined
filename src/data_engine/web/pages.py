@@ -1,14 +1,13 @@
-"""Minimal server-rendered UI for the MVP Status / Jobs / Artifacts slice.
+"""Server-rendered UI for the MVP Status / Jobs / Artifacts slice.
 
-Per ADR 0014 this is plain server-rendered HTML plus vanilla-JS polling: no
-framework, no bundler, no new runtime dependency. The pages read only the
-application's own HTTP surface and never touch PostgreSQL or the artifact store
-directly. Visual design is still deferred to the phase-12 pass; this establishes
-mechanism and information, not style.
+Per ADR 0014 this is server-rendered HTML with vanilla-JS polling: no framework,
+no bundler, no build step, and no JavaScript dependency. The terminal/instrument
+vocabulary comes from a vendored stylesheet (see vendor/terminal-ui/NOTICE.md);
+this module owns layout, semantics, and escaping.
 
-Polling re-requests the same page with ``?fragment=1`` and swaps the returned
+Polling re-requests the same page with ``X-Fragment: 1`` and swaps the returned
 HTML. The alternative, re-rendering JSON in JavaScript, would mean writing every
-row twice; the fragment keeps Python as the only renderer.
+row twice and two renderers eventually disagreeing.
 """
 
 from __future__ import annotations
@@ -18,44 +17,122 @@ from html import escape
 from pathlib import Path
 from typing import Any
 
-STYLESHEET = Path(__file__).with_name("faultlined.css")
-STYLESHEET_URL = "/ui/faultlined.css"
+HERE = Path(__file__).parent
+VENDOR = HERE / "vendor" / "terminal-ui"
+CORE_URL = "/ui/vendor/terminal-ui/core.css"
+THEME_URL = "/ui/vendor/terminal-ui/theme-{name}.css"
+LAYOUT_URL = "/ui/faultlined.css"
+
+# Upstream ships more themes; these four are vendored. See vendor/terminal-ui/NOTICE.md.
+THEMES = ("vt220", "amber", "github-dark", "monochrome")
+DEFAULT_THEME = "vt220"
 
 NAV_LINKS = (
-    ("/", "Status"),
+    ("/ui", "Status"),
     ("/ui/jobs", "Jobs"),
     ("/ui/artifacts", "Artifacts"),
     ("/docs", "API"),
 )
 
+JOB_STATES = ("queued", "running", "retrying", "succeeded", "failed", "canceled", "timed_out")
+ACTIVE_STATES = ("queued", "running", "retrying", "cancel_requested")
 
-def stylesheet() -> str:
-    return STYLESHEET.read_text(encoding="utf-8")
+# Progress a job is expected to pass through, for the detail strip.
+STRIP_STEPS = ("queued", "running", "succeeded")
 
 
-def _nav(active: str) -> str:
+def vendor_css(name: str) -> str:
+    return (VENDOR / name).read_text(encoding="utf-8")
+
+
+def layout_css() -> str:
+    return (HERE / "faultlined.css").read_text(encoding="utf-8")
+
+
+def _theme(name: str | None) -> str:
+    return name if name in THEMES else DEFAULT_THEME
+
+
+def _nav(active: str, theme: str) -> str:
     links = " ".join(
-        f'<a href="{href}"{' class="on"' if href == active else ""}>{label}</a>'
+        f'<a href="{href}"{' aria-current="page"' if href == active else ""}>{label}</a>'
         for href, label in NAV_LINKS
     )
-    return f"<nav>{links}</nav>"
-
-
-def _page(title: str, active: str, body: str, script: str = "") -> str:
-    head = '<link rel="stylesheet" href="' + STYLESHEET_URL + '">'
-    return (
-        '<!doctype html><html lang="en"><head><meta charset="utf-8">'
-        f"<title>{escape(title)} - Faultlined</title>"
-        '<meta name="viewport" content="width=device-width,initial-scale=1">'
-        f"{head}</head><body>{_nav(active)}"
-        f"<h1>{escape(title)}</h1>{body}"
-        f"<script>{script}</script></body></html>"
+    options = "".join(
+        f'<option value="{t}"{" selected" if t == theme else ""}>{t}</option>' for t in THEMES
     )
+    return (
+        '<nav class="de-nav">'
+        '<span class="de-brand">Faultlined<span> / data engine</span></span>'
+        f"{links}"
+        '<span class="de-spacer"></span>'
+        f'<form method="get" action="{active}"><select class="de-theme" name="theme" '
+        f'onchange="this.form.submit()">{options}</select></form>'
+        "</nav>"
+    )
+
+
+def _page(title: str, active: str, body: str, theme: str, script: str = "") -> str:
+    return (
+        '<!doctype html><html lang="en" data-theme="' + theme + '">'
+        '<head><meta charset="utf-8">'
+        f"<title>{escape(title)} // Faultlined</title>"
+        '<meta name="viewport" content="width=device-width,initial-scale=1">'
+        f'<link rel="stylesheet" href="{CORE_URL}">'
+        f'<link rel="stylesheet" href="{THEME_URL.format(name=theme)}">'
+        f'<link rel="stylesheet" href="{LAYOUT_URL}">'
+        f'</head><body><div class="de-shell">{_nav(active, theme)}'
+        f'<div class="de-head"><h1>{escape(title)}</h1>'
+        '<span class="de-clock" data-clock>--:--:--</span></div>'
+        f"{body}"
+        f"<script>{script}</script></div></body></html>"
+    )
+
+
+# ---------------------------------------------------------------- primitives
+
+
+def _readouts(pairs: list[tuple[str, str, str]]) -> str:
+    cells = "".join(
+        f'<div class="de-readout"><dt>{escape(label)}</dt>'
+        f"<dd>{value}<small>{escape(unit)}</small></dd></div>"
+        for label, value, unit in pairs
+    )
+    return f'<dl class="de-readouts">{cells}</dl>'
+
+
+def _meter(fraction: float, width: int = 24) -> str:
+    """ASCII meter, e.g. [#########.............] 38%."""
+    filled = max(0, min(width, round(fraction * width)))
+    return (
+        f'<span class="de-meter">[{"#" * filled}'
+        f'<span class="off">{"." * (width - filled)}</span>] '
+        f"{round(fraction * 100)}%</span>"
+    )
+
+
+def _state_badge(state: str) -> str:
+    css = {
+        "succeeded": "success",
+        "failed": "error",
+        "timed_out": "error",
+        "canceled": "comment",
+        "cancel_requested": "warning",
+        "running": "info",
+        "retrying": "warning",
+    }.get(state, "comment")
+    return f'<span class="text-{css}">{escape(state)}</span>'
+
+
+def _when(value: Any) -> str:
+    if not value:
+        return '<span class="text-comment">-</span>'
+    return escape(str(value))[:19].replace("T", " ")
 
 
 def _bytes(value: Any) -> str:
     if value is None:
-        return '<span class="muted">n/a</span>'
+        return "n/a"
     size = float(value)
     for unit in ("B", "KiB", "MiB", "GiB", "TiB"):
         if abs(size) < 1024 or unit == "TiB":
@@ -64,23 +141,25 @@ def _bytes(value: Any) -> str:
     return f"{size:.1f} TiB"
 
 
-def _state(state: str) -> str:
-    css = {"succeeded": "s", "failed": "f", "canceled": "q", "timed_out": "c"}.get(state, "")
-    return f'<span class="{css}">{escape(state)}</span>' if css else escape(state)
-
-
-def _when(value: Any) -> str:
-    if not value:
-        return '<span class="muted">-</span>'
-    return escape(str(value))[:19].replace("T", " ")
-
-
 def _pretty(value: Any) -> str:
     try:
         return json.dumps(value, indent=2, default=str)[:4000]
     except TypeError, ValueError:
         return str(value)
 
+
+_CLOCK_JS = """
+(function () {
+  var el = document.querySelector('[data-clock]');
+  if (!el) return;
+  var tick = function () {
+    var d = new Date();
+    el.textContent = d.toISOString().slice(11, 19) + ' UTC';
+  };
+  tick();
+  setInterval(tick, 1000);
+})();
+"""
 
 # Intervals follow agents/architecture/frontend.md: jobs list 3 s, detail 5 s,
 # and polling pauses while the tab is hidden.
@@ -99,156 +178,198 @@ _POLL_JS = """
 """
 
 
-def _poll_js(url: str, ms: int) -> str:
-    return _POLL_JS % (json.dumps(url), ms)
+def _script(url: str | None, ms: int) -> str:
+    return _CLOCK_JS + ("" if url is None else _POLL_JS % (json.dumps(url), ms))
 
 
-def status_page(initial: dict[str, Any]) -> str:
-    body = _status_body(initial)
-    return _page(
-        "Status",
-        "/",
-        '<p class="sub">Health, queue depth, and host telemetry. Refreshes every 3 s.</p>'
-        f"<div data-poll>{body}</div>",
-        _poll_js("/ui", 3000),
-    )
+# ---------------------------------------------------------------- status
 
 
-def status_fragment(data: dict[str, Any]) -> str:
-    return _status_body(data)
-
-
-def _status_body(data: dict[str, Any]) -> str:
-    res = data.get("resources", {})
-    depth = data.get("queue_depth", {})
-    active = sum(depth.get(k, 0) for k in ("queued", "running", "retrying", "cancel_requested"))
-    gpu = res.get("gpu_model") or ("present" if res.get("gpu_present") else "none")
-    cards = [
-        ("Health", '<span class="s">ok</span>'),
-        ("Active jobs", str(active)),
-        ("Artifacts", str(data.get("artifact_count", 0))),
-        ("Episodes", str(data.get("episode_count", 0))),
-        ("CPU", f"{res['cpu_percent']}%" if res.get("cpu_percent") is not None else "n/a"),
-        ("Memory", _bytes(res.get("memory_used_bytes"))),
-        ("Disk free", _bytes(res.get("disk_free_bytes"))),
-        ("GPU", escape(str(gpu))),
-    ]
-    grid = "".join(
-        f'<div class="card"><div class="k">{k}</div><div class="v">{v}</div></div>'
-        for k, v in cards
-    )
-    rows = "".join(f"<tr><td>{escape(str(k))}</td><td>{v}</td></tr>" for k, v in depth.items())
-    return (
-        f'<div class="grid">{grid}</div><h2>Queue depth by state</h2>'
-        f"<table><thead><tr><th>State</th><th>Jobs</th></tr></thead><tbody>{rows}</tbody></table>"
-    )
-
-
-def jobs_page(initial: dict[str, Any], state_filter: str | None) -> str:
-    query = f"&state={state_filter}" if state_filter else ""
-    fragment_url = "/ui/jobs" + (f"?state={state_filter}" if state_filter else "")
+def status_page(model: dict[str, Any], theme: str) -> str:
     body = (
-        '<p class="sub">Newest first. Refreshes every 3 s.</p>'
-        f'<form method="get" action="/ui/jobs"><label for="s">State</label>'
-        '<select id="s" name="state" onchange="this.form.submit()">'
-        f"{_options(state_filter)}</select>"
-        "</form>"
-        f"<div data-poll>{_jobs_body(initial)}</div>"
+        f'<p class="de-sub">live telemetry // poll 3s</p><div data-poll>{_status_body(model)}</div>'
     )
-    del query
-    return _page("Jobs", "/ui/jobs", body, _poll_js(fragment_url, 3000))
+    return _page("Status", "/ui", body, theme, _script("/ui", 3000))
 
 
-def jobs_fragment(initial: dict[str, Any]) -> str:
-    return _jobs_body(initial)
+def status_fragment(model: dict[str, Any]) -> str:
+    return _status_body(model)
+
+
+def _status_body(model: dict[str, Any]) -> str:
+    res = model.get("resources", {})
+    depth = model.get("queue_depth", {})
+    artifacts = int(model.get("artifact_count", 0))
+    episodes = int(model.get("episode_count", 0))
+    total_jobs = sum(int(v) for v in depth.values())
+    active = sum(int(depth.get(k, 0)) for k in ACTIVE_STATES)
+    cpu = res.get("cpu_percent")
+    mem = res.get("memory_used_bytes")
+    disk = res.get("disk_free_bytes")
+    gpu = res.get("gpu_model") or ("present" if res.get("gpu_present") else "absent")
+
+    readouts = _readouts(
+        [
+            ("health", '<span class="text-success">ok</span>', ""),
+            ("active jobs", str(active), f"/ {total_jobs}"),
+            ("artifacts", str(artifacts), ""),
+            ("episodes", str(episodes), ""),
+            ("cpu", f"{cpu:.1f}" if cpu is not None else "n/a", "%"),
+            ("memory", escape(_bytes(mem)), ""),
+            ("disk free", escape(_bytes(disk)), ""),
+            ("gpu", escape(str(gpu)), ""),
+        ]
+    )
+
+    peak = max([int(v) for v in depth.values()] + [1])
+    rows = "".join(
+        f'<tr><td>{escape(str(k))}</td><td class="num">{v}</td>'
+        f"<td>{_meter(int(v) / peak)}</td></tr>"
+        for k, v in depth.items()
+    )
+    queue = (
+        '<section class="de-section"><h2>Queue depth by state</h2>'
+        '<table class="de-table"><thead><tr><th>State</th><th class="num">Jobs</th>'
+        f"<th>Load</th></tr></thead><tbody>{rows}</tbody></table></section>"
+    )
+
+    return readouts + queue
+
+
+# ---------------------------------------------------------------- jobs
+
+
+def jobs_page(model: dict[str, Any], state_filter: str | None, theme: str) -> str:
+    query = f"?state={escape(state_filter)}" if state_filter else ""
+    body = (
+        '<p class="de-sub">newest first // poll 3s</p>'
+        f'<form class="de-filters" method="get" action="/ui/jobs">'
+        '<label for="state">filter</label>'
+        '<select id="state" name="state" onchange="this.form.submit()">'
+        f"{_options(state_filter)}</select>"
+        '<button type="submit">apply</button></form>'
+        f"<div data-poll>{_jobs_body(model)}</div>"
+    )
+    return _page("Jobs", "/ui/jobs", body, theme, _script("/ui/jobs" + query, 3000))
+
+
+def jobs_fragment(model: dict[str, Any]) -> str:
+    return _jobs_body(model)
 
 
 def _options(state_filter: str | None) -> str:
-    states = ("", "queued", "running", "succeeded", "failed", "canceled", "timed_out")
     return "".join(
         f'<option value="{s}"{" selected" if s == state_filter else ""}>{s or "all"}</option>'
-        for s in states
+        for s in ("", *JOB_STATES)
     )
 
 
-def _jobs_body(initial: dict[str, Any]) -> str:
-    rows = (
-        "".join(
-            "<tr>"
-            f'<td><a href="/ui/jobs/{escape(str(i["id"]))}">'
-            f"<code>{escape(str(i['id'])[:8])}</code></a></td>"
-            f"<td>{escape(str(i['type']))}</td>"
-            f"<td>{_state(str(i['state']))}</td>"
-            f"<td>{_when(i.get('created_at'))}</td>"
-            f"<td>{_when(i.get('finished_at'))}</td>"
-            f'<td class="muted"><code>{escape(str(i["correlation_id"])[:8])}</code></td>'
-            "</tr>"
-            for i in initial.get("items", [])
-        )
-        or '<tr><td colspan="6" class="muted">No jobs yet.</td></tr>'
+def _jobs_body(model: dict[str, Any]) -> str:
+    items = model.get("items", [])
+    if not items:
+        return '<p class="de-empty">// no jobs recorded</p>'
+    rows = "".join(
+        "<tr>"
+        f'<td><a href="/ui/jobs/{escape(str(i["id"]))}">{escape(str(i["id"])[:8])}</a></td>'
+        f"<td>{escape(str(i['type']))}</td>"
+        f"<td>{_state_badge(str(i['state']))}</td>"
+        f"<td>{_when(i.get('created_at'))}</td>"
+        f"<td>{_when(i.get('finished_at'))}</td>"
+        f'<td class="dim">{escape(str(i["correlation_id"])[:8])}</td>'
+        "</tr>"
+        for i in items
     )
     return (
-        "<table><thead><tr><th>Job</th><th>Type</th><th>State</th>"
-        f"<th>Created</th><th>Finished</th><th>Correlation</th></tr></thead>"
+        '<table class="de-table"><thead><tr><th>Job</th><th>Type</th><th>State</th>'
+        "<th>Queued</th><th>Finished</th><th>Trace</th></tr></thead>"
         f"<tbody>{rows}</tbody></table>"
     )
 
 
-def job_detail_page(job: dict[str, Any]) -> str:
-    timeline = " &rarr; ".join(
-        f"{label}: <code>{_when(job.get(field))}</code>"
-        for label, field in (
-            ("queued", "created_at"),
-            ("started", "started_at"),
-            ("finished", "finished_at"),
-        )
-    )
+# ---------------------------------------------------------------- job detail
+
+
+def _strip(state: str) -> str:
+    if state in ("failed", "timed_out", "canceled"):
+        steps = ("queued", "running", state)
+    else:
+        steps = STRIP_STEPS
+    parts = []
+    for step in steps:
+        cls = "now" if step == state else ("done" if steps.index(step) < steps.index(state) else "")
+        parts.append(f'<span class="step {cls}">{escape(step)}</span>')
+    return '<div class="de-strip">' + '<span class="sep">&rarr;</span>'.join(parts) + "</div>"
+
+
+def job_detail_page(job: dict[str, Any], theme: str) -> str:
+    state = str(job.get("state"))
+    facts = [
+        ("job id", escape(str(job.get("id")))),
+        ("type", escape(str(job.get("type")))),
+        ("trace", escape(str(job.get("correlation_id")))),
+        ("queued", _when(job.get("created_at"))),
+        ("started", _when(job.get("started_at"))),
+        ("finished", _when(job.get("finished_at"))),
+    ]
+    if job.get("error"):
+        facts.append(("error", escape(str((job["error"] or {}).get("code", "see below")))))
     blocks = [
-        f"<h2>Timeline</h2><p>{timeline}</p>",
-        "<h2>Payload</h2><pre>" + escape(_pretty(job.get("payload"))) + "</pre>",
+        f'<section class="de-section"><h2>State</h2>{_strip(state)}</section>',
+        '<section class="de-section"><h2>Record</h2><dl class="de-kv">'
+        + "".join(f"<dt>{k}</dt><dd>{v}</dd>" for k, v in facts)
+        + "</dl></section>",
+        '<section class="de-section"><h2>Payload</h2>'
+        f'<pre class="de-json">{escape(_pretty(job.get("payload")))}</pre></section>',
     ]
     if job.get("result"):
-        blocks.append("<h2>Result</h2><pre>" + escape(_pretty(job["result"])) + "</pre>")
+        blocks.append(
+            '<section class="de-section"><h2>Result</h2>'
+            f'<pre class="de-json">{escape(_pretty(job["result"]))}</pre></section>'
+        )
     if job.get("error"):
-        blocks.append("<h2>Error</h2><pre>" + escape(_pretty(job["error"])) + "</pre>")
+        blocks.append(
+            '<section class="de-section"><h2>Error</h2>'
+            f'<pre class="de-json">{escape(_pretty(job["error"]))}</pre></section>'
+        )
     episode = (job.get("result") or {}).get("episode_id")
     if episode:
         link = f"/api/v1/episodes/{escape(str(episode))}"
-        blocks.append(f'<p><a href="{link}">Episode JSON &rarr;</a></p>')
+        blocks.append(f'<p><a href="{link}">// episode json</a></p>')
+    return _page("Job " + str(job.get("id"))[:8], "/ui/jobs", "".join(blocks), theme)
+
+
+# ---------------------------------------------------------------- artifacts
+
+
+def artifacts_page(model: dict[str, Any], theme: str) -> str:
     body = (
-        f'<p class="sub">{_state(str(job.get("state")))} - type '
-        f"<code>{escape(str(job.get('type')))}</code> - correlation "
-        f"<code>{escape(str(job.get('correlation_id')))}</code></p>" + "".join(blocks)
+        '<p class="de-sub">content addressed // poll 5s</p>'
+        f"<div data-poll>{_artifacts_body(model)}</div>"
     )
-    return _page("Job " + str(job.get("id"))[:8], "/ui/jobs", body)
+    return _page("Artifacts", "/ui/artifacts", body, theme, _script("/ui/artifacts", 5000))
 
 
-def artifacts_page(initial: dict[str, Any]) -> str:
-    body = (
-        '<p class="sub">Content-addressed blobs, newest first. Refreshes every 5 s.</p>'
-        f"<div data-poll>{_artifacts_body(initial)}</div>"
-    )
-    return _page("Artifacts", "/ui/artifacts", body, _poll_js("/ui/artifacts", 5000))
+def artifacts_fragment(model: dict[str, Any]) -> str:
+    return _artifacts_body(model)
 
 
-def artifacts_fragment(initial: dict[str, Any]) -> str:
-    return _artifacts_body(initial)
-
-
-def _artifacts_body(initial: dict[str, Any]) -> str:
-    rows = (
-        "".join(
-            "<tr>"
-            f"<td><code>{escape(str(a['hash'])[:16])}...</code></td>"
-            f"<td>{_bytes(a.get('size_bytes'))}</td>"
-            f"<td>{_when(a.get('created_at'))}</td>"
-            f'<td class="muted">{escape(str(len(a.get("episode_ids") or [])))}</td>'
-            "</tr>"
-            for a in initial.get("items", [])
-        )
-        or '<tr><td colspan="4" class="muted">No artifacts yet.</td></tr>'
+def _artifacts_body(model: dict[str, Any]) -> str:
+    items = model.get("items", [])
+    if not items:
+        return '<p class="de-empty">// no artifacts stored</p>'
+    total = sum(int(a.get("size_bytes") or 0) for a in items)
+    rows = "".join(
+        "<tr>"
+        f"<td><code>{escape(str(a['hash'])[:24])}</code></td>"
+        f'<td class="num">{_bytes(a.get("size_bytes"))}</td>'
+        f"<td>{_when(a.get('created_at'))}</td>"
+        f'<td class="num">{escape(str(len(a.get("episode_ids") or [])))}</td>'
+        "</tr>"
+        for a in items
     )
     return (
-        "<table><thead><tr><th>Hash</th><th>Size</th><th>Created</th>"
-        f"<th>Episodes</th></tr></thead><tbody>{rows}</tbody></table>"
+        f'<p class="de-sub">{len(items)} shown // {_bytes(total)} on this page</p>'
+        '<table class="de-table"><thead><tr><th>Hash</th><th class="num">Size</th>'
+        '<th>Written</th><th class="num">Episodes</th></tr></thead>'
+        f"<tbody>{rows}</tbody></table>"
     )

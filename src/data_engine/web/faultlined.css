@@ -1,146 +1,270 @@
+/*
+ * Faultlined layout layer.
+ *
+ * The terminal/instrument vocabulary (colours, type scale, tables, status badges,
+ * ASCII bars) comes from the vendored stylesheet; see vendor/terminal-ui/NOTICE.md.
+ * This file only adds what Faultlined specifically needs on top of it.
+ */
+
 :root {
-  color-scheme: light dark;
-  --fg: #1a1a1a;
-  --muted: #6b7280;
-  --line: #d8dce2;
-  --bg: #fbfcfd;
-  --card: #ffffff;
-  --accent: #2f6f4f;
-  --warn: #8a5a00;
-  --bad: #8c2f2f;
+  --de-gap: 0.75rem;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --fg: #e6e8eb;
-    --muted: #9aa3ae;
-    --line: #2c3238;
-    --bg: #14171a;
-    --card: #1b1f24;
-  }
-}
-
-* { box-sizing: border-box; }
+/* ---- shell ---------------------------------------------------------------- */
 
 body {
   margin: 0;
-  padding: 1.5rem;
-  background: var(--bg);
-  color: var(--fg);
-  font: 14px/1.55 ui-sans-serif, -apple-system, "Segoe UI", Roboto, sans-serif;
+  background: var(--fine-use-bg, #000);
+  color: var(--fine-use-text, #0f0);
 }
 
-h1 { font-size: 1.15rem; margin: 0 0 0.15rem; letter-spacing: -0.01em; }
-
-h2 {
-  font-size: 0.82rem;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--muted);
-  margin: 1.5rem 0 0.5rem;
-  font-weight: 600;
+.de-shell {
+  max-width: 76rem;
+  margin: 0 auto;
+  padding: 1.25rem 1.25rem 3rem;
 }
 
-.sub { color: var(--muted); font-size: 0.82rem; margin: 0 0 1.1rem; }
-
-nav {
+.de-nav {
   display: flex;
-  gap: 1.1rem;
-  margin-bottom: 1.2rem;
-  padding-bottom: 0.7rem;
-  border-bottom: 1px solid var(--line);
+  align-items: baseline;
+  gap: 1.25rem;
+  flex-wrap: wrap;
+  padding-bottom: 0.6rem;
+  margin-bottom: 1rem;
+  border-bottom: 1px solid var(--fine-use-border, #0a0);
 }
 
-nav a { color: var(--accent); text-decoration: none; font-weight: 550; }
-nav a:hover { text-decoration: underline; }
-
-nav a.on {
-  color: var(--fg);
-  border-bottom: 2px solid var(--accent);
-  padding-bottom: 0.7rem;
-  margin-bottom: -0.7rem;
+.de-brand {
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--fine-use-accent, #0c0);
 }
 
-.grid {
+.de-brand span {
+  color: var(--fine-use-comment, #080);
+  font-weight: 400;
+}
+
+.de-nav a {
+  color: var(--fine-use-text, #0f0);
+  text-decoration: none;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-size: 0.78rem;
+  padding-bottom: 2px;
+}
+
+.de-nav a:hover { border-bottom: 1px solid var(--fine-use-border, #0a0); }
+
+.de-nav a[aria-current="page"] {
+  color: var(--fine-use-accent, #0c0);
+  border-bottom: 2px solid var(--fine-use-accent, #0c0);
+}
+
+.de-nav .de-spacer { flex: 1; }
+
+.de-theme {
+  font: inherit;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  background: transparent;
+  color: var(--fine-use-text, #0f0);
+  border: 1px solid var(--fine-use-border, #0a0);
+  padding: 0.15rem 0.35rem;
+}
+
+/* ---- page header ---------------------------------------------------------- */
+
+.de-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.25rem;
+}
+
+.de-head h1 {
+  margin: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+}
+
+.de-clock {
+  font-variant-numeric: tabular-nums;
+  color: var(--fine-use-comment, #080);
+  font-size: 0.8rem;
+  letter-spacing: 0.08em;
+}
+
+.de-sub {
+  color: var(--fine-use-comment, #080);
+  font-size: 0.8rem;
+  margin: 0 0 1rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+/* ---- telemetry readouts --------------------------------------------------- */
+
+.de-readouts {
   display: grid;
-  gap: 0.7rem;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr));
+  gap: 1px;
+  background: var(--fine-use-border, #0a0);
+  border: 1px solid var(--fine-use-border, #0a0);
+  margin-bottom: 1.25rem;
 }
 
-.card {
-  background: var(--card);
-  border: 1px solid var(--line);
-  border-radius: 7px;
-  padding: 0.7rem 0.8rem;
+.de-readout {
+  background: var(--fine-use-surface, #010);
+  padding: 0.6rem 0.7rem;
 }
 
-.card .k {
-  color: var(--muted);
-  font-size: 0.72rem;
+.de-readout dt {
+  font-size: 0.68rem;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.14em;
+  color: var(--fine-use-comment, #080);
+  margin: 0 0 0.3rem;
 }
 
-.card .v { font-size: 1.35rem; font-variant-numeric: tabular-nums; margin-top: 0.15rem; }
-
-table {
-  width: 100%;
-  border-collapse: collapse;
-  background: var(--card);
-  border: 1px solid var(--line);
-  border-radius: 7px;
-  overflow: hidden;
+.de-readout dd {
+  margin: 0;
+  font-size: 1.4rem;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
 }
 
-th {
+.de-readout dd small {
+  font-size: 0.7rem;
+  color: var(--fine-use-comment, #080);
+  letter-spacing: 0.08em;
+  margin-left: 0.2rem;
+}
+
+/* ---- sections ------------------------------------------------------------- */
+
+.de-section { margin-bottom: 1.4rem; }
+
+.de-section > h2 {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  color: var(--fine-use-accent, #0c0);
+  margin: 0 0 0.5rem;
+  padding-bottom: 0.25rem;
+  border-bottom: 1px dashed var(--fine-use-border, #0a0);
+}
+
+/* ---- ascii meter ---------------------------------------------------------- */
+
+.de-meter {
+  font-family: inherit;
+  letter-spacing: 0.02em;
+  white-space: pre;
+  color: var(--fine-use-accent, #0c0);
+}
+
+.de-meter .off { color: var(--fine-use-comment, #080); opacity: 0.45; }
+
+/* ---- job state strip ------------------------------------------------------ */
+
+.de-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  font-size: 0.8rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.de-strip .step { color: var(--fine-use-comment, #080); }
+.de-strip .step.done { color: var(--fine-use-text, #0f0); }
+.de-strip .step.now { color: var(--fine-use-bg, #000); background: var(--fine-use-accent, #0c0); padding: 0 0.3rem; }
+.de-strip .sep { color: var(--fine-use-comment, #080); }
+
+/* ---- tables --------------------------------------------------------------- */
+
+.de-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+
+.de-table th {
   text-align: left;
-  font-size: 0.72rem;
+  font-size: 0.68rem;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--muted);
-  font-weight: 600;
-  padding: 0.5rem 0.65rem;
-  border-bottom: 1px solid var(--line);
+  letter-spacing: 0.12em;
+  color: var(--fine-use-comment, #080);
+  font-weight: 400;
+  padding: 0.35rem 0.5rem;
+  border-bottom: 1px solid var(--fine-use-border, #0a0);
+  white-space: nowrap;
 }
 
-td {
-  padding: 0.45rem 0.65rem;
-  border-bottom: 1px solid var(--line);
+.de-table td {
+  padding: 0.32rem 0.5rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--fine-use-border, #0a0) 35%, transparent);
   font-variant-numeric: tabular-nums;
   vertical-align: top;
 }
 
-tr:last-child td { border-bottom: none; }
+.de-table tbody tr:hover td { background: color-mix(in srgb, var(--fine-use-accent, #0c0) 8%, transparent); }
+.de-table a { color: var(--fine-use-accent, #0c0); text-decoration: none; }
+.de-table a:hover { text-decoration: underline; }
+.de-table .num { text-align: right; }
+.de-table .dim { color: var(--fine-use-comment, #080); }
 
-code, .mono {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.85em;
+/* ---- filter bar ----------------------------------------------------------- */
+
+.de-filters {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.6rem;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
 }
 
-.s { color: var(--accent); }
-.f { color: var(--bad); }
-.c { color: var(--warn); }
-.q, .muted { color: var(--muted); }
+.de-filters label { color: var(--fine-use-comment, #080); }
 
-pre {
-  background: var(--card);
-  border: 1px solid var(--line);
-  border-radius: 7px;
-  padding: 0.7rem;
-  overflow: auto;
-  font-size: 0.82em;
-}
-
-form { display: flex; gap: 0.45rem; align-items: center; margin-bottom: 0.8rem; }
-
-select, button {
+.de-filters select,
+.de-filters button {
   font: inherit;
-  padding: 0.35rem 0.6rem;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: var(--card);
-  color: var(--fg);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  background: transparent;
+  color: var(--fine-use-text, #0f0);
+  border: 1px solid var(--fine-use-border, #0a0);
+  padding: 0.2rem 0.5rem;
   cursor: pointer;
 }
 
-a { color: var(--accent); }
+/* ---- misc ----------------------------------------------------------------- */
+
+.de-kv { display: grid; grid-template-columns: max-content 1fr; gap: 0.25rem 1rem; font-size: 0.85rem; }
+.de-kv dt { color: var(--fine-use-comment, #080); text-transform: uppercase; letter-spacing: 0.1em; font-size: 0.72rem; }
+.de-kv dd { margin: 0; word-break: break-all; }
+
+pre.de-json {
+  background: var(--fine-use-surface, #010);
+  border: 1px solid var(--fine-use-border, #0a0);
+  padding: 0.7rem;
+  overflow: auto;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  margin: 0;
+}
+
+.de-empty { color: var(--fine-use-comment, #080); padding: 0.6rem 0; letter-spacing: 0.08em; }
+
+@media (prefers-reduced-motion: no-preference) {
+  .de-pulse { animation: de-blink 1.6s steps(2, start) infinite; }
+}
+
+@keyframes de-blink {
+  to { opacity: 0.25; }
+}

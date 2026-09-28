@@ -1,0 +1,1054 @@
+/*
+ * Fine Use Design System - Core CSS
+ * Version 1.1.0
+ * 
+ * Terminal-inspired interface design system prioritizing
+ * functional density and geometric precision.
+ * 
+ * New in v1.1.0:
+ * - Enhanced button grid system for perfect alignment
+ * - Comprehensive utility class system
+ * - 8 professional themes (5 new themes added)
+ */
+
+/* Reset and Base Styles */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  border-radius: 0 !important; /* Enforce no rounded corners */
+}
+
+/* CSS Custom Properties - Overridden by themes */
+:root {
+  /* Spacing system */
+  --space-xs: 0.25rem;   /* 4px */
+  --space-sm: 0.5rem;    /* 8px */
+  --space-md: 1rem;      /* 16px */
+  --space-lg: 1.5rem;    /* 24px */
+  --space-xl: 2rem;      /* 32px */
+  --space-xxl: 3rem;     /* 48px */
+  
+  /* Border system */
+  --border-thin: 2px;
+  --border-thick: 4px;
+  --border-heavy: 8px;
+  
+  /* Typography scale */
+  --text-xs: 0.75rem;    /* 12px */
+  --text-sm: 0.875rem;   /* 14px */
+  --text-md: 1rem;       /* 16px */
+  --text-lg: 1.125rem;   /* 18px */
+  --text-xl: 1.25rem;    /* 20px */
+  --text-2xl: 1.5rem;    /* 24px */
+  --text-3xl: 2rem;      /* 32px */
+  --text-4xl: 2.5rem;    /* 40px */
+  --text-5xl: 3rem;      /* 48px */
+  
+  /* Animation timing */
+  --transition-fast: 150ms ease;
+  --transition-normal: 200ms ease;
+  --transition-slow: 300ms ease;
+  
+  /* Z-index scale */
+  --z-dropdown: 1000;
+  --z-modal: 2000;
+  --z-tooltip: 3000;
+}
+
+/* Typography Foundation */
+html {
+  font-size: 16px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: var(--text-md);
+  line-height: 1.5;
+  background-color: var(--fine-use-bg);
+  color: var(--fine-use-text);
+  overflow-x: auto;
+  font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+}
+
+/* Typography Classes */
+.fine-use-h1 {
+  font-size: var(--text-5xl);
+  font-weight: 800;
+  line-height: 1.2;
+  margin-bottom: var(--space-lg);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.fine-use-h2 {
+  font-size: var(--text-3xl);
+  font-weight: 700;
+  line-height: 1.3;
+  margin-bottom: var(--space-lg);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.fine-use-h3 {
+  font-size: var(--text-2xl);
+  font-weight: 600;
+  line-height: 1.4;
+  margin-bottom: var(--space-md);
+  text-transform: uppercase;
+  letter-spacing: 0.01em;
+}
+
+.fine-use-h4 {
+  font-size: var(--text-xl);
+  font-weight: 600;
+  line-height: 1.4;
+  margin-bottom: var(--space-md);
+  text-transform: uppercase;
+}
+
+.fine-use-body-lg {
+  font-size: var(--text-lg);
+  line-height: 1.6;
+}
+
+.fine-use-body {
+  font-size: var(--text-md);
+  line-height: 1.5;
+}
+
+.fine-use-body-sm {
+  font-size: var(--text-sm);
+  line-height: 1.4;
+}
+
+.fine-use-body-xs {
+  font-size: var(--text-xs);
+  line-height: 1.3;
+}
+
+/* ==========================================================================
+   LAYOUT GRID SYSTEM - FIXED FOR PERFECT COLUMN ALIGNMENT
+   ========================================================================== */
+
+.fine-use-container {
+  width: 100%;
+  max-width: none;
+  padding: var(--space-xl);
+  margin: 0;
+}
+
+/* Grid Layouts - Strict Proportions with Forced Equal Heights */
+.grid-thirds {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: var(--space-xl);
+  align-items: stretch; /* Force equal column heights */
+}
+
+.grid-halves {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-xl);
+  align-items: stretch; /* Force equal column heights */
+}
+
+.grid-main-sidebar {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: var(--space-xl);
+  align-items: stretch; /* Force equal column heights */
+}
+
+.grid-full {
+  display: grid;
+  grid-template-columns: 1fr;
+}
+
+/* Column Content Wrapper - Ensures full height usage */
+.grid-column {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+/* Fine Use components in grids take full height */
+.grid-thirds .fine-use-component,
+.grid-halves .fine-use-component,
+.grid-main-sidebar .fine-use-component {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Component content fills available space */
+.grid-thirds .fine-use-component > *:last-child,
+.grid-halves .fine-use-component > *:last-child,
+.grid-main-sidebar .fine-use-component > *:last-child {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+/* Button grids in components take remaining space */
+.fine-use-component .button-grid {
+  margin-top: auto; /* Push to bottom if needed */
+}
+
+/* Content padding for equal height columns */
+.content-filler {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--fine-use-comment);
+  font-style: italic;
+  min-height: 4rem;
+}
+
+/* Gap utilities */
+.gap-xs { gap: var(--space-xs); }
+.gap-sm { gap: var(--space-sm); }
+.gap-md { gap: var(--space-md); }
+.gap-lg { gap: var(--space-lg); }
+.gap-xl { gap: var(--space-xl); }
+.gap-xxl { gap: var(--space-xxl); }
+
+/* Base Component Styles */
+.fine-use-component {
+  border: var(--border-thin) solid var(--fine-use-border);
+  background-color: var(--fine-use-surface);
+  padding: var(--space-lg);
+  color: var(--fine-use-text);
+}
+
+/* Data Table Component */
+.fine-use-data-table {
+  border: var(--border-thin) solid var(--fine-use-border);
+  background-color: var(--fine-use-surface);
+  overflow-x: hidden;
+}
+
+.fine-use-data-table .table-header {
+  padding: var(--space-lg);
+  border-bottom: var(--border-thin) solid var(--fine-use-border);
+  background-color: var(--fine-use-border);
+}
+
+.fine-use-data-table .table-header h3 {
+  margin: 0;
+  font-size: var(--text-xl);
+  font-weight: 700;
+  color: var(--fine-use-text);
+}
+
+.fine-use-data-table table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-lg);
+}
+
+.fine-use-data-table thead {
+  background-color: var(--fine-use-border);
+}
+
+.fine-use-data-table th {
+  padding: var(--space-md) var(--space-lg);
+  text-align: left;
+  font-weight: 700;
+  color: var(--fine-use-text);
+  border: none;
+}
+
+.fine-use-data-table td {
+  padding: var(--space-md) var(--space-lg);
+  border-top: var(--border-thin) solid var(--fine-use-border);
+  color: var(--fine-use-text);
+}
+
+.fine-use-data-table tr:hover {
+  background-color: var(--fine-use-border);
+  transition: background-color var(--transition-fast);
+}
+
+/* Status Indicators */
+.status-badge {
+  display: inline-block;
+  padding: var(--space-xs) var(--space-md);
+  font-weight: 700;
+  font-size: var(--text-sm);
+  text-transform: uppercase;
+}
+
+.status-online,
+.status-success {
+  background-color: var(--fine-use-success);
+  color: var(--fine-use-bg);
+}
+
+.status-warning,
+.status-degraded {
+  background-color: var(--fine-use-warning);
+  color: var(--fine-use-bg);
+}
+
+.status-error,
+.status-offline {
+  background-color: var(--fine-use-error);
+  color: var(--fine-use-bg);
+}
+
+.status-info {
+  background-color: var(--fine-use-info);
+  color: var(--fine-use-bg);
+}
+
+/* Metric Values */
+.metric-value {
+  font-weight: 700;
+  font-size: var(--text-xl);
+}
+
+.metric-success { color: var(--fine-use-success); }
+.metric-warning { color: var(--fine-use-warning); }
+.metric-error { color: var(--fine-use-error); }
+.metric-info { color: var(--fine-use-info); }
+
+/* Progress Bars */
+.fine-use-progress-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+}
+
+.fine-use-progress-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-lg);
+}
+
+.progress-label {
+  width: 12rem;
+  font-size: var(--text-lg);
+  font-weight: 700;
+  color: var(--fine-use-text);
+  text-transform: uppercase;
+}
+
+.progress-container {
+  flex: 1;
+  height: 1.5rem;
+  border: var(--border-thin) solid var(--fine-use-border);
+  background-color: var(--fine-use-bg);
+  position: relative;
+}
+
+.progress-bar {
+  height: 100%;
+  transition: width var(--transition-slow);
+  background-color: var(--fine-use-success);
+}
+
+.progress-bar.status-success {
+  background-color: var(--fine-use-success);
+}
+
+.progress-bar.status-warning {
+  background-color: var(--fine-use-warning);
+}
+
+.progress-bar.status-error {
+  background-color: var(--fine-use-error);
+}
+
+.progress-value {
+  width: 5rem;
+  text-align: right;
+  font-size: var(--text-lg);
+  font-weight: 700;
+  color: var(--fine-use-text);
+}
+
+/* Graph Components */
+.fine-use-graph {
+  border: var(--border-thin) solid var(--fine-use-border);
+  background-color: var(--fine-use-surface);
+  padding: var(--space-lg);
+}
+
+.graph-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--space-lg);
+}
+
+.graph-header h3 {
+  font-size: var(--text-xl);
+  font-weight: 700;
+  color: var(--fine-use-text);
+  margin: 0;
+}
+
+.current-value {
+  font-size: var(--text-3xl);
+  font-weight: 700;
+  color: var(--fine-use-success);
+}
+
+.graph-container {
+  height: 6rem;
+  border: var(--border-thin) solid var(--fine-use-border);
+  background-color: var(--fine-use-bg);
+  padding: var(--space-sm);
+}
+
+.graph-bars {
+  display: flex;
+  align-items: flex-end;
+  height: 100%;
+  gap: 2px;
+}
+
+.graph-bar {
+  flex: 1;
+  background-color: var(--fine-use-success);
+  transition: height var(--transition-slow);
+  min-height: 2px;
+}
+
+/* Log Terminal */
+.fine-use-log-terminal {
+  border: var(--border-thin) solid var(--fine-use-border);
+  background-color: var(--fine-use-surface);
+}
+
+.terminal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--space-lg);
+  border-bottom: var(--border-thin) solid var(--fine-use-border);
+  background-color: var(--fine-use-border);
+}
+
+.terminal-header h3 {
+  margin: 0;
+  font-size: var(--text-xl);
+  font-weight: 700;
+  color: var(--fine-use-text);
+}
+
+.terminal-controls {
+  display: flex;
+  gap: var(--space-sm);
+}
+
+.terminal-content {
+  height: 20rem;
+  overflow-y: auto;
+  padding: var(--space-lg);
+  background-color: var(--fine-use-bg);
+  
+  /* Hide scrollbars but keep functionality */
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.terminal-content::-webkit-scrollbar {
+  display: none;
+}
+
+.log-entry {
+  margin-bottom: var(--space-sm);
+  padding: var(--space-sm);
+  border-left: var(--border-thick) solid var(--fine-use-success);
+  font-family: inherit;
+  font-size: var(--text-sm);
+  line-height: 1.4;
+}
+
+.log-entry.new {
+  background-color: var(--fine-use-surface);
+  animation: highlight 1s ease-out;
+}
+
+@keyframes highlight {
+  0% { background-color: var(--fine-use-accent); }
+  100% { background-color: var(--fine-use-surface); }
+}
+
+.log-entry.error {
+  border-left-color: var(--fine-use-error);
+}
+
+.log-entry.warning {
+  border-left-color: var(--fine-use-warning);
+}
+
+.log-entry.info {
+  border-left-color: var(--fine-use-info);
+}
+
+.log-timestamp {
+  color: var(--fine-use-comment);
+}
+
+.log-level {
+  display: inline-block;
+  padding: 0.125rem var(--space-sm);
+  font-weight: 700;
+  font-size: var(--text-xs);
+  margin: 0 var(--space-sm);
+  text-transform: uppercase;
+}
+
+.log-level.level-info {
+  background-color: var(--fine-use-success);
+  color: var(--fine-use-bg);
+}
+
+.log-level.level-error {
+  background-color: var(--fine-use-error);
+  color: var(--fine-use-bg);
+}
+
+.log-level.level-warning {
+  background-color: var(--fine-use-warning);
+  color: var(--fine-use-bg);
+}
+
+.log-level.level-debug {
+  background-color: var(--fine-use-accent);
+  color: var(--fine-use-bg);
+}
+
+.log-message {
+  color: var(--fine-use-text);
+}
+
+/* Button Components */
+.fine-use-button {
+  padding: var(--space-md) var(--space-xl);
+  border: var(--border-thin) solid var(--fine-use-border);
+  background-color: var(--fine-use-surface);
+  color: var(--fine-use-text);
+  font-family: inherit;
+  font-size: var(--text-lg);
+  font-weight: 700;
+  cursor: pointer;
+  transition: all var(--transition-normal);
+  text-transform: uppercase;
+  min-height: 3.5rem; /* Consistent minimum height */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  box-sizing: border-box;
+}
+
+.fine-use-button:hover {
+  background-color: var(--fine-use-border);
+}
+
+.fine-use-button:focus {
+  outline: 3px solid var(--fine-use-accent);
+  outline-offset: 2px;
+}
+
+.fine-use-button[data-variant="primary"] {
+  background-color: var(--fine-use-success);
+  color: var(--fine-use-bg);
+  border-color: var(--fine-use-success);
+}
+
+.fine-use-button[data-variant="danger"] {
+  background-color: var(--fine-use-error);
+  color: var(--fine-use-bg);
+  border-color: var(--fine-use-error);
+}
+
+.fine-use-button[data-variant="info"] {
+  background-color: var(--fine-use-info);
+  color: var(--fine-use-bg);
+  border-color: var(--fine-use-info);
+}
+
+.control-button {
+  padding: var(--space-sm) var(--space-md);
+  border: var(--border-thin) solid var(--fine-use-border);
+  background-color: var(--fine-use-bg);
+  color: var(--fine-use-text);
+  font-family: inherit;
+  font-size: var(--text-sm);
+  font-weight: 700;
+  cursor: pointer;
+  transition: all var(--transition-normal);
+  text-transform: uppercase;
+  min-height: 2.5rem; /* Smaller but consistent */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  box-sizing: border-box;
+}
+
+.control-button:hover {
+  background-color: var(--fine-use-border);
+}
+
+.control-button.active {
+  background-color: var(--fine-use-accent);
+  color: var(--fine-use-bg);
+}
+
+/* Toggle Switches (Boxy) */
+.fine-use-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-lg);
+  border: var(--border-thin) solid var(--fine-use-border);
+  background-color: var(--fine-use-bg);
+}
+
+.toggle-label {
+  font-size: var(--text-lg);
+  font-weight: 700;
+  color: var(--fine-use-text);
+  text-transform: uppercase;
+}
+
+.toggle-status {
+  font-size: var(--text-lg);
+  font-weight: 700;
+}
+
+.toggle-switch {
+  display: flex;
+  border: var(--border-thin) solid var(--fine-use-border);
+}
+
+.toggle-button {
+  width: 3rem;
+  height: 2rem;
+  border: none;
+  font-family: inherit;
+  font-size: var(--text-sm);
+  font-weight: 700;
+  cursor: pointer;
+  transition: all var(--transition-normal);
+  text-transform: uppercase;
+}
+
+.toggle-button.toggle-on.active {
+  background-color: var(--fine-use-success);
+  color: var(--fine-use-bg);
+}
+
+.toggle-button.toggle-off.active {
+  background-color: var(--fine-use-error);
+  color: var(--fine-use-bg);
+}
+
+.toggle-button:not(.active) {
+  background-color: var(--fine-use-surface);
+  color: var(--fine-use-comment);
+}
+
+/* Service Status */
+.fine-use-service-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-lg);
+  border: var(--border-thin) solid var(--fine-use-border);
+  background-color: var(--fine-use-bg);
+}
+
+.status-indicator-box {
+  width: 1.5rem;
+  height: 1.5rem;
+  border: var(--border-thin) solid var(--fine-use-border);
+}
+
+.status-indicator-box[data-status="operational"] {
+  background-color: var(--fine-use-success);
+}
+
+.status-indicator-box[data-status="degraded"] {
+  background-color: var(--fine-use-warning);
+}
+
+.status-indicator-box[data-status="maintenance"] {
+  background-color: var(--fine-use-error);
+}
+
+.service-info {
+  flex: 1;
+  margin-left: var(--space-lg);
+}
+
+.service-name {
+  font-weight: 700;
+  color: var(--fine-use-text);
+  text-transform: uppercase;
+}
+
+.service-uptime {
+  font-size: var(--text-sm);
+  color: var(--fine-use-comment);
+}
+
+.status-label {
+  font-weight: 700;
+  font-size: var(--text-lg);
+  text-transform: uppercase;
+}
+
+.status-operational { color: var(--fine-use-success); }
+.status-degraded { color: var(--fine-use-warning); }
+.status-maintenance { color: var(--fine-use-error); }
+
+/* Theme Selector */
+.theme-selector {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  margin-bottom: var(--space-xl);
+}
+
+.theme-label {
+  font-size: var(--text-lg);
+  font-weight: 700;
+  color: var(--fine-use-comment);
+  text-transform: uppercase;
+}
+
+.theme-dropdown {
+  padding: var(--space-sm) var(--space-md);
+  border: var(--border-thin) solid var(--fine-use-border);
+  background-color: var(--fine-use-surface);
+  color: var(--fine-use-text);
+  font-family: inherit;
+  font-size: var(--text-lg);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.theme-dropdown:focus {
+  outline: 2px solid var(--fine-use-accent);
+  outline-offset: 2px;
+}
+
+/* ==========================================================================
+   BUTTON GRID SYSTEM - FIXED FOR PERFECT ALIGNMENT
+   ========================================================================== */
+
+/* Base button grid - forces equal height and width for all buttons */
+.button-grid {
+  display: grid;
+  gap: var(--space-md);
+  width: 100%;
+  align-items: stretch; /* Force all buttons to same height */
+  justify-items: stretch; /* Force all buttons to same width */
+}
+
+/* Grid Layout Variants with Fixed Heights */
+.button-grid-2x2 {
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+  height: 8rem; /* Fixed height for consistency - 4rem per button */
+}
+
+.button-grid-1x4 {
+  grid-template-columns: 1fr;
+  grid-template-rows: repeat(4, 1fr);
+  height: 16rem; /* Fixed height for consistency - 4rem per button */
+}
+
+.button-grid-1x3 {
+  grid-template-columns: 1fr;
+  grid-template-rows: repeat(3, 1fr);
+  height: 12rem; /* Fixed height for consistency - 4rem per button */
+}
+
+.button-grid-1x2 {
+  grid-template-columns: 1fr;
+  grid-template-rows: 1fr 1fr;
+  height: 8rem; /* Fixed height for consistency - 4rem per button */
+}
+
+.button-grid-halves {
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr;
+  height: 4rem; /* Fixed height for consistency */
+}
+
+.button-grid-thirds {
+  grid-template-columns: 1fr 1fr 1fr;
+  grid-template-rows: 1fr;
+  height: 4rem; /* Fixed height for consistency */
+}
+
+.button-grid-quarters {
+  grid-template-columns: repeat(4, 1fr);
+  grid-template-rows: 1fr;
+  height: 4rem; /* Fixed height for consistency */
+}
+
+/* Grid buttons - consistent sizing for ALL grid buttons */
+.fine-use-button.grid-button {
+  width: 100%;
+  height: 100%; /* Use full grid cell height */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: var(--space-md);
+  box-sizing: border-box;
+  line-height: 1.2; /* Tight line height for multi-line text */
+  word-wrap: break-word;
+}
+
+/* Spacing Utilities */
+.space-y-4 > * + * {
+  margin-top: var(--space-md);
+}
+
+.space-y-6 > * + * {
+  margin-top: var(--space-lg);
+}
+
+/* Width Utilities */
+.w-full {
+  width: 100%;
+}
+
+/* Flexbox Utilities */
+.flex {
+  display: flex;
+}
+
+.items-center {
+  align-items: center;
+}
+
+.justify-between {
+  justify-content: space-between;
+}
+
+.gap-6 {
+  gap: var(--space-lg);
+}
+
+.gap-8 {
+  gap: var(--space-xl);
+}
+
+.gap-12 {
+  gap: var(--space-xxl);
+}
+
+/* Text Utilities */
+.text-left {
+  text-align: left;
+}
+
+.text-lg {
+  font-size: var(--text-lg);
+}
+
+.text-white {
+  color: var(--fine-use-text);
+}
+
+.font-bold {
+  font-weight: 700;
+}
+
+.ml-3 {
+  margin-left: 0.75rem;
+}
+
+/* Margin Utilities */
+.mt-16 {
+  margin-top: 4rem;
+}
+
+.pt-8 {
+  padding-top: 2rem;
+}
+
+.border-t-4 {
+  border-top: 4px solid;
+}
+
+/* Additional Utilities */
+.text-sm {
+  font-size: var(--text-sm);
+}
+
+.text-md {
+  font-size: var(--text-md);
+}
+
+.mb-2 {
+  margin-bottom: 0.5rem;
+}
+
+.mb-3 {
+  margin-bottom: 0.75rem;
+}
+
+.mt-2 {
+  margin-top: 0.5rem;
+}
+
+/* Input Components */
+.fine-use-input {
+  width: 100%;
+  padding: var(--space-md) var(--space-lg);
+  border: var(--border-thin) solid var(--fine-use-border);
+  background-color: var(--fine-use-surface);
+  color: var(--fine-use-text);
+  font-family: inherit;
+  font-size: var(--text-lg);
+  font-weight: 500;
+  transition: all var(--transition-fast);
+}
+
+.fine-use-input:focus {
+  outline: 3px solid var(--fine-use-accent);
+  outline-offset: 2px;
+  border-color: var(--fine-use-accent);
+}
+
+.fine-use-input::placeholder {
+  color: var(--fine-use-comment);
+}
+
+.fine-use-input:invalid {
+  border-color: var(--fine-use-error);
+}
+
+.fine-use-input:valid {
+  border-color: var(--fine-use-success);
+}
+
+/* Color Utilities */
+.text-success { color: var(--fine-use-success); }
+.text-warning { color: var(--fine-use-warning); }
+.text-error { color: var(--fine-use-error); }
+.text-info { color: var(--fine-use-info); }
+.text-accent { color: var(--fine-use-accent); }
+.text-comment { color: var(--fine-use-comment); }
+
+.bg-success { background-color: var(--fine-use-success); }
+.bg-warning { background-color: var(--fine-use-warning); }
+.bg-error { background-color: var(--fine-use-error); }
+.bg-info { background-color: var(--fine-use-info); }
+.bg-surface { background-color: var(--fine-use-surface); }
+
+.border-success { border-color: var(--fine-use-success); }
+.border-warning { border-color: var(--fine-use-warning); }
+.border-error { border-color: var(--fine-use-error); }
+.border-info { border-color: var(--fine-use-info); }
+
+/* Focus Management */
+.fine-use-focusable:focus {
+  outline: 3px solid var(--fine-use-accent);
+  outline-offset: 2px;
+}
+
+.fine-use-component:focus-within {
+  border-color: var(--fine-use-accent);
+}
+
+/* Error States */
+.fine-use-error-message {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-md);
+  border: var(--border-thin) solid var(--fine-use-error);
+  background-color: var(--fine-use-surface);
+  color: var(--fine-use-error);
+  margin: var(--space-md) 0;
+}
+
+.error-icon {
+  font-size: var(--text-lg);
+  font-weight: 700;
+}
+
+/* Accessibility */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.skip-link {
+  position: absolute;
+  top: -40px;
+  left: 6px;
+  background: var(--fine-use-accent);
+  color: var(--fine-use-bg);
+  padding: 8px;
+  text-decoration: none;
+  transition: top 0.3s;
+  font-weight: 700;
+  z-index: var(--z-tooltip);
+}
+
+.skip-link:focus {
+  top: 6px;
+}
+
+/* Print Styles */
+@media print {
+  .fine-use-app {
+    background: white !important;
+    color: black !important;
+  }
+  
+  .fine-use-component {
+    border: 1px solid black !important;
+    background: white !important;
+  }
+  
+  .fine-use-button,
+  .control-button {
+    display: none;
+  }
+}
+
+/* High Contrast Mode */
+@media (prefers-contrast: high) {
+  :root {
+    --fine-use-bg: #000000;
+    --fine-use-text: #ffffff;
+    --fine-use-border: #ffffff;
+  }
+}
+
+/* Reduced Motion */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

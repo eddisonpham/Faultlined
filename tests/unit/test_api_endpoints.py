@@ -182,9 +182,11 @@ def test_ui_pages_render() -> None:
     client = _ui_client()
     for path, expected in (
         ("/ui", "Queue depth by state"),
-        ("/ui/jobs", "Correlation"),
-        ("/ui/artifacts", "Content-addressed"),
-        ("/ui/faultlined.css", "--accent"),
+        ("/ui/jobs", "Trace"),
+        ("/ui/artifacts", "content addressed"),
+        ("/ui/faultlined.css", ".de-readouts"),
+        ("/ui/vendor/terminal-ui/core.css", "--fine-use"),
+        ("/ui/vendor/terminal-ui/theme-vt220.css", "--fine-use-bg"),
     ):
         response = client.get(path)
         assert response.status_code == 200, path
@@ -202,6 +204,19 @@ def test_ui_job_detail_and_missing_job() -> None:
     client = _ui_client()
     assert "corr-1" in client.get("/ui/jobs/job-1").text
     assert client.get("/ui/jobs/nope").status_code == 404
+
+
+@pytest.mark.contract
+def test_theme_selection_falls_back_for_unknown_names() -> None:
+    client = _ui_client()
+    assert 'data-theme="amber"' in client.get("/ui?theme=amber").text
+    assert 'data-theme="vt220"' in client.get("/ui?theme=../../etc/passwd").text
+
+
+@pytest.mark.contract
+def test_vendor_stylesheet_route_rejects_traversal() -> None:
+    client = _ui_client()
+    assert client.get("/ui/vendor/terminal-ui/nope.css").status_code == 404
 
 
 @pytest.mark.contract

@@ -1,0 +1,113 @@
+/*
+ * Fine Use Design System v2.0 - VT220 Terminal Theme
+ * 
+ * Authentic vintage terminal aesthetic
+ * Based on the classic DEC VT220 terminal colors
+ */
+
+:root[data-theme="vt220"],
+[data-theme="vt220"] {
+  /* Background hierarchy */
+  --fine-use-bg: #000000;
+  --fine-use-surface: #001100;
+  
+  /* Structure */
+  --fine-use-border: #00aa00;
+  
+  /* Text colors */
+  --fine-use-text: #00ff00;
+  --fine-use-comment: #008800;
+  
+  /* Status colors - semantic meanings preserved */
+  --fine-use-success: #00ff00;
+  --fine-use-warning: #ffff00;
+  --fine-use-error: #ff0000;
+  --fine-use-info: #00ffff;
+  
+  /* Theme personality - vintage terminal accents */
+  --fine-use-accent: #00cc00;
+  --fine-use-orange: #ff8800;
+}
+
+/* VT220 terminal styling */
+[data-theme="vt220"] .fine-use-app {
+  background-color: var(--fine-use-bg);
+  color: var(--fine-use-text);
+}
+
+[data-theme="vt220"] .current-value {
+  color: var(--fine-use-accent);
+  text-shadow: 0 0 8px var(--fine-use-accent);
+}
+
+/* Authentic terminal text glow */
+[data-theme="vt220"] .fine-use-text,
+[data-theme="vt220"] .fine-use-h1,
+[data-theme="vt220"] .fine-use-h2,
+[data-theme="vt220"] .fine-use-h3 {
+  text-shadow: 0 0 4px currentColor;
+}
+
+/* VT220-specific animations */
+[data-theme="vt220"] .log-entry.new {
+  animation: vt220-highlight 1s ease-out;
+}
+
+@keyframes vt220-highlight {
+  0% { 
+    background-color: var(--fine-use-accent);
+    color: var(--fine-use-bg);
+    box-shadow: 0 0 15px var(--fine-use-accent);
+  }
+  100% { 
+    background-color: var(--fine-use-surface);
+    color: var(--fine-use-text);
+  }
+}
+
+/* Terminal scanline effect */
+[data-theme="vt220"] .fine-use-app::before {
+  content: "";
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(
+    transparent 50%,
+    rgba(0, 255, 0, 0.03) 50%
+  );
+  background-size: 100% 4px;
+  pointer-events: none;
+  z-index: 1000;
+}
+
+/* Enhanced focus for VT220 */
+[data-theme="vt220"] .fine-use-focusable:focus {
+  outline: 3px solid var(--fine-use-accent);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 6px rgba(0, 255, 0, 0.4);
+}
+
+/* Terminal cursor effect */
+[data-theme="vt220"] .terminal-cursor {
+  background-color: var(--fine-use-text);
+  animation: vt220-cursor 1s infinite;
+}
+
+@keyframes vt220-cursor {
+  0%, 50% { opacity: 1; }
+  51%, 100% { opacity: 0; }
+}
+
+/* Terminal block styling */
+[data-theme="vt220"] .block-item {
+  box-shadow: inset 0 0 2px var(--fine-use-success);
+  border: 1px solid var(--fine-use-border);
+}
+
+/* Component highlighting */
+[data-theme="vt220"] .fine-use-component {
+  box-shadow: 0 0 5px rgba(0, 255, 0, 0.2);
+  border: 2px solid var(--fine-use-border);
+}

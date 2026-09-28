@@ -50,6 +50,32 @@ not lock in visual style.
 - (−) Server rendering means the pages are only as correct as the read endpoints behind them, so those endpoints
   are a prerequisite and are added in the same change rather than mocked.
 
+## Addendum (2026-09-28): vendored terminal stylesheet
+
+The owner asked for a "low level, robotic" look and suggested using an existing template. Two were
+evaluated. `terminal.css` (panic) is classless and prose-oriented, so it has nothing for dense telemetry
+tables. `terminal-ui-components` (MIT, pinned at `b5d9a832eb6d631e4610cc9662b79707bb1a6bd6`) ships the
+right vocabulary as a single stylesheet with **no JavaScript and no build step**, so adopting it adds a
+file, not a framework. Generic admin templates (Tabler, CoreUI, AdminLTE) were rejected: they are the
+dashboard look this specification rules out and they require a bundler.
+
+Vendoring a single CSS file preserves the constraint this ADR exists to protect, so the decision stands.
+Provenance, licence, and the known caveats are in
+[../implementation/terminal-ui-vendored.md](../implementation/terminal-ui-vendored.md).
+
+**Caveat worth stating plainly:** that project had 0 stars and 0 forks when pinned, and its README lists
+themes that do not exist in the repository. It is unproven. It is isolated behind two routes and one
+stylesheet link so it can be dropped without touching Python logic.
+
+## Style mandate
+
+The owner redefined the visual direction as a low-level instrument/telemetry console: monospace
+throughout, hairline square panels, uppercase tracked labels, ASCII load meters, and block-glyph state
+indicators. This is *more* restrained than a generic dashboard, not less, so it is consistent with the
+spirit of the "restrained, technically credible" mandate; the phrase "not a generic dashboard" in
+[../architecture/frontend.md](../architecture/frontend.md) is now reinforced rather than relaxed. Visual
+design proper remains deferred to phase 12.
+
 ## Docs updated
 
 - [../architecture/frontend.md](../architecture/frontend.md) (mechanism now decided; visual design still deferred)

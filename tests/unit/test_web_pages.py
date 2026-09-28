@@ -4,15 +4,35 @@ from __future__ import annotations
 
 import pytest
 
-from data_engine.web import pages
-from data_engine.web.pages import _bytes, _state, _when, stylesheet
+from data_engine.web import DEFAULT_THEME, THEMES, layout_css, vendor_css
+from data_engine.web.pages import (
+    _bytes,
+    _meter,
+    _state_badge,
+    _strip,
+    _when,
+    artifacts_page,
+    job_detail_page,
+    jobs_page,
+    status_page,
+)
 
 
 @pytest.mark.unit
-def test_stylesheet_is_served_from_a_real_file() -> None:
-    css = stylesheet()
-    assert "--accent" in css
-    assert "<" not in css.split("{")[0], "stylesheet must not be HTML-escaped"
+def test_vendored_stylesheets_are_present_and_self_contained() -> None:
+    """The vendored CSS must ship in-tree and must not fetch anything at runtime."""
+    assert "--fine-use" in vendor_css("core.css")
+    for theme in THEMES:
+        css = vendor_css(f"theme-{theme}.css")
+        assert "--fine-use-bg" in css
+        assert "@import" not in css
+        assert "http://" not in css and "https://" not in css
+
+
+@pytest.mark.unit
+def test_layout_layer_defines_our_own_class_names() -> None:
+    assert ".de-readouts" in layout_css()
+    assert ".de-meter" in layout_css()
 
 
 @pytest.mark.unit
@@ -20,31 +40,50 @@ def test_bytes_formatting_is_human_readable() -> None:
     assert _bytes(0) == "0 B"
     assert _bytes(2048) == "2.0 KiB"
     assert _bytes(5 * 1024 * 1024) == "5.0 MiB"
+    assert _bytes(None) == "n/a"
 
 
 @pytest.mark.unit
-def test_bytes_handles_missing_telemetry() -> None:
-    assert "n/a" in _bytes(None)
+def test_when_renders_a_placeholder_for_missing_timestamps() -> None:
+    assert "text-comment" in _when(None)
+    assert _when("2026-09-28T12:00:00Z") == "2026-09-28 12:00:00"
 
 
 @pytest.mark.unit
-def test_when_renders_a_dash_for_missing_timestamps() -> None:
-    assert ">" in _when(None)
-    assert _when("2026-09-28T12:00:00Z").startswith("2026-09-28 12:00:00")
+def test_state_badges_colour_terminally() -> None:
+    assert "text-success" in _state_badge("succeeded")
+    assert "text-error" in _state_badge("failed")
+    assert "text-comment" in _state_badge("brand-new-state")
 
 
 @pytest.mark.unit
-def test_state_gets_a_colour_class_but_unknown_states_stay_plain() -> None:
-    assert 'class="s"' in _state("succeeded")
-    assert 'class="f"' in _state("failed")
-    assert "<" not in _state("brand-new-state")
+def test_meter_is_clamped_to_its_width() -> None:
+    assert _meter(0.0, 10).count("#") == 0
+    assert _meter(1.0, 10).count("#") == 10
+    assert _meter(5.0, 10).count("#") == 10, "over-range values must not overflow the meter"
+    assert _meter(-1.0, 10).count("#") == 0
+
+
+@pytest.mark.unit
+def test_strip_marks_the_current_step_and_finished_ones() -> None:
+    strip = _strip("succeeded")
+    assert 'class="step now">succeeded' in strip
+    assert 'class="step done">queued' in strip
+
+
+@pytest.mark.unit
+def test_strip_routes_failures_to_a_failing_terminal_state() -> None:
+    strip = _strip("failed")
+    assert ">failed<" in strip
+    assert ">succeeded<" not in strip
 
 
 @pytest.mark.unit
 def test_pages_escape_untrusted_values() -> None:
-    """Episode/artifact data is user-controlled and must never inject markup."""
-    html = pages.artifacts_page(
-        {"items": [{"hash": "<script>x</script>", "size_bytes": 1, "episode_ids": []}]}
+    """Episode and artifact data is user-controlled and must never inject markup."""
+    html = artifacts_page(
+        {"items": [{"hash": "<script>x</script>", "size_bytes": 1, "episode_ids": []}]},
+        DEFAULT_THEME,
     )
     assert "<script>x</script>" not in html
     assert "&lt;script&gt;" in html
@@ -52,7 +91,7 @@ def test_pages_escape_untrusted_values() -> None:
 
 @pytest.mark.unit
 def test_job_detail_escapes_payload_and_renders_error() -> None:
-    html = pages.job_detail_page(
+    html = job_detail_page(
         {
             "id": "job-1",
             "type": "ingest",
@@ -64,7 +103,8 @@ def test_job_detail_escapes_payload_and_renders_error() -> None:
             "created_at": "2026-09-28T00:00:00Z",
             "started_at": "2026-09-28T00:00:01Z",
             "finished_at": None,
-        }
+        },
+        DEFAULT_THEME,
     )
     assert "<img src=x" not in html
     assert "boom" in html
@@ -72,29 +112,38 @@ def test_job_detail_escapes_payload_and_renders_error() -> None:
 
 
 @pytest.mark.unit
-def test_empty_states_render_a_message_not_a_broken_table() -> None:
-    assert "No jobs yet." in pages.jobs_page({"items": []}, None)
-    assert "No artifacts yet." in pages.artifacts_page({"items": []})
+def test_empty_states_read_like_a_terminal() -> None:
+    assert "// no jobs recorded" in jobs_page({"items": []}, None, DEFAULT_THEME)
+    assert "// no artifacts stored" in artifacts_page({"items": []}, DEFAULT_THEME)
 
 
 @pytest.mark.unit
-def test_status_body_counts_active_jobs_across_states() -> None:
-    body = pages.status_fragment(
+def test_status_body_shows_readouts_and_ascii_meters() -> None:
+    html = status_page(
         {
             "status": "ok",
-            "queue_depth": {"queued": 2, "running": 1, "retrying": 0, "succeeded": 9},
+            "queue_depth": {"queued": 2, "running": 1, "succeeded": 9},
             "artifact_count": 4,
             "episode_count": 4,
             "resources": {"cpu_percent": 12.5, "gpu_present": False},
-        }
+        },
+        DEFAULT_THEME,
     )
-    assert "Active jobs" in body
-    assert "12.5%" in body
-    assert "none" in body, "absent GPU should read as none, not blank"
+    assert "12.5" in html
+    assert "active jobs" in html.lower()
+    assert "[" in html and "]" in html, "queue depth should render as an ASCII meter"
+    assert "absent" in html, "missing GPU should read as absent, not blank"
+
+
+@pytest.mark.unit
+def test_selected_theme_is_applied_and_pinned() -> None:
+    html = status_page({"status": "ok", "queue_depth": {}, "resources": {}}, "amber")
+    assert 'data-theme="amber"' in html
+    assert "theme-amber.css" in html
 
 
 @pytest.mark.unit
 def test_poll_script_targets_the_fragment_endpoint() -> None:
-    html = pages.status_page({"status": "ok", "queue_depth": {}, "resources": {}})
-    assert '"/ui"' in html
+    html = jobs_page({"items": []}, None, DEFAULT_THEME)
+    assert '"/ui/jobs"' in html
     assert "X-Fragment" in html

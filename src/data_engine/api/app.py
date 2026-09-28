@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -26,15 +27,26 @@ from data_engine.config import Settings, load_settings
 from data_engine.jobs.state import JobState
 from data_engine.observability.telemetry import sample_resources
 from data_engine.web import (
+    DEFAULT_THEME,
+    THEMES,
     artifacts_fragment,
     artifacts_page,
     job_detail_page,
     jobs_fragment,
     jobs_page,
+    layout_css,
     status_fragment,
     status_page,
-    stylesheet,
+    vendor_css,
 )
+
+# Only these two filename shapes are servable; anything else is a 404.
+_SAFE_STYLESHEET = re.compile(r"(core|theme-[a-z0-9-]+)")
+
+
+def _theme(name: str | None) -> str:
+    """Only vendored themes are selectable; anything else falls back to the default."""
+    return name if name in THEMES else DEFAULT_THEME
 
 
 def _parse_state(state: str | None) -> JobState | None:
@@ -204,22 +216,38 @@ def create_app(
         return _status_model(catalog_for_request)
 
     @app.get("/ui/faultlined.css")
-    def ui_stylesheet() -> Response:
-        return Response(stylesheet(), media_type="text/css; charset=utf-8")
+    def ui_layout_css() -> Response:
+        return Response(layout_css(), media_type="text/css; charset=utf-8")
+
+    @app.get("/ui/vendor/terminal-ui/{name}.css")
+    def ui_vendor_css(name: str) -> Response:
+        """Serve the vendored terminal stylesheet. See web/vendor/terminal-ui/NOTICE.md."""
+        if not _SAFE_STYLESHEET.fullmatch(name):
+            raise HTTPException(status_code=404, detail="unknown stylesheet")
+        try:
+            body = vendor_css(f"{name}.css")
+        except OSError as exc:
+            raise HTTPException(status_code=404, detail="unknown stylesheet") from exc
+        return Response(body, media_type="text/css; charset=utf-8")
 
     @app.get("/ui", response_class=HTMLResponse)
-    def ui_status(request: Request, x_fragment: str | None = Header(default=None)) -> HTMLResponse:
-        """Status/Overview page. The X-Fragment header returns just the polling body."""
+    def ui_status(
+        request: Request,
+        theme: str | None = None,
+        x_fragment: str | None = Header(default=None),
+    ) -> HTMLResponse:
+        """Status/Overview. The X-Fragment header returns only the polling body."""
         catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
         model = _status_model(catalog_for_request)
         if x_fragment:
             return HTMLResponse(status_fragment(model))
-        return HTMLResponse(status_page(model))
+        return HTMLResponse(status_page(model, _theme(theme)))
 
     @app.get("/ui/jobs", response_class=HTMLResponse)
     def ui_jobs(
         request: Request,
         state: str | None = None,
+        theme: str | None = None,
         x_fragment: str | None = Header(default=None),
     ) -> HTMLResponse:
         catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
@@ -227,28 +255,31 @@ def create_app(
         summaries = {"items": [_job_summary(row) for row in rows]}
         if x_fragment:
             return HTMLResponse(jobs_fragment(summaries))
-        return HTMLResponse(jobs_page(summaries, state))
+        return HTMLResponse(jobs_page(summaries, state, _theme(theme)))
 
     @app.get("/ui/jobs/{job_id}", response_class=HTMLResponse)
-    def ui_job_detail(job_id: str, request: Request) -> HTMLResponse:
+    def ui_job_detail(job_id: str, request: Request, theme: str | None = None) -> HTMLResponse:
         catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
         job = catalog_for_request.get_job(job_id)
         if job is None:
             return HTMLResponse(
-                '<!doctype html><p>No such job. <a href="/ui/jobs">Back to jobs</a></p>',
+                '<!doctype html><p class="de-empty">// no such job. '
+                '<a href="/ui/jobs">back to jobs</a></p>',
                 status_code=404,
             )
-        return HTMLResponse(job_detail_page(job))
+        return HTMLResponse(job_detail_page(job, _theme(theme)))
 
     @app.get("/ui/artifacts", response_class=HTMLResponse)
     def ui_artifacts(
-        request: Request, x_fragment: str | None = Header(default=None)
+        request: Request,
+        theme: str | None = None,
+        x_fragment: str | None = Header(default=None),
     ) -> HTMLResponse:
         catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
         items = {"items": catalog_for_request.list_artifacts(limit=50)}
         if x_fragment:
             return HTMLResponse(artifacts_fragment(items))
-        return HTMLResponse(artifacts_page(items))
+        return HTMLResponse(artifacts_page(items, _theme(theme)))
 
     @app.get("/api/v1/episodes/{episode_id}", response_model=EpisodeResponse)
     def get_episode(episode_id: str, request: Request) -> dict[str, Any]:
