@@ -10,4 +10,4 @@ supersede it with a new ADR and update the affected docs.
 |---|---|---|
 | [0001](0001-record-architecture-decisions.md) | Record architecture decisions | accepted |
 | [0002](0002-secrets-handling.md) | Secrets handling | accepted |
-| [0003](0003-problem-selection.md) | Problem selection: robot episode data engine | proposed (awaiting owner approval) |
+| [0003](0003-problem-selection.md) | Problem selection: robot episode data engine | accepted |

@@ -1,6 +1,6 @@
 # 0003. Problem selection: robot episode data engine
 
-- **Status:** proposed (awaiting owner approval at the phase-01 checkpoint)
+- **Status:** accepted (owner approved 2026-09-28 at the phase-01 checkpoint)
 - **Date (UTC):** 2026-09-28
 - **Deciders:** researcher + architect agents (proposal); project owner (approval)
 

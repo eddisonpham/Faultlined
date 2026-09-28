@@ -16,15 +16,15 @@ Rules:
 Source: [01-scaffolding-instructions.md](01-scaffolding-instructions.md) §3.
 
 **Problem**
-- [ ] Concrete robotics ML infra problem selected (ADR)
-- [ ] Users and workflow documented
-- [ ] Relationship to NVIDIA/Tesla/Amazon Robotics/Google Robotics patterns documented
-- [ ] Scope boundaries and non-goals explicit
+- [x] Concrete robotics ML infra problem selected (ADR) — [ADR 0003](../decisions/0003-problem-selection.md) (accepted)
+- [x] Users and workflow documented — [problem.md](problem.md) §3, §5
+- [x] Relationship to NVIDIA/Tesla/Amazon Robotics/Google Robotics patterns documented — [problem.md](problem.md) §6, [industry-patterns.md](../research/industry-patterns.md)
+- [x] Scope boundaries and non-goals explicit — [problem.md](problem.md) §7
 
 **Research**
-- [ ] Sources recorded in `research/source-log.md` (breadth targets met)
-- [ ] Technologies/patterns classified core / optional / excluded with justification
-- [ ] Research sufficient to justify the architecture
+- [x] Sources recorded in `research/source-log.md` (breadth targets met) — 40 sources / 14 orgs / 13 job postings, [source-log.md](../research/source-log.md)
+- [x] Technologies/patterns classified core / optional / excluded with justification — [technology-matrix.md](../research/technology-matrix.md)
+- [ ] Research sufficient to justify the architecture — TODO(phase 03): confirm no evidence gaps when the architecture is written
 
 **Architecture**
 - [ ] Components, responsibilities, data/control flow documented
