@@ -26,7 +26,7 @@ def test_gc_reports_placeholder(capsys: pytest.CaptureFixture[str]) -> None:
 def test_worker_once_initializes_and_processes_one(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(cli, "initialize_schema", MagicMock())
     worker = MagicMock()
-    monkeypatch.setattr(cli, "IngestWorker", lambda _settings: worker)
+    monkeypatch.setattr(cli, "IngestWorker", lambda _settings, **_kwargs: worker)
     cli.main(["worker", "--once"])
     worker.process_one.assert_called_once()
 

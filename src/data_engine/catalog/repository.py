@@ -161,6 +161,16 @@ class PostgresCatalog:
             )
             return dict(row)
 
+    def count_jobs(self, state: JobState) -> int:
+        """Number of jobs currently in ``state``; feeds the queue-depth gauge."""
+        with connect(self.settings) as connection:
+            row = connection.execute(
+                "SELECT count(*) AS total FROM jobs WHERE state = %s", (state.value,)
+            ).fetchone()
+        if row is None:
+            return 0
+        return cast(int, row["total"])
+
     def get_job(self, job_id: str) -> dict[str, Any] | None:
         with connect(self.settings) as connection:
             row = connection.execute("SELECT * FROM jobs WHERE id = %s", (job_id,)).fetchone()

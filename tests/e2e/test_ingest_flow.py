@@ -45,11 +45,15 @@ class InMemoryCatalog:
             self.keys[key] = job_id
         return job, True
 
+    def count_jobs(self, state: str) -> int:
+        return sum(1 for job in self.jobs.values() if job["state"] == state)
+
     def claim_job(self) -> dict[str, Any] | None:
         job = next((item for item in self.jobs.values() if item["state"] == "queued"), None)
         if job is None:
             return None
         job["state"] = "running"
+        job["started_at"] = "2026-09-28T00:00:01Z"
         return job
 
     def register_episode(self, **kwargs: Any) -> dict[str, Any]:

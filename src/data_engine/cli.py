@@ -15,11 +15,17 @@ from data_engine.catalog.database import initialize_schema
 from data_engine.config import load_settings
 from data_engine.jobs.worker import IngestWorker
 from data_engine.observability.logging import configure_logging
+from data_engine.observability.metrics import JsonlMetricSink, RuntimeMetrics
+
+
+def build_metrics(settings: Any) -> RuntimeMetrics:
+    """Runtime recorder writing to the configured JSONL sink."""
+    return RuntimeMetrics(JsonlMetricSink(settings.metrics_path))
 
 
 def _worker_loop(stop: Any, poll_seconds: float = 0.25) -> None:
     settings = load_settings()
-    worker = IngestWorker(settings)
+    worker = IngestWorker(settings, metrics=build_metrics(settings))
     while not stop.is_set():
         result = worker.process_one()
         if result is None:
@@ -47,7 +53,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         return
     if args.command == "worker":
         initialize_schema(settings)
-        worker = IngestWorker(settings)
+        worker = IngestWorker(settings, metrics=build_metrics(settings))
         if args.once:
             worker.process_one()
             return

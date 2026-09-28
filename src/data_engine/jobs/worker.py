@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import time
+from datetime import datetime
 from typing import Any
 
 from data_engine.catalog.repository import PostgresCatalog
@@ -10,21 +12,64 @@ from data_engine.config import Settings
 from data_engine.ingest.service import SyntheticEpisodeIngestService
 from data_engine.jobs.state import JobState
 from data_engine.observability.logging import correlation_id_var
+from data_engine.observability.metrics import RuntimeMetrics
+from data_engine.observability.reason_codes import ReasonCode
 from data_engine.storage.artifacts import FileArtifactStore
 
 logger = logging.getLogger(__name__)
 
 
+class UnsupportedJobType(ValueError):
+    """A claimed job is not handled by this worker."""
+
+
+class InvalidJobPayload(ValueError):
+    """A claimed job's payload does not match the handler contract."""
+
+
+def _failure_reason_code(exc: Exception) -> ReasonCode:
+    if isinstance(exc, InvalidJobPayload):
+        return ReasonCode.INGEST_PARSE_FAILED
+    if isinstance(exc, UnsupportedJobType):
+        return ReasonCode.INGEST_FORMAT_UNKNOWN
+    if isinstance(exc, KeyError):
+        return ReasonCode.INGEST_PARSE_FAILED
+    return ReasonCode.INTERNAL_ERROR
+
+
+def _elapsed_seconds(earlier: object, later: object) -> float | None:
+    """Seconds between two datetimes, or None when either is missing/unparsable."""
+    if not isinstance(earlier, datetime) or not isinstance(later, datetime):
+        return None
+    delta = (later - earlier).total_seconds()
+    return delta if delta >= 0 else None
+
+
 class IngestWorker:
-    def __init__(self, settings: Settings | None = None) -> None:
+    def __init__(
+        self,
+        settings: Settings | None = None,
+        *,
+        metrics: RuntimeMetrics | None = None,
+    ) -> None:
         self.settings = settings or Settings()
         self.catalog = PostgresCatalog(self.settings)
         self.artifacts = FileArtifactStore(self.settings.artifact_root)
-        self.ingest = SyntheticEpisodeIngestService(self.catalog, self.artifacts)
+        self.ingest = SyntheticEpisodeIngestService(self.catalog, self.artifacts, metrics=metrics)
+        self.metrics = metrics or RuntimeMetrics()
+
+    def _record_queue_signals(self, job: dict[str, Any]) -> None:
+        """Queue depth after the claim, plus time spent waiting for this job."""
+        self.metrics.queue_depth(self.catalog.count_jobs(JobState.QUEUED))
+        job_type = str(job["type"])
+        waited = _elapsed_seconds(job.get("created_at"), job.get("started_at"))
+        if waited is not None:
+            self.metrics.job_queue_time(waited, job_type=job_type)
 
     def process_one(self) -> dict[str, Any] | None:
         job = self.catalog.claim_job()
         if job is None:
+            self.metrics.queue_depth(self.catalog.count_jobs(JobState.QUEUED))
             return None
         correlation_id = str(job["correlation_id"])
         token = correlation_id_var.set(correlation_id)
@@ -32,16 +77,26 @@ class IngestWorker:
             "claimed job",
             extra={"event": "job_claimed", "job_id": job["id"], "correlation_id": correlation_id},
         )
+        self._record_queue_signals(job)
+        job_type = str(job["type"])
+        started = time.perf_counter()
         try:
             if job["type"] != "ingest":
-                raise ValueError(f"unsupported job type: {job['type']}")
+                raise UnsupportedJobType(f"unsupported job type: {job['type']}")
             payload = job["payload"]
             episode = payload.get("episode")
             if not isinstance(episode, dict):
-                raise ValueError("payload.episode must be an object")
+                raise InvalidJobPayload("payload.episode must be an object")
             result = self.ingest.ingest(episode, job_id=str(job["id"]))
             episode_id = str(result["episode_id"])
             completed = self.catalog.finish_job(str(job["id"]), JobState.SUCCEEDED, result=result)
+            stage_seconds = time.perf_counter() - started
+            self.metrics.job_run_time(
+                stage_seconds, job_type=job_type, state=JobState.SUCCEEDED.value
+            )
+            self.metrics.stage_duration(
+                stage_seconds, stage="ingest", status=JobState.SUCCEEDED.value
+            )
             logger.info(
                 "ingest job succeeded",
                 extra={
@@ -53,6 +108,11 @@ class IngestWorker:
             )
             return completed
         except Exception as exc:
+            stage_seconds = time.perf_counter() - started
+            reason_code = _failure_reason_code(exc)
+            self.metrics.job_run_time(stage_seconds, job_type=job_type, state=JobState.FAILED.value)
+            self.metrics.stage_duration(stage_seconds, stage="ingest", status=JobState.FAILED.value)
+            self.metrics.job_failure(job_type=job_type, reason_code=reason_code.value)
             logger.error(
                 "ingest job failed",
                 extra={
@@ -60,6 +120,7 @@ class IngestWorker:
                     "job_id": job["id"],
                     "correlation_id": correlation_id,
                     "error_type": type(exc).__name__,
+                    "reason_code": reason_code.value,
                 },
             )
             self.catalog.finish_job(

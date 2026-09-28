@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     worker_slots: str = "auto"  # "auto" or "cpu=N,gpu=N"
     api_host: str = "127.0.0.1"
     api_port: int = Field(default=8000, ge=1, le=65535)
+    metrics_path: Path = Path("./var/metrics/runtime.jsonl")
 
     # No env_prefix for this one: the name is fixed by the secrets convention (ADR 0002).
     hf_key: SecretStr | None = Field(default=None, validation_alias="HF_KEY")
