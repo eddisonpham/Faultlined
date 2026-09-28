@@ -52,6 +52,35 @@ stop it.
 
 The current repository stage is **scaffolding (not yet accepted)**. A synthetic JSON API/worker/artifact vertical slice and benchmark/telemetry foundations exist; scope and limitations are recorded in [the handoff](agents/HANDOFF.md). `just run` requires a configured PostgreSQL database. `just bench` runs a synthetic local workload and compares it against the committed baseline; see [EXP-0001](agents/experiments/0001-synthetic-ingest-baseline.md) for what that number does and does not mean. Host-based development with optional containers is recorded in [ADR 0012](agents/decisions/0012-host-based-development.md).
 
+## Try it
+
+`just run` starts the API on `http://127.0.0.1:8000` and a worker beside it. In another terminal:
+
+```bash
+# health check
+curl -s http://127.0.0.1:8000/api/v1/health
+
+# submit an ingest job (the worker picks it up within a second)
+JOB=$(curl -s -X POST http://127.0.0.1:8000/api/v1/jobs   -H 'Content-Type: application/json'   -H 'Idempotency-Key: demo-1'   -d '{"type":"ingest","payload":{"episode":{"task":"pick_place","robot":"arm",
+       "timestamps":[0.0,0.1,0.2],"observations":[[0.0],[1.0],[2.0]],
+       "actions":[[0.1],[0.2],[0.3]]}}}')
+echo "$JOB"
+
+# watch it finish
+curl -s http://127.0.0.1:8000/api/v1/jobs/<id>
+
+# the registered episode, with lineage back to the job
+curl -s http://127.0.0.1:8000/api/v1/episodes/<episode_id>
+```
+
+The response carries `X-Correlation-Id` and `X-Idempotent-Replay`. Re-sending the same
+`Idempotency-Key` **with the same payload** replays the original job (`x-idempotent-replay: true`);
+re-sending it with a **different** payload is a `409`.
+
+Written artifacts land under `var/artifacts/blobs/`, and runtime metrics are appended to
+`var/metrics/runtime.jsonl` (queue depth, queue time, run time, stage duration, ingest counters).
+Interactive API docs are at `http://127.0.0.1:8000/docs`.
+
 ## Task commands
 
 ```bash
@@ -65,7 +94,10 @@ just typecheck   # strict mypy
 just test        # fast tests + coverage gate
 just test-all    # include slow and GPU-marked tests
 just bench       # synthetic harness + comparison against the committed baseline
-just run         # local API + worker (requires local PostgreSQL and DE_DATABASE_URL if non-default)
+just run         # local API + worker together (Ctrl+C to stop)
+just api         # HTTP API only
+just worker      # ingest worker only (-- --once to process a single job)
+just doctor      # check database connectivity and catalog schema
 just hygiene     # relative links, ADRs, secrets, required structure
 just ci          # lint + typecheck + test + hygiene
 ```

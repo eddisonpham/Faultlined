@@ -59,9 +59,16 @@ def test_worker_processes_ingest_and_registers_episode(tmp_path: Path) -> None:
         "ingest", {"episode": _episode()}, f"worker-{uuid.uuid4()}", "test-correlation"
     )
 
-    completed = IngestWorker(settings).process_one()
+    # process_one claims the oldest queued job in the shared catalog, which is not
+    # necessarily this one: other tests and any leftover work sit in the same queue.
+    # Drain until this job reaches a terminal state instead of assuming it goes first.
+    worker = IngestWorker(settings)
+    for _ in range(50):
+        if worker.process_one() is None:
+            break
+        if catalog.get_job(job["id"])["state"] != JobState.QUEUED.value:
+            break
 
-    assert completed is not None
     actual = catalog.get_job(job["id"])
     assert actual is not None
     assert actual["state"] == JobState.SUCCEEDED.value

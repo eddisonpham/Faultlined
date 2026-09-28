@@ -23,10 +23,24 @@ def build_metrics(settings: Any) -> RuntimeMetrics:
     return RuntimeMetrics(JsonlMetricSink(settings.metrics_path))
 
 
+def _parent_alive() -> bool:
+    """False once the parent process is gone.
+
+    `dev` runs the worker as a child process. If the parent is killed outright the
+    child is not reaped, and an orphan keeps claiming jobs from the shared catalog,
+    which silently breaks `just test` and steals work from any other worker.
+    """
+    parent = multiprocessing.parent_process()
+    return parent is not None and parent.is_alive()
+
+
 def _worker_loop(stop: Any, poll_seconds: float = 0.25) -> None:
     settings = load_settings()
     worker = IngestWorker(settings, metrics=build_metrics(settings))
     while not stop.is_set():
+        if not _parent_alive():
+            logging.getLogger(__name__).warning("parent process gone; worker exiting")
+            return
         result = worker.process_one()
         if result is None:
             stop.wait(poll_seconds)
@@ -75,7 +89,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         initialize_schema(settings)
         stop = multiprocessing.Event()
         worker_process = multiprocessing.Process(
-            target=_worker_loop, args=(stop,), name="data-engine-worker"
+            target=_worker_loop, args=(stop,), name="data-engine-worker", daemon=True
         )
         worker_process.start()
         try:

@@ -36,9 +36,25 @@ test-all:
 bench *ARGS:
     uv run --all-extras python -m benchmarks.harness {{ARGS}}
 
-# Run the platform locally (API + workers)
+# Run the platform locally (API + worker in one process group)
 run:
     uv run --all-extras de dev
+
+# Run only the HTTP API
+api:
+    uv run --all-extras de api
+
+# Run only the ingest worker (add --once to process at most one job)
+worker *ARGS:
+    uv run --all-extras de worker {{ARGS}}
+
+# Check database connectivity and catalog schema
+doctor:
+    uv run --all-extras de doctor
+
+# Garbage collection (not implemented in the vertical slice)
+gc:
+    uv run --all-extras de gc
 
 # Repository hygiene (structure, links, ADRs, secret patterns)
 hygiene:
