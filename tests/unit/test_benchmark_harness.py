@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 from unittest.mock import patch
 from uuid import uuid4
@@ -14,13 +15,15 @@ from benchmarks.provenance import collect_provenance
 from benchmarks.schema import BenchmarkResult
 from pydantic import ValidationError
 
+SCHEMA_PATH = Path(__file__).parents[2] / "agents" / "benchmarking" / "result.schema.json"
+
 
 def _result(p50: float = 0.01) -> BenchmarkResult:
     config = {"warmups": 1, "trials": 2}
     provenance = collect_provenance(config, workload="test", workload_version="1.0")
     return BenchmarkResult.model_validate(
         {
-            "schema_version": 1,
+            "schema_version": 2,
             "run_id": str(uuid4()),
             "benchmark": {"name": "test-bench", "version": "1.0"},
             "status": "ok",
@@ -47,6 +50,7 @@ def _result(p50: float = 0.01) -> BenchmarkResult:
             "summary": {
                 "n": 2,
                 "warmup_count": 1,
+                "warmup_failure_count": 0,
                 "p50_seconds": p50,
                 "p95_seconds": p50,
                 "p99_seconds": p50,
@@ -74,6 +78,16 @@ def test_result_rejects_missing_provenance() -> None:
 
 
 @pytest.mark.unit
+def test_published_json_schema_matches_pydantic_model() -> None:
+    published_schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
+    assert published_schema.pop("$schema") == "https://json-schema.org/draft/2020-12/schema"
+    assert published_schema.pop("$id") == (
+        "https://example.invalid/data-engine/benchmark-result-v2.schema.json"
+    )
+    assert published_schema == BenchmarkResult.model_json_schema()
+
+
+@pytest.mark.unit
 def test_harness_runs_warmup_and_repeated_trials_and_persists(tmp_path: Path) -> None:
     calls = 0
 
@@ -92,6 +106,33 @@ def test_harness_runs_warmup_and_repeated_trials_and_persists(tmp_path: Path) ->
         result = run_benchmark(operation, name="op", warmups=2, trials=3)
     assert calls == 5
     assert result.summary.n == 3
+    output = persist_result(result, tmp_path)
+    assert validate_result_file(output).run_id == result.run_id
+
+
+@pytest.mark.unit
+def test_warmup_failure_produces_persistable_failed_result(tmp_path: Path) -> None:
+    def operation() -> None:
+        raise RuntimeError("synthetic warmup error")
+
+    with (
+        patch("benchmarks.harness.sample_resources") as sample,
+        patch(
+            "benchmarks.harness.collect_provenance",
+            return_value=collect_provenance({}, workload="op", workload_version="1"),
+        ),
+    ):
+        sample.return_value.to_dict.return_value = {"gpu_present": False}
+        result = run_benchmark(operation, name="op", warmups=3, trials=2)
+
+    assert result.status == "failed"
+    assert result.trials == []
+    assert result.summary.n == 0
+    assert result.summary.warmup_count == 1
+    assert result.summary.warmup_failure_count == 1
+    assert result.summary.failure_count == 0
+    assert result.failure is not None
+    assert result.failure.type == "WarmupFailure"
     output = persist_result(result, tmp_path)
     assert validate_result_file(output).run_id == result.run_id
 
@@ -160,8 +201,6 @@ def test_baseline_comparison_rejects_other_hardware(tmp_path: Path) -> None:
 
 @pytest.mark.unit
 def test_failed_trial_result_is_consistent_and_invalid_success_is_rejected() -> None:
-    from benchmarks.schema import BenchmarkResult
-
     payload = _result().model_dump(mode="json")
     payload["trials"][1]["success"] = False
     payload["summary"]["failure_count"] = 1
@@ -171,5 +210,5 @@ def test_failed_trial_result_is_consistent_and_invalid_success_is_rejected() -> 
 
     payload["status"] = "ok"
     payload["failure"] = None
-    with pytest.raises(ValidationError, match="failed trials"):
+    with pytest.raises(ValidationError, match="status must match"):
         BenchmarkResult.model_validate(payload)

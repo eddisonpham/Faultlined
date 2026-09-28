@@ -37,12 +37,25 @@ def summarize(
     warmup_count: int,
     failures: int,
     seed: int,
+    warmup_failure_count: int = 0,
 ) -> ResultSummary:
     if not samples:
-        raise ValueError("at least one measured sample is required")
+        return ResultSummary(
+            n=0,
+            warmup_count=warmup_count,
+            warmup_failure_count=warmup_failure_count,
+            p50_seconds=0.0,
+            p95_seconds=0.0,
+            p99_seconds=0.0,
+            mean_seconds=0.0,
+            stddev_seconds=0.0,
+            ci95_mean_seconds=(0.0, 0.0),
+            failure_count=failures,
+        )
     return ResultSummary(
         n=len(samples),
         warmup_count=warmup_count,
+        warmup_failure_count=warmup_failure_count,
         p50_seconds=nearest_rank(samples, 0.50),
         p95_seconds=nearest_rank(samples, 0.95),
         p99_seconds=nearest_rank(samples, 0.99),

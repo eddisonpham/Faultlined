@@ -1,13 +1,13 @@
 # Benchmark Metric / Result Schema
 
-**Status: initial schema version 1 implemented; model/JSON Schema parity is not yet verified.** Python model:
-`benchmarks/schema.py`; JSON Schema: [`result.schema.json`](result.schema.json). Schema changes increment `schema_version`; old results remain readable.
+**Status: schema version 2 implemented; published JSON Schema is generated from the Pydantic model and parity-tested.** Python model:
+`benchmarks/schema.py`; JSON Schema: [`result.schema.json`](result.schema.json). Version 2 records warmup failures separately and supports zero measured trials when a warmup fails. Schema changes increment `schema_version`; older version-1 raw results require a migration or compatibility reader, which is not implemented yet.
 
 ## Result envelope (`BenchmarkResult`)
 
 | Field | Type | Required | Meaning |
 |---|---|---:|---|
-| `schema_version` | integer | yes | Current value: `1` |
+| `schema_version` | integer | yes | Current value: `2` |
 | `run_id` | UUID string | yes | Unique benchmark invocation |
 | `benchmark` | object `{name, version}` | yes | Stable named workload |
 | `status` | `ok` / `failed` | yes | Failure includes `failure` details |
@@ -16,7 +16,7 @@
 | `config` | object | yes | Full benchmark config (warmup/trials/payload/workers) |
 | `provenance` | object | yes | All mandatory provenance fields below; missing/empty required fields reject validation |
 | `trials` | array of `Trial` | yes | Per-trial raw latency seconds, success flag, and resource sample references |
-| `summary` | object | yes | n, warmup count, p50/p95/p99, mean, sample stddev, bootstrap CI95, failures |
+| `summary` | object | yes | n, warmup count and warmup failures, p50/p95/p99, mean, sample stddev, bootstrap CI95, measured failures |
 | `resource_samples` | array of telemetry snapshots | yes | Time series with CPU/RAM/disk/network/GPU-if-present fields |
 | `failure` | object or null | yes | Stable error type/message (no secrets) |
 
@@ -33,8 +33,8 @@ Container image digest is `null` when not containerized (ADR 0012).
 - Raw samples are preserved; latency values in seconds, bytes in bytes, utilization in percent.
 - Percentiles use nearest-rank on sorted samples: `ceil(p*n)-1` (clamped at 0); mean and sample standard deviation.
 - 95% CI for the mean uses deterministic bootstrap resampling (seeded) with 2,000 resamples and percentile bounds.
-- A result without complete provenance or at least one measured trial is invalid.
-- The current comparator checks benchmark name/version and exact equality of the recorded CPU, logical CPU count, RAM, GPU descriptor, and OS hardware profile. It flags a latency median increase > 20% **and** an absolute increase > 1 ms. This is a coarse scaffolding alarm, not a statistical significance claim; raw repeated samples are always retained. Published JSON Schema / Pydantic parity and independent comparison validation remain open review follow-ups before using this as an accepted regression gate.
+- A result without complete provenance or a measured trial is invalid, except a failed schema-v2 result may contain zero trials when a warmup failed; its latency summaries and CI are zero and `warmup_failure_count` records the failed warmup.
+- The current comparator checks benchmark name/version and exact equality of the recorded CPU, logical CPU count, RAM, GPU descriptor, and OS hardware profile. It flags a latency median increase > 20% **and** an absolute increase > 1 ms. This is a coarse scaffolding alarm, not a statistical significance claim; raw repeated samples are always retained. Published JSON Schema matches Pydantic-generated fields and constraints by a unit-test parity assertion. Baseline input validation and independent comparison validation remain open review follow-ups before using this as an accepted regression gate.
 
 ## Result storage
 

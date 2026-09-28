@@ -1,6 +1,6 @@
 # Handoff
 
-**Status: Scaffolding in progress; stage acceptance rejected on 2026-09-28.** See [engineering review](reviews/2026-09-28-scaffolding.md) and [definition of done](spec/definition-of-done.md). Phase 05/06 implementation remains uncommitted in the current working tree; review before staging or splitting commits. Do not tag `scaffold-complete` until the blocking criteria are closed and the review is repeated.
+**Status: Scaffolding in progress; stage acceptance rejected on 2026-09-28.** See [engineering review](reviews/2026-09-28-scaffolding.md) and [definition of done](spec/definition-of-done.md). Phase 05/06 work and the benchmark-hardening follow-up are committed on `main`; the working tree is clean. Do not tag `scaffold-complete` until the blocking criteria are closed and the review is repeated.
 
 ## 1. Current problem definition
 
@@ -32,19 +32,19 @@ Python 3.14, uv/uv.lock, just, Ruff, mypy, pytest/pytest-cov, FastAPI/Pydantic, 
 - One ingest worker process; atomic SHA-256 filesystem artifact writes; synthetic JSON canonicalization and lineage readback.
 - Unit/contract/E2E tests and Postgres-marked integration tests.
 - JSON log formatter, request/job correlation context, psutil/NVML resource snapshot, metric point/JSONL sink primitives.
-- Benchmark schema, summary statistics, provenance capture, synthetic local workload and baseline compare/write CLI. Initial uncommitted fixes validate raw-trial consistency and resource references, reject failed results for comparisons/baseline writes, require exact recorded hardware-profile match, and test failure/mismatch paths. They passed local gates; baseline/model-schema validation remains open.
+- Benchmark schema, summary statistics, provenance capture, synthetic local workload and baseline compare/write CLI. Current implementation validates raw-trial consistency and resource references, rejects failed results for comparisons/baseline writes, requires exact recorded hardware-profile match, persists warmup failures, and parity-tests the generated Pydantic/JSON Schema. These changes passed local gates; baseline input validation and confidence interval consistency remain open.
 
 **Not implemented or incomplete:**
 - MCAP/LeRobot readers, real-data ingest, validation rules/quarantine, Parquet indexing, LeRobot v3 builds, workload execution, frontend, complete job retries/leases/timeouts/cancellation/heartbeats, GC, formal DB migrations, runtime metric instrumentation, and a committed benchmark baseline.
-- `just bench` runs a synthetic workload but cannot complete comparison from a clean checkout because there is no baseline. Warmup failures still abort without a result file; confidence interval consistency and Pydantic/JSON Schema parity remain follow-ups.
+- `just bench` runs a synthetic workload but cannot complete comparison from a clean checkout because there is no baseline. Warmup failures now produce a persisted failed result with zero measured trials; confidence interval consistency and baseline input validation remain follow-ups.
 
 See [implementation status](implementation/status.md), [failure modes](testing/failure-modes.md), and [review findings](reviews/2026-09-28-scaffolding.md).
 
 ## 6. Known technical risks
 
 1. **Benchmark gate is not ready:** no baseline exists; default `just bench` fails at comparison on a clean checkout. Do not write a baseline until explicitly authorized and after correctness findings are resolved.
-2. **Benchmark trustworthiness:** selected raw-trial summaries/status/references and hardware comparison checks were added and locally gated, but are uncommitted. Warmup errors, bootstrap CI consistency, baseline schema validation, and model/JSON Schema parity remain.
-3. **Observability gaps:** runtime metrics are not emitted at queue/job/stage call sites. Initial uncommitted host telemetry changes return nullable fields on psutil/OS errors and an AccessDenied test passes; broaden failure-path tests and verify provenance's separate hardware sampling as well.
+2. **Benchmark trustworthiness:** raw-trial summaries/status/references, exact hardware comparison, warmup-failure persistence, and Pydantic/JSON Schema parity are covered and locally gated. Bootstrap CI consistency and baseline schema validation remain.
+3. **Observability gaps:** runtime metrics are not emitted at queue/job/stage call sites. Current host telemetry changes return nullable fields on psutil/OS errors and an AccessDenied test passes; broaden failure-path tests and verify provenance's separate hardware sampling as well.
 4. **Postgres path is unverified in the current test environment:** tests skip without `DE_DATABASE_URL`; do not open or recover `.env`. An operator may provide configuration through their environment for later verification.
 5. **Crash consistency:** artifact publication and DB catalog writes are separate transactions; worker crash recovery, retries, leases, and orphan GC remain future work.
 6. **Clean-clone review and complete secrets audit:** not performed. No `.env` was opened. The duplicate GitHub quality workflows should be consolidated or differentiated.
@@ -52,7 +52,7 @@ See [implementation status](implementation/status.md), [failure modes](testing/f
 
 ## 7. Highest-priority next steps
 
-1. Resolve benchmark follow-ups: CI consistency, warmup failure persistence, baseline schema validation, and Pydantic/JSON Schema parity.
+1. Resolve benchmark follow-ups: CI consistency and baseline schema validation.
 2. Wire runtime metrics or explicitly defer specific registry entries; broaden telemetry and provenance fallback tests.
 3. Ask the owner to authorize a controlled benchmark measurement. If authorized, preserve provenance, write the baseline, update EXP-0001 with real numbers/caveats, and verify default `just bench`.
 4. Run PostgreSQL-marked integration/E2E tests using operator-provided `DE_DATABASE_URL`; do not inspect local secret files.
@@ -73,11 +73,11 @@ Harness and schema foundations exist; `synthetic-episode-ingest` measures a tiny
 
 ## 10. Testing status
 
-Latest local gates after review fixes: `just fmt && just lint && just typecheck && just test && just hygiene && uv lock --check` passed; 74 passed, 3 skipped, coverage 92.04%, hygiene clean, lock current. A Starlette/httpx deprecation warning remains non-blocking. The 3 Postgres-dependent tests skipped because `DE_DATABASE_URL` is not configured. No clean-clone run or live DB verification has been completed. Repeat all gates after further changes.
+Latest local gates after benchmark-hardening follow-up: `just fmt && just lint && just typecheck && just test && just hygiene && uv lock --check` passed; 76 passed, 3 skipped, coverage 92.04%, hygiene clean, lock current. A Starlette/httpx deprecation warning remains non-blocking. The 3 Postgres-dependent tests skipped because `DE_DATABASE_URL` is not configured. No clean-clone run or live DB verification has been completed. Repeat all gates after further changes.
 
 ## 11. Observability status
 
-JSON logs and correlation IDs flow across the current API → persisted job → worker → logs path. Host telemetry snapshots CPU/RAM/disk/network with optional GPU fields; initial uncommitted code makes individual host fields nullable on psutil/OS errors, with one AccessDenied test, pending broader verification. Metric naming/point/sink primitives exist; runtime queue depth, wait, state, stage, failure, and episode metrics in [the registry](observability/conventions.md) are not wired to runtime call sites. Distributed tracing remains deferred per [ADR 0008](decisions/0008-observability.md); psutil is recorded in [ADR 0013](decisions/0013-cross-platform-resource-telemetry.md).
+JSON logs and correlation IDs flow across the current API → persisted job → worker → logs path. Host telemetry snapshots CPU/RAM/disk/network with optional GPU fields; host fields become nullable on psutil/OS errors, with an AccessDenied test in the passing suite. Broader failure-path testing and provenance's separate hardware sampling still need review. Metric naming/point/sink primitives exist; runtime queue depth, wait, state, stage, failure, and episode metrics in [the registry](observability/conventions.md) are not wired to runtime call sites. Distributed tracing remains deferred per [ADR 0008](decisions/0008-observability.md); psutil is recorded in [ADR 0013](decisions/0013-cross-platform-resource-telemetry.md).
 
 ## 12. Important decisions and rejected alternatives
 

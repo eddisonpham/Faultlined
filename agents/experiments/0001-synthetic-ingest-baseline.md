@@ -11,7 +11,7 @@ Establish a repeatable local reference for canonicalizing a small synthetic epis
 
 ## Change under test
 
-No performance optimization is being tested. The planned baseline will measure the current `synthetic-episode-ingest` workload once the harness correctness findings in [the scaffolding review](../reviews/2026-09-28-scaffolding.md) are resolved and the owner explicitly authorizes a measured baseline.
+No performance optimization is being tested. The planned baseline will measure the current `synthetic-episode-ingest` workload once the remaining baseline/comparison correctness findings in [the scaffolding review](../reviews/2026-09-28-scaffolding.md) are resolved and the owner explicitly authorizes a measured baseline.
 
 ## Configuration
 
@@ -31,7 +31,7 @@ A synthetic local workload avoids network downloads and robotics dependencies bu
 
 ## Conclusion
 
-Decision: **defer**. Collect and publish only after (1) owner authorization to write a measured baseline, (2) failed-run handling and result validation are corrected, and (3) hardware comparison compatibility is checked. The default `just bench` currently has no committed baseline to compare against.
+Decision: **defer**. Collect and publish only after (1) owner authorization to write a measured baseline, (2) baseline input validation and remaining result-consistency checks are corrected, and (3) hardware comparison compatibility remains verified. The default `just bench` currently has no committed baseline to compare against.
 
 ## Follow-ups
 

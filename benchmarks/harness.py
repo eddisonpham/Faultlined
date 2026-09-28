@@ -49,37 +49,54 @@ def run_benchmark(
     started = datetime.now(UTC)
     invocation_started = time.perf_counter()
     resource_samples: list[dict[str, Any]] = [sample_resources().to_dict()]
+    warmup_failures = 0
+    warmups_performed = 0
     for _ in range(warmups):
-        operation()
-    samples: list[float] = []
-    failures = 0
-    raw_trials: list[Trial] = []
-    for index in range(trials):
-        start_index = len(resource_samples) - 1
-        start = time.perf_counter()
-        success = True
+        warmups_performed += 1
         try:
             operation()
         except Exception:
-            success = False
-            failures += 1
-        elapsed = time.perf_counter() - start
-        samples.append(elapsed)
-        resource_samples.append(sample_resources().to_dict())
-        raw_trials.append(
-            Trial(
-                index=index,
-                latency_seconds=elapsed,
-                success=success,
-                resource_sample_start=start_index,
-                resource_sample_end=len(resource_samples) - 1,
+            warmup_failures += 1
+            break
+    samples: list[float] = []
+    failures = 0
+    raw_trials: list[Trial] = []
+    if warmup_failures == 0:
+        for index in range(trials):
+            start_index = len(resource_samples) - 1
+            start = time.perf_counter()
+            success = True
+            try:
+                operation()
+            except Exception:
+                success = False
+                failures += 1
+            elapsed = time.perf_counter() - start
+            samples.append(elapsed)
+            resource_samples.append(sample_resources().to_dict())
+            raw_trials.append(
+                Trial(
+                    index=index,
+                    latency_seconds=elapsed,
+                    success=success,
+                    resource_sample_start=start_index,
+                    resource_sample_end=len(resource_samples) - 1,
+                )
             )
-        )
-    summary = summarize(samples, warmup_count=warmups, failures=failures, seed=20260928)
+    else:
+        resource_samples.append(sample_resources().to_dict())
+    summary = summarize(
+        samples,
+        warmup_count=warmups_performed,
+        failures=failures,
+        seed=20260928,
+        warmup_failure_count=warmup_failures,
+    )
     result = BenchmarkResult(
+        schema_version=2,
         run_id=run_id,
         benchmark={"name": name, "version": version},
-        status="ok" if failures == 0 else "failed",
+        status="ok" if failures == 0 and warmup_failures == 0 else "failed",
         started_at=started,
         duration_seconds=time.perf_counter() - invocation_started,
         config=actual_config,
@@ -93,8 +110,15 @@ def run_benchmark(
         summary=summary,
         resource_samples=resource_samples,
         failure=None
-        if failures == 0
-        else {"type": "TrialFailure", "message": f"{failures} trial(s) failed"},
+        if failures == 0 and warmup_failures == 0
+        else {
+            "type": "WarmupFailure" if warmup_failures else "TrialFailure",
+            "message": (
+                f"{warmup_failures} warmup operation(s) failed"
+                if warmup_failures
+                else f"{failures} trial(s) failed"
+            ),
+        },
     )
     return result
 
