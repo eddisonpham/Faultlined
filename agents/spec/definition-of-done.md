@@ -1,6 +1,6 @@
 # Definition of Done (living)
 
-**Current stage: Scaffolding — not yet accepted (reviewed 2026-09-28).** Keep stage unchanged until every criterion is checked with evidence and the review is accepted.
+**Current stage: Scaffolding — review passed with follow-ups (2026-09-28); stage acceptance still pending a measured baseline.** Keep the stage unchanged until every criterion is checked with evidence. Product name: **Faultlined**.
 
 ```text
 Scaffolding → MVP → Production Baseline → Performance/Scaling → Production Hardening → Resume/Demo Ready
@@ -40,20 +40,20 @@ Source: [01-scaffolding-instructions.md](01-scaffolding-instructions.md) §3.
 - [x] Standards, methodology, conventions, known limitations, rejected approaches, current experiments all in `agents/` — see [benchmark backlog](../benchmarking/backlog.md), [experiment registry](../experiments/registry.md), [implementation status](../implementation/status.md), [observability conventions](../observability/conventions.md), [review](../reviews/2026-09-28-scaffolding.md); the planned EXP-0001 is explicitly not a measured experiment
 
 **Engineering tooling**
-- [x] Format, lint, type-check, test, 70% coverage gate, local dev config, CI; containers optional per [ADR 0012](../decisions/0012-host-based-development.md) / machine availability (phase-04 commit `110c83d`; gates pass)
+- [x] Format, lint, type-check, test, 70% coverage gate, local dev config, CI; containers optional per [ADR 0012](../decisions/0012-host-based-development.md) / machine availability — single canonical workflow `.github/workflows/ci.yml`; local gates pass (91 passed, 3 skipped, 91.34% coverage)
 - [x] One command each for setup, fmt, lint, typecheck, test, bench, run (`justfile`; run/harness code exists, but `just bench` still needs an absent baseline for successful default comparison; see open benchmarking criterion)
 
 **Vertical slice**
 - [x] Minimal end-to-end path through real API → Postgres queue → worker → content-addressed artifact → episode/lineage → API read, with unit/contract tests — [vertical-slice.md](../implementation/vertical-slice.md), tests: [unit](../../tests/unit/), [contract](../../tests/contract/), [Postgres integration/E2E](../../tests/integration/test_ingest_job.py), [E2E](../../tests/e2e/test_ingest_flow.py) (DB-dependent tests skip without operator-provided `DE_DATABASE_URL`)
 
 **Benchmarking**
-- [ ] Metric schema + harness + one real micro-benchmark + baseline; schema/harness foundations exist, but baseline is absent and a review blocker remains — [backlog](../benchmarking/backlog.md), [EXP-0001](../experiments/0001-synthetic-ingest-baseline.md), [review](../reviews/2026-09-28-scaffolding.md)
+- [ ] Metric schema + harness + one real micro-benchmark + baseline. Schema v2, statistics, provenance, validated baseline compare, and the synthetic workload are implemented and gated; **the baseline awaits the owner's green flag** (runbook in [HANDOFF §13](../HANDOFF.md#13-baseline-runbook-owner-green-flag-required)) — [EXP-0001](../experiments/0001-synthetic-ingest-baseline.md), [review](../reviews/2026-09-28-scaffolding.md)
 
 **Observability**
-- [ ] Structured logs, correlation IDs across components, metric naming, resource telemetry (degrades without GPU) — JSON logs/correlation and optional-GPU snapshot foundations exist; runtime metrics remain unwired. Host psutil failures now have an initial uncommitted nullable-field fix and test, awaiting full verification; see [conventions](../observability/conventions.md) and [review](../reviews/2026-09-28-scaffolding.md)
+- [x] Structured logs, correlation IDs across components, metric naming, resource telemetry (degrades without GPU) — JSON logs + correlation across API/queue/worker; host telemetry with nullable per-field fallback and optional GPU; **runtime metrics emitted at call sites** (queue depth, queue/run time, stage duration, failures, ingest counters) to a JSONL sink; [conventions](../observability/conventions.md), `src/data_engine/observability/metrics.py`
 
 **Handoff**
-- [ ] Repo-wide review accepted; `HANDOFF.md` complete; clean-clone run verified — handoff and review record exist, but the review verdict is reject and clean-clone verification was not performed
+- [ ] Repo-wide review accepted; `HANDOFF.md` complete; clean-clone run verified — review verdict is accept-with-follow-ups and the handoff is complete; **clean-clone run and history secrets scan remain outstanding**
 
 ## 2. MVP
 

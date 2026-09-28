@@ -1,6 +1,6 @@
 # Handoff
 
-**Status: Scaffolding in progress; stage acceptance rejected on 2026-09-28.** See [engineering review](reviews/2026-09-28-scaffolding.md) and [definition of done](spec/definition-of-done.md). Phase 05/06 work and the benchmark-hardening follow-up are committed on `main`; the working tree is clean. Do not tag `scaffold-complete` until the blocking criteria are closed and the review is repeated.
+**Status: Scaffolding; review verdict is accept-with-follow-ups (2026-09-28).** The project is **Faultlined**. All engineering findings are resolved and gated; the only blocker is publishing a measured benchmark baseline, which requires the owner's explicit green flag. See [engineering review](reviews/2026-09-28-scaffolding.md) and [definition of done](spec/definition-of-done.md). All work is committed on `main` and pushed. Do not tag `scaffold-complete` until the baseline and the residual verifications below are closed.
 
 ## 1. Current problem definition
 
@@ -28,36 +28,33 @@ Python 3.14, uv/uv.lock, just, Ruff, mypy, pytest/pytest-cov, FastAPI/Pydantic, 
 
 **Implemented foundations (current checkout):**
 - FastAPI POST job submission and GET job/episode/health subset; correlation middleware and typed request/response schema.
-- Postgres schema/repository for jobs, artifacts, episodes, and lineage; idempotent submission and atomic queue claim.
+- Postgres schema/repository for jobs, artifacts, episodes, and lineage; idempotent submission and atomic queue claim; queue-depth query.
 - One ingest worker process; atomic SHA-256 filesystem artifact writes; synthetic JSON canonicalization and lineage readback.
 - Unit/contract/E2E tests and Postgres-marked integration tests.
-- JSON log formatter, request/job correlation context, psutil/NVML resource snapshot, metric point/JSONL sink primitives.
-- Benchmark schema, summary statistics, provenance capture, synthetic local workload and baseline compare/write CLI. Current implementation validates raw-trial consistency and resource references, rejects failed results for comparisons/baseline writes, requires exact recorded hardware-profile match, persists warmup failures, and parity-tests the generated Pydantic/JSON Schema. These changes passed local gates; baseline input validation and confidence interval consistency remain open.
+- JSON log formatter, request/job correlation context, psutil/NVML host telemetry with nullable fallbacks.
+- **Runtime metrics emitted at call sites**: queue depth, queue/run time, stage duration, failures by reason code, episode and artifact counters (`RuntimeMetrics`, JSONL sink configured by `DE_METRICS_PATH`).
+- Benchmark schema v2, deterministic statistics, provenance capture, and a CLI that validates results and baselines, refuses to publish from a failed run, and fails closed with an actionable message.
 
 **Not implemented or incomplete:**
-- MCAP/LeRobot readers, real-data ingest, validation rules/quarantine, Parquet indexing, LeRobot v3 builds, workload execution, frontend, complete job retries/leases/timeouts/cancellation/heartbeats, GC, formal DB migrations, runtime metric instrumentation, and a committed benchmark baseline.
-- `just bench` runs a synthetic workload but cannot complete comparison from a clean checkout because there is no baseline. Warmup failures now produce a persisted failed result with zero measured trials; confidence interval consistency and baseline input validation remain follow-ups.
+- MCAP/LeRobot readers, real-data ingest, validation rules/quarantine, Parquet indexing, LeRobot v3 builds, workload execution, frontend, job retries/leases/timeouts/cancellation/heartbeats, GC, formal DB migrations, and a committed benchmark baseline.
+- `just bench` runs and produces a valid result, then exits 1 because no baseline is committed. That is the intended, awaited state.
 
 See [implementation status](implementation/status.md), [failure modes](testing/failure-modes.md), and [review findings](reviews/2026-09-28-scaffolding.md).
 
 ## 6. Known technical risks
 
-1. **Benchmark gate is not ready:** no baseline exists; default `just bench` fails at comparison on a clean checkout. Do not write a baseline until explicitly authorized and after correctness findings are resolved.
-2. **Benchmark trustworthiness:** raw-trial summaries/status/references, exact hardware comparison, warmup-failure persistence, and Pydantic/JSON Schema parity are covered and locally gated. Bootstrap CI consistency and baseline schema validation remain.
-3. **Observability gaps:** runtime metrics are not emitted at queue/job/stage call sites. Current host telemetry changes return nullable fields on psutil/OS errors and an AccessDenied test passes; broaden failure-path tests and verify provenance's separate hardware sampling as well.
-4. **Postgres path is unverified in the current test environment:** tests skip without `DE_DATABASE_URL`; do not open or recover `.env`. An operator may provide configuration through their environment for later verification.
-5. **Crash consistency:** artifact publication and DB catalog writes are separate transactions; worker crash recovery, retries, leases, and orphan GC remain future work.
-6. **Clean-clone review and complete secrets audit:** not performed. No `.env` was opened. The duplicate GitHub quality workflows should be consolidated or differentiated.
-7. Mixed phase 05/06 uncommitted work must be reviewed and carefully separated before any commit; avoid staging unrelated pre-existing changes.
+1. **No benchmark baseline yet — awaiting the green flag.** This is an authorization gap, not a tooling gap. When authorized, follow the runbook in [§13](#13-baseline-runbook-owner-green-flag-required).
+2. **Hardware matching is exact.** A baseline only compares on a byte-identical CPU/RAM/GPU/OS/disk profile; on a different machine the harness refuses to compare. Revisit with evidence before gating CI.
+3. **Postgres path is unverified in this environment:** tests skip without `DE_DATABASE_URL`; do not open or recover `.env`. An operator may supply configuration through their environment.
+4. **Crash consistency:** artifact publication and DB catalog writes are separate transactions; worker crash recovery, retries, leases, and orphan GC remain future work.
+5. **Clean-clone review and history secrets scan are not performed.** Current-tree hygiene passes; no `.env` was opened.
 
 ## 7. Highest-priority next steps
 
-1. Resolve benchmark follow-ups: CI consistency and baseline schema validation.
-2. Wire runtime metrics or explicitly defer specific registry entries; broaden telemetry and provenance fallback tests.
-3. Ask the owner to authorize a controlled benchmark measurement. If authorized, preserve provenance, write the baseline, update EXP-0001 with real numbers/caveats, and verify default `just bench`.
-4. Run PostgreSQL-marked integration/E2E tests using operator-provided `DE_DATABASE_URL`; do not inspect local secret files.
-5. Reconcile duplicate CI, conduct clean-clone documented-command validation and approved history secret scan, repeat the review, then stage/commit phase 05/06 logical pieces. Tag only after explicit stage acceptance criteria are met.
-6. MVP engineering order: real MCAP/LeRobot reader on a fixed subset → rule-based validation/quarantine → Parquet metadata index → durable job lifecycle/recovery → deterministic LeRobot v3 dataset build.
+1. **Owner green flag → run the baseline runbook in [§13](#13-baseline-runbook-owner-green-flag-required).**
+2. Verify the slice against a real PostgreSQL instance (operator-provided `DE_DATABASE_URL`).
+3. Validate a clean clone end-to-end and run a history-wide secrets scan; then repeat the review and consider `scaffold-complete`.
+4. MVP engineering order: real MCAP/LeRobot reader on a fixed subset → rule-based validation/quarantine → Parquet metadata index → durable job lifecycle/recovery → deterministic LeRobot v3 dataset build.
 
 ## 8. Open architectural questions
 
@@ -69,15 +66,15 @@ See [implementation status](implementation/status.md), [failure modes](testing/f
 
 ## 9. Benchmarking status
 
-Harness and schema foundations exist; `synthetic-episode-ingest` measures a tiny synthetic episode using an in-memory catalog and the filesystem artifact store (3 warmups, 10 trials). It is not a database, API, MCAP, LeRobot, or production throughput benchmark. **No real result, experiment outcome, or baseline has been published.** EXP-0001 is planned only. Backlog: [benchmark backlog](benchmarking/backlog.md); rules: [methodology](benchmarking/methodology.md); review: [scaffolding review](reviews/2026-09-28-scaffolding.md).
+Harness and schema v2 are implemented and tested; `synthetic-episode-ingest` measures a tiny synthetic episode using an in-memory catalog and the filesystem artifact store (3 warmups, 10 trials). It is **not** a database, API, MCAP, LeRobot, or production throughput benchmark. A verification run produced a valid schema-v2 result with full provenance, but **no result has been published as a measurement and no baseline is committed**; EXP-0001 stays planned. Backlog: [benchmark backlog](benchmarking/backlog.md); rules: [methodology](benchmarking/methodology.md); review: [scaffolding review](reviews/2026-09-28-scaffolding.md).
 
 ## 10. Testing status
 
-Latest local gates after benchmark-hardening follow-up: `just fmt && just lint && just typecheck && just test && just hygiene && uv lock --check` passed; 76 passed, 3 skipped, coverage 92.04%, hygiene clean, lock current. A Starlette/httpx deprecation warning remains non-blocking. The 3 Postgres-dependent tests skipped because `DE_DATABASE_URL` is not configured. No clean-clone run or live DB verification has been completed. Repeat all gates after further changes.
+Latest local gates: `just fmt && just lint && just typecheck && just test && just hygiene && uv lock --check` passed; **91 passed, 3 skipped, 91.34% coverage**, hygiene clean, lock current. A Starlette/httpx `TestClient` deprecation warning is non-blocking and deferred. The 3 skips are PostgreSQL-dependent (`DE_DATABASE_URL` not configured). No clean-clone run or live DB verification has been completed; repeat all gates after any change.
 
 ## 11. Observability status
 
-JSON logs and correlation IDs flow across the current API → persisted job → worker → logs path. Host telemetry snapshots CPU/RAM/disk/network with optional GPU fields; host fields become nullable on psutil/OS errors, with an AccessDenied test in the passing suite. Broader failure-path testing and provenance's separate hardware sampling still need review. Metric naming/point/sink primitives exist; runtime queue depth, wait, state, stage, failure, and episode metrics in [the registry](observability/conventions.md) are not wired to runtime call sites. Distributed tracing remains deferred per [ADR 0008](decisions/0008-observability.md); psutil is recorded in [ADR 0013](decisions/0013-cross-platform-resource-telemetry.md).
+JSON logs and correlation IDs flow across the current API → persisted job → worker → logs path. Host telemetry snapshots CPU/RAM/disk/network with optional GPU fields; host fields become nullable on psutil/OS errors, with an AccessDenied test in the passing suite. **Runtime metrics are emitted** at the worker and ingest call sites — `jobs_queue_depth`, `jobs_queue_time_seconds`, `jobs_run_time_seconds`, `jobs_failures_total`, `pipeline_stage_duration_seconds`, `episodes_ingested_total`, `artifacts_written_bytes_total` — written to a JSONL sink at `DE_METRICS_PATH` (default `var/metrics/runtime.jsonl`). Labels stay low-cardinality; IDs appear only in logs. Sink failures never break the pipeline. Distributed tracing remains deferred per [ADR 0008](decisions/0008-observability.md); psutil is recorded in [ADR 0013](decisions/0013-cross-platform-resource-telemetry.md).
 
 ## 12. Important decisions and rejected alternatives
 
@@ -85,3 +82,27 @@ JSON logs and correlation IDs flow across the current API → persisted job → 
 - PostgreSQL catalog + thin custom queue (ADR 0005); content-addressed local artifacts / ecosystem data formats (ADR 0006); build-thin lineage/run records (ADR 0007).
 - Stdlib JSON logging, correlation IDs, file metric direction, defer OTel/Prometheus/Grafana until need (ADR 0008); FastAPI (ADR 0009); modular monolith + separate worker (ADR 0010); 70% coverage floor (ADR 0011); host-based development, containers optional (ADR 0012); psutil host telemetry (ADR 0013).
 - No performance approach has been measured or adopted; there are no experiment-backed optimization claims. Alternatives and triggers are recorded in the linked ADRs and [experiment registry](experiments/registry.md).
+
+## 13. Baseline runbook (owner green flag required)
+
+Do not start until the owner authorizes a measured baseline. Preconditions: a committed, clean tree; the machine you
+will measure on must stay idle; nothing else heavy may run during the measurement.
+
+```bash
+just ci                                  # 1. all gates green before measuring
+git status --short                       # 2. must be empty (provenance records dirty state)
+just bench --write-baseline --baseline benchmarks/baselines/synthetic-ingest-$(git rev-parse --short HEAD).json
+just bench                               # 4. re-run: must now compare and report no regression
+```
+
+Then, before tagging:
+
+1. Inspect the written baseline and the raw result under `benchmarks/results/`. Confirm provenance is complete:
+   git commit, dirty flag, config hash, hardware, OS/Python/lockfile, seed, timestamp, workload version, background-load note.
+2. Update [EXP-0001](experiments/0001-synthetic-ingest-baseline.md) with the actual numbers, the hardware profile, and
+   honest caveats. Do not restate the number as a throughput or production claim — it is a synthetic local microbenchmark.
+3. Update [the experiment registry](experiments/registry.md) to record the measured entry.
+4. Tick the Benchmarking criterion in [the definition of done](spec/definition-of-done.md) with links to the baseline,
+   EXP-0001, and the result file. Leave Handoff unticked until the clean-clone and secrets-scan items close.
+5. Re-run `just ci`, then commit as `bench: record first measured baseline` and push.
+6. Only after the Handoff criterion is also evidenced, tag `scaffold-complete`.

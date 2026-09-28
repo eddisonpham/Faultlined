@@ -62,4 +62,4 @@ Never commit large data, model weights, or `.env`.
 
 ## Current stage
 
-Scaffolding (reviewed 2026-09-28; not accepted — see [review](agents/reviews/2026-09-28-scaffolding.md) and [handoff](agents/HANDOFF.md)). Update only after all DoD criteria are evidenced.
+Scaffolding — review passed with follow-ups 2026-09-28; stage acceptance pending a measured benchmark baseline (owner green flag). See [review](agents/reviews/2026-09-28-scaffolding.md) and [handoff](agents/HANDOFF.md).

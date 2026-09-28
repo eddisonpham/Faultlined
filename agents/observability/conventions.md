@@ -1,6 +1,6 @@
 # Observability Conventions
 
-Implemented foundations (phase 06), not complete runtime instrumentation. Libraries: stdlib logging/JSON, psutil host sampling (ADR 0013), optional NVML GPU sampling (ADR 0008). Initial host psutil error fallback uses nullable fields; it is under verification. Runtime metrics below are a target registry, not all emitted today.
+Implemented: JSON logging, correlation IDs, host/GPU telemetry with per-field fallback, and runtime metric emission at worker/ingest call sites. Libraries: stdlib logging/JSON, psutil host sampling (ADR 0013), optional NVML GPU sampling (ADR 0008). Host psutil errors yield `null` fields rather than exceptions. Host-level `system_*` gauges are sampled by the benchmark harness but not yet on a runtime interval.
 
 ## Principles
 - Every metric or log field must inform a decision. Delete ones that don't.
@@ -43,7 +43,9 @@ Implemented foundations (phase 06), not complete runtime instrumentation. Librar
 | `episodes_ingested_total` | counter | episodes | `format`, `status` | Ingest throughput/failure trend |
 | `artifacts_written_bytes_total` | counter | bytes | `kind` | Disk/storage growth |
 
-Labels are deliberately low-cardinality; IDs belong in logs/result provenance, never metric labels. The metric point and JSONL sink primitives exist, but runtime call sites for queue/job/stage metrics are not yet wired. The registry is a target list, not evidence those metrics are currently collected.
+Labels are deliberately low-cardinality; IDs belong in logs/result provenance, never metric labels.
+
+**Emission status.** `RuntimeMetrics` emits these signals at their call sites: `jobs_queue_depth`, `jobs_queue_time_seconds`, `jobs_run_time_seconds`, `jobs_failures_total`, `pipeline_stage_duration_seconds`, `episodes_ingested_total`, and `artifacts_written_bytes_total`. They are appended as JSONL to `DE_METRICS_PATH` (default `var/metrics/runtime.jsonl`, gitignored) by `de worker`/`de dev`. Sink failures are logged and swallowed so telemetry never breaks the pipeline. Not yet emitted: the `system_*` host/GPU gauges, `workers_heartbeat_age_seconds` (no heartbeat leases yet), and per-format validation/episode signals from unimplemented stages.
 
 ## Tracing
 
