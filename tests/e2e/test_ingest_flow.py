@@ -1,4 +1,3 @@
-import os
 import uuid
 from pathlib import Path
 from typing import Any
@@ -12,6 +11,7 @@ from data_engine.catalog.repository import PostgresCatalog
 from data_engine.config import Settings
 from data_engine.jobs.state import JobState
 from data_engine.jobs.worker import IngestWorker
+from tests.conftest import postgres_test_dsn
 
 
 class InMemoryCatalog:
@@ -147,7 +147,7 @@ def test_api_worker_artifact_and_lineage_end_to_end(tmp_path: Path) -> None:
 @pytest.mark.e2e
 @pytest.mark.integration
 def test_real_postgres_catalog_initializes_when_configured() -> None:
-    dsn = os.environ.get("DE_DATABASE_URL")
+    dsn = postgres_test_dsn()
     if not dsn:
         pytest.skip("DE_DATABASE_URL is required for PostgreSQL integration test")
     settings = Settings(database_url=dsn, _env_file=None)

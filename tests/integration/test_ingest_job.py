@@ -1,4 +1,3 @@
-import os
 import uuid
 from pathlib import Path
 from typing import Any
@@ -10,12 +9,13 @@ from data_engine.catalog.repository import IdempotencyConflict, PostgresCatalog
 from data_engine.config import Settings
 from data_engine.jobs.state import JobState
 from data_engine.jobs.worker import IngestWorker
+from tests.conftest import postgres_test_dsn
 
 pytestmark = [pytest.mark.integration]
 
 
 def _settings() -> Settings:
-    dsn = os.environ.get("DE_DATABASE_URL")
+    dsn = postgres_test_dsn()
     if not dsn:
         pytest.skip("DE_DATABASE_URL is required for PostgreSQL integration tests")
     return Settings(database_url=dsn, artifact_root=Path("var/test-artifacts"), _env_file=None)

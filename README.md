@@ -81,6 +81,9 @@ The response carries `X-Correlation-Id` and `X-Idempotent-Replay`. Re-sending th
 `Idempotency-Key` **with the same payload** replays the original job (`x-idempotent-replay: true`);
 re-sending it with a **different** payload is a `409`.
 
+Tests use a separate `data_engine_test` database, so you can leave `just run` going while running `just test`
+without the dev worker claiming the jobs the suite submitted.
+
 Written artifacts land under `var/artifacts/blobs/`, and runtime metrics are appended to
 `var/metrics/runtime.jsonl` (queue depth, queue time, run time, stage duration, ingest counters).
 Interactive API docs are at `http://127.0.0.1:8000/docs`.
