@@ -1,6 +1,6 @@
 # Definition of Done (living)
 
-**Current stage: Scaffolding — review passed with follow-ups (2026-09-28); stage acceptance still pending a measured baseline.** Keep the stage unchanged until every criterion is checked with evidence. Product name: **Faultlined**.
+**Current stage: Scaffolding complete (2026-09-28, tagged `scaffold-complete`); work has started on MVP (stage 2).** Every stage-1 criterion is checked with evidence: the authorized benchmark baseline is committed, the suite passes 96/0 against a live Postgres, and a clean clone runs setup/ci/bench green. Product name: **Faultlined**.
 
 ```text
 Scaffolding → MVP → Production Baseline → Performance/Scaling → Production Hardening → Resume/Demo Ready
@@ -40,11 +40,11 @@ Source: [01-scaffolding-instructions.md](01-scaffolding-instructions.md) §3.
 - [x] Standards, methodology, conventions, known limitations, rejected approaches, current experiments all in `agents/` — see [benchmark backlog](../benchmarking/backlog.md), [experiment registry](../experiments/registry.md), [implementation status](../implementation/status.md), [observability conventions](../observability/conventions.md), [review](../reviews/2026-09-28-scaffolding.md); the planned EXP-0001 is explicitly not a measured experiment
 
 **Engineering tooling**
-- [x] Format, lint, type-check, test, 70% coverage gate, local dev config, CI; containers optional per [ADR 0012](../decisions/0012-host-based-development.md) / machine availability — single canonical workflow `.github/workflows/ci.yml`; local gates pass (91 passed, 3 skipped, 91.34% coverage)
-- [x] One command each for setup, fmt, lint, typecheck, test, bench, run (`justfile`; run/harness code exists, but `just bench` still needs an absent baseline for successful default comparison; see open benchmarking criterion)
+- [x] Format, lint, type-check, test, 70% coverage gate, local dev config, CI; containers optional per [ADR 0012](../decisions/0012-host-based-development.md) / machine availability — single canonical workflow `.github/workflows/ci.yml`; local gates pass (96 passed, 0 skipped, 91.59% coverage against a live Postgres)
+- [x] One command each for setup, fmt, lint, typecheck, test, bench, run (`justfile`; run/harness code exists and `just bench` compares successfully against the committed baseline (see the benchmarking criterion)
 
 **Vertical slice**
-- [x] Minimal end-to-end path through real API → Postgres queue → worker → content-addressed artifact → episode/lineage → API read, with unit/contract tests — [vertical-slice.md](../implementation/vertical-slice.md), tests: [unit](../../tests/unit/), [contract](../../tests/contract/), [Postgres integration/E2E](../../tests/integration/test_ingest_job.py), [E2E](../../tests/e2e/test_ingest_flow.py) (DB-dependent tests skip without operator-provided `DE_DATABASE_URL`)
+- [x] Minimal end-to-end path through real API → Postgres queue → worker → content-addressed artifact → episode/lineage → API read, with unit/contract tests — [vertical-slice.md](../implementation/vertical-slice.md), tests: [unit](../../tests/unit/), [contract](../../tests/contract/), [Postgres integration/E2E](../../tests/integration/test_ingest_job.py), [E2E](../../tests/e2e/test_ingest_flow.py) (DB-dependent tests run against an isolated `just pg-up` cluster, and against a separate `data_engine_test` database so a running `just run` cannot interfere)
 
 **Benchmarking**
 - [x] Metric schema + harness + one real micro-benchmark + baseline. Schema v2, statistics, provenance, validated baseline compare, and the synthetic workload are implemented and gated; **measured baseline committed 2026-09-28** at `f7ffbeb` (P50 0.6084 ms, 10 trials, 0 failures) with owner authorization (runbook in [HANDOFF §13](../HANDOFF.md#13-baseline-runbook-owner-green-flag-required)) — [EXP-0001](../experiments/0001-synthetic-ingest-baseline.md), [review](../reviews/2026-09-28-scaffolding.md)

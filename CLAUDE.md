@@ -62,4 +62,5 @@ Never commit large data, model weights, or `.env`.
 
 ## Current stage
 
-Scaffolding — review passed with follow-ups 2026-09-28; stage acceptance pending a measured benchmark baseline (owner green flag). See [review](agents/reviews/2026-09-28-scaffolding.md) and [handoff](agents/HANDOFF.md).
+MVP. Scaffolding completed and tagged `scaffold-complete` on 2026-09-28; the authorized benchmark
+baseline is committed and the clean-clone run is green. See [review](agents/reviews/2026-09-28-scaffolding.md) and [handoff](agents/HANDOFF.md).
