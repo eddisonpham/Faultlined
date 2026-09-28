@@ -64,7 +64,7 @@ wording preserved in git history. Rationale recorded with the refinement commit.
 - [ ] Job lifecycle: submit, queue, run, retry, timeout, cancel — `jobs` state machine with failure-path tests (failure-modes F4, F6, F7)
 - [ ] Dataset/model versioning and lineage recorded — `builds` manifests + `catalog` lineage edges (FR-006–FR-008)
 - [ ] Experiments reproducible from recorded provenance — `workloads` run records + rebuild determinism test (NFR-004)
-- [ ] API contract tests; coverage gate enforced — `api` + committed `docs/api/openapi.json` drift check (ADR 0009)
+- [x] API contract tests; coverage gate enforced — `api` + committed `docs/api/openapi.json` drift check (ADR 0009); `just api-contract` runs in `just ci` and in CI, and a unit test fails the suite on drift — `api` + committed `docs/api/openapi.json` drift check (ADR 0009)
 - [x] Minimal UI: jobs, artifacts, status — `frontend` Status/Jobs/Artifacts pages at `/ui` (server-rendered + vanilla polling, [ADR 0014](../decisions/0014-minimal-ui-server-rendered.md)); episodes/failures/builds/runs/benchmarks pages remain stage-3 work per [../architecture/frontend.md](../architecture/frontend.md) — `frontend` Status/Jobs/Artifacts pages ([../architecture/frontend.md](../architecture/frontend.md))
 - [ ] First real benchmark baseline committed — `benchmarks/` `bench-ingest` baseline per [../benchmarking/methodology.md](../benchmarking/methodology.md)
 

@@ -78,5 +78,13 @@ pg-down:
 pg-status:
     uv run --all-extras python scripts/dev_postgres.py status
 
+# Regenerate the committed OpenAPI contract (do this deliberately with an API change)
+api-contract-write:
+    uv run --all-extras python scripts/openapi_contract.py --write
+
+# Verify the OpenAPI contract has not drifted from the committed copy
+api-contract:
+    uv run --all-extras python scripts/openapi_contract.py --check
+
 # Everything CI runs
-ci: lint typecheck test hygiene
+ci: lint typecheck test hygiene api-contract

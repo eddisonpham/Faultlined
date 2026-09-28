@@ -19,6 +19,7 @@ jobs:
       - run: uv run mypy
       - run: uv run pytest -m "not slow and not gpu" --cov --cov-report=term-missing
       - run: python scripts/check_repo_hygiene.py
+      - run: uv run python scripts/openapi_contract.py --check
   optional-slow-gpu:
     if: ${{ vars.RUN_SLOW_GPU_TESTS == 'true' }}
     runs-on: ubuntu-latest
