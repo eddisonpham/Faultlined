@@ -53,4 +53,6 @@
 
 All seven original findings are resolved and gated. The single remaining blocker is an authorization decision, not an engineering gap: publishing a measured baseline. Because that baseline must be produced by a deliberate owner-approved run, the **Benchmarking** and **Handoff** criteria in [the definition of done](../spec/definition-of-done.md) stay unticked, the stage stays at Scaffolding, and `scaffold-complete` must not be tagged.
 
-Residual gaps, none of which block the green flag: live-Postgres verification, clean-clone validation, and the history-wide secrets scan.
+Residual gaps: live-Postgres verification and the green flag are now closed (2026-09-28) — `just pg-up` runs an
+isolated trust-auth cluster so the suite is 94 passed / 0 skipped, and the authorized baseline is committed.
+Still open: clean-clone validation and the history-wide secrets scan.

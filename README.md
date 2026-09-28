@@ -14,12 +14,22 @@ See [agents/spec/problem.md](agents/spec/problem.md) and [agents/architecture/ov
 ## Quickstart
 
 1. Clone the repository and open Git Bash in its root.
-2. Create a local database named `data_engine` in PostgreSQL.
-3. Create local config from the placeholder template and set your own database URL/password locally:
+2. Start an isolated local PostgreSQL for tests. This creates a cluster in gitignored `var/pgdata` on port
+   `55432`; it does not touch any system PostgreSQL install and needs no administrator rights and no password.
+
+   ```bash
+   just pg-up
+   ```
+
+   To use an existing PostgreSQL server instead, skip this and put your own DSN in `.env` (step 3).
+3. Create local config and point it at that server:
 
    ```bash
    cp .env.example .env
-   # Edit .env locally; never paste credentials into chat or commit them.
+   # For the isolated cluster, set:
+   #   DE_DATABASE_URL=postgresql://data_engine@127.0.0.1:55432/data_engine
+   # That DSN has no password. For your own server, edit .env locally;
+   # never paste credentials into chat or commit them.
    ```
 
 4. Install and run the gates:
@@ -36,20 +46,25 @@ See [agents/spec/problem.md](agents/spec/problem.md) and [agents/architecture/ov
 `just` imports a local `.env` into each recipe's process environment; the application itself reads environment variables
 only. `just setup` creates `.venv` and syncs the committed `uv.lock` (including optional GPU telemetry, which degrades
 without a GPU). `just test` runs the fast suite and enforces the 70% coverage floor. Integration tests requiring a live
-Postgres instance are marked and need `DE_DATABASE_URL` set in your local `.env` or shell.
+Postgres instance are marked and need `DE_DATABASE_URL` set in your local `.env` or shell; with `just pg-up` and the
+DSN above, the whole suite runs with nothing skipped. Use `just pg-status` to check the cluster and `just pg-down` to
+stop it.
 
-The current repository stage is **scaffolding (not yet accepted)**. A synthetic JSON API/worker/artifact vertical slice and benchmark/telemetry foundations exist; scope and limitations are recorded in [the handoff](agents/HANDOFF.md). `just run` requires a configured PostgreSQL database. `just bench` runs a synthetic local workload but currently cannot complete baseline comparison from a fresh checkout because no baseline has been authorized or committed. Host-based development with optional containers is recorded in [ADR 0012](agents/decisions/0012-host-based-development.md).
+The current repository stage is **scaffolding (not yet accepted)**. A synthetic JSON API/worker/artifact vertical slice and benchmark/telemetry foundations exist; scope and limitations are recorded in [the handoff](agents/HANDOFF.md). `just run` requires a configured PostgreSQL database. `just bench` runs a synthetic local workload and compares it against the committed baseline; see [EXP-0001](agents/experiments/0001-synthetic-ingest-baseline.md) for what that number does and does not mean. Host-based development with optional containers is recorded in [ADR 0012](agents/decisions/0012-host-based-development.md).
 
 ## Task commands
 
 ```bash
 just setup       # install locked deps
+just pg-up        # isolated local PostgreSQL for tests (var/pgdata, port 55432)
+just pg-status    # is that cluster running?
+just pg-down      # stop it
 just fmt         # format + safe lint fixes
 just lint        # check without writing
 just typecheck   # strict mypy
 just test        # fast tests + coverage gate
 just test-all    # include slow and GPU-marked tests
-just bench       # synthetic harness + comparison; needs a committed baseline (currently absent)
+just bench       # synthetic harness + comparison against the committed baseline
 just run         # local API + worker (requires local PostgreSQL and DE_DATABASE_URL if non-default)
 just hygiene     # relative links, ADRs, secrets, required structure
 just ci          # lint + typecheck + test + hygiene

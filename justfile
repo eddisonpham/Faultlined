@@ -44,5 +44,17 @@ run:
 hygiene:
     python scripts/check_repo_hygiene.py
 
+# Start an isolated local PostgreSQL for tests (gitignored var/pgdata, no admin, no password)
+pg-up:
+    uv run python scripts/dev_postgres.py up
+
+# Stop the isolated local PostgreSQL started by pg-up
+pg-down:
+    uv run python scripts/dev_postgres.py down
+
+# Report whether the isolated local PostgreSQL is running
+pg-status:
+    uv run python scripts/dev_postgres.py status
+
 # Everything CI runs
 ci: lint typecheck test hygiene

@@ -69,4 +69,6 @@ def test_worker_processes_ingest_and_registers_episode(tmp_path: Path) -> None:
     episode = catalog.get_episode(actual["result"]["episode_id"])
     assert episode is not None
     assert episode["artifact_hash"] == actual["result"]["artifact_hash"]
-    assert episode["lineage"][0]["to_ref"] == job["id"]
+    # The episode is content-addressed, so a persistent database accumulates one edge per
+    # job that produced it. Assert membership, not position, or this fails on the second run.
+    assert job["id"] in [edge["to_ref"] for edge in episode["lineage"]]

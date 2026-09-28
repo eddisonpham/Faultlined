@@ -43,16 +43,16 @@ See [implementation status](implementation/status.md), [failure modes](testing/f
 
 ## 6. Known technical risks
 
-1. **No benchmark baseline yet — awaiting the green flag.** This is an authorization gap, not a tooling gap. When authorized, follow the runbook in [§13](#13-baseline-runbook-owner-green-flag-required).
+1. **Benchmark baseline is measured and committed** (2026-09-28, authorized): P50 0.6084 ms, 10 trials, 0 failures at `f7ffbeb`. See [§13](#13-baseline-runbook-owner-green-flag-required) and [EXP-0001](experiments/0001-synthetic-ingest-baseline.md). It is a regression tripwire, not a performance target: observed run-to-run spread was ~24%.
 2. **Hardware matching is exact.** A baseline only compares on a byte-identical CPU/RAM/GPU/OS/disk profile; on a different machine the harness refuses to compare. Revisit with evidence before gating CI.
-3. **Postgres path is unverified in this environment:** tests skip without `DE_DATABASE_URL`; do not open or recover `.env`. An operator may supply configuration through their environment.
+3. **Postgres path is now verified.** `just pg-up` starts an isolated cluster in gitignored `var/pgdata` on port 55432 using local trust auth, so the full suite runs with nothing skipped and the DSN holds no credential. The owner's system PostgreSQL on 5432 is untouched and its superuser password remains unknown; that instance is still unverified.
 4. **Crash consistency:** artifact publication and DB catalog writes are separate transactions; worker crash recovery, retries, leases, and orphan GC remain future work.
 5. **Clean-clone review and history secrets scan are not performed.** Current-tree hygiene passes; no `.env` was opened.
 
 ## 7. Highest-priority next steps
 
 1. **Owner green flag → run the baseline runbook in [§13](#13-baseline-runbook-owner-green-flag-required).**
-2. Verify the slice against a real PostgreSQL instance (operator-provided `DE_DATABASE_URL`).
+2. Optionally verify the slice against the owner's own system PostgreSQL (port 5432) by putting its DSN in `.env`; the isolated `just pg-up` cluster already covers this.
 3. Validate a clean clone end-to-end and run a history-wide secrets scan; then repeat the review and consider `scaffold-complete`.
 4. MVP engineering order: real MCAP/LeRobot reader on a fixed subset → rule-based validation/quarantine → Parquet metadata index → durable job lifecycle/recovery → deterministic LeRobot v3 dataset build.
 
@@ -70,7 +70,7 @@ Harness and schema v2 are implemented and tested; `synthetic-episode-ingest` mea
 
 ## 10. Testing status
 
-Latest local gates: `just fmt && just lint && just typecheck && just test && just hygiene && uv lock --check` passed; **91 passed, 3 skipped, 91.34% coverage**, hygiene clean, lock current. A Starlette/httpx `TestClient` deprecation warning is non-blocking and deferred. The 3 skips are PostgreSQL-dependent (`DE_DATABASE_URL` not configured). No clean-clone run or live DB verification has been completed; repeat all gates after any change.
+Latest local gates: `just fmt && just lint && just typecheck && just test && just hygiene && uv lock --check` passed; **94 passed, 0 skipped, 92.33% coverage** against the isolated Postgres cluster, hygiene clean, lock current. A Starlette/httpx `TestClient` deprecation warning is non-blocking and deferred. Live DB verification is done (`just pg-up`); the clean-clone run and the history-wide secrets scan have not. Repeat all gates after any change.
 
 ## 11. Observability status
 
