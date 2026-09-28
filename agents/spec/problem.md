@@ -8,7 +8,7 @@ Candidates and weighted scores: [../research/problem-candidates.md](../research/
 Robotics ML teams collect robot episodes — multimodal sensor/action logs from arms, humanoids, and mobile robots — faster
 than they can trust, index, and curate them: raw recordings arrive in mixed formats and mixed quality, quality checks and
 metadata extraction are ad-hoc scripts, dataset assembly is manual and unversioned, and no one can say exactly which
-episodes went into a training run. This project builds a self-hosted **robot episode data engine**: a platform that
+episodes went into a training run. This project, **Faultlined**, builds a self-hosted **robot episode data engine**: a platform that
 ingests raw episodes (MCAP logs, LeRobot-format datasets), validates them against declared schemas and quality rules,
 indexes them in a versioned catalog with full lineage, and serves **reproducible curated dataset builds** to downstream
 training and evaluation workloads — with a real job lifecycle (submit, queue, run, retry, timeout, cancel), structured

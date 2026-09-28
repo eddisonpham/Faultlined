@@ -33,7 +33,7 @@ def _worker_loop(stop: Any, poll_seconds: float = 0.25) -> None:
 
 
 def main(argv: Sequence[str] | None = None) -> None:
-    parser = argparse.ArgumentParser(prog="de", description="Robot episode data engine")
+    parser = argparse.ArgumentParser(prog="de", description="Faultlined robot episode data engine")
     subparsers = parser.add_subparsers(dest="command", required=True)
     for name in ("api", "worker", "dev", "doctor", "gc"):
         command = subparsers.add_parser(name)

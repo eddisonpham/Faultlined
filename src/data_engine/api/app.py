@@ -32,7 +32,7 @@ def create_app(
         yield
 
     app = FastAPI(
-        title="Robot Episode Data Engine",
+        title="Faultlined",
         version="0.1.0",
         lifespan=lifespan,
     )

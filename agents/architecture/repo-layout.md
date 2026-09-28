@@ -48,9 +48,9 @@ Where every kind of code belongs. Component ↔ directory mapping must stay 1:1 
 └── .pre-commit-config.yaml      # pre-commit hooks (secrets, ruff, mypy, hygiene)
 ```
 
-Naming: package `data_engine` (the product: "robot episode data engine"); CLI `de`. Runtime state (`var/`, `.env`)
-is gitignored. Host-based local development and optional containers are recorded in
-[ADR 0012](../decisions/0012-host-based-development.md).
+Naming: the product is **Faultlined**, a robot episode data engine. The distribution is `faultlined`, the import package is
+`data_engine`, and the CLI is `de`. Runtime state (`var/`, `.env`) is gitignored. Host-based local development and
+optional containers are recorded in [ADR 0012](../decisions/0012-host-based-development.md).
 
 ## Dependency direction rules
 

@@ -1,4 +1,4 @@
-# Robot Episode Data Engine
+# Faultlined
 
 A local-first robotics ML data platform: ingest MCAP / LeRobot episodes, validate and index them, then build reproducible,
 versioned LeRobot datasets with end-to-end lineage. Models are workloads the platform executes — not the product.

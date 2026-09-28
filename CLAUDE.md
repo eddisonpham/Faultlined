@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Robotics ML infrastructure platform. **The platform is the product; models are workloads it executes.**
+**Faultlined** — a robotics ML infrastructure platform. **The platform is the product; models are workloads it executes.**
 The concrete problem: a **robot episode data engine** — ingest, validate, index/version, and curate robot episode
 datasets (MCAP / LeRobot) with full lineage, serving reproducible dataset builds to ML workloads (see `agents/spec/problem.md`).
 

@@ -1,7 +1,7 @@
 [project]
-name = "data-engine"
+name = "faultlined"
 version = "0.1.0"
-description = "Robot episode data engine: ingest, validate, index, and curate robot episode datasets with lineage"
+description = "Faultlined: a robot episode data engine for ingesting, validating, indexing, and curating robot episode datasets with lineage"
 requires-python = ">=3.14"
 dependencies = [
     "fastapi>=0.115",

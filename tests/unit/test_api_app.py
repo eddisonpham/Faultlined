@@ -12,7 +12,7 @@ class CatalogStub:
 @pytest.mark.unit
 def test_create_app_has_expected_title_and_version() -> None:
     app = create_app(Settings(_env_file=None), initialize_database=False, catalog=CatalogStub())  # type: ignore[arg-type]
-    assert app.title == "Robot Episode Data Engine"
+    assert app.title == "Faultlined"
     assert app.version == "0.1.0"
     assert isinstance(app.state.catalog, CatalogStub)
 
