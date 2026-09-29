@@ -22,17 +22,25 @@ from data_engine.api.schemas import (
     EpisodeQualityResponse,
     EpisodeResponse,
     EpisodeValidationResponse,
+    FailingEpisodesResponse,
+    FailureSummaryResponse,
     JobListResponse,
     JobReportResponse,
     JobResponse,
     MetricsResponse,
     QualitySummaryResponse,
+    SliceCreateRequest,
+    SliceDetailResponse,
+    SliceListResponse,
+    SliceManifestResponse,
+    SliceUpdateRequest,
     StatusResponse,
     SubmitSourceJobRequest,
 )
 from data_engine.catalog.database import initialize_schema
 from data_engine.catalog.repository import InvalidTransition, PostgresCatalog
 from data_engine.config import Settings, load_settings
+from data_engine.curation import REASON_CODES
 from data_engine.jobs.state import DEFAULT_MAX_ATTEMPTS, JobState
 from data_engine.observability.aggregate import (
     heartbeat_age_seconds,
@@ -53,6 +61,8 @@ from data_engine.web import (
     episode_detail_page,
     episodes_fragment,
     episodes_page,
+    failures_fragment,
+    failures_page,
     font_bytes,
     insights_fragment,
     insights_page,
@@ -62,6 +72,8 @@ from data_engine.web import (
     layout_css,
     metrics_fragment,
     metrics_page,
+    slices_fragment,
+    slices_page,
     status_fragment,
     status_page,
     vendor_css,
@@ -449,6 +461,34 @@ def create_app(
         """Serve the vendored display font. See web/vendor/departure-mono/NOTICE.md."""
         return Response(font_bytes(), media_type="font/woff2")
 
+    @app.get("/ui/failures", response_class=HTMLResponse)
+    def ui_failures(
+        request: Request,
+        theme: str | None = None,
+        limit: int = 50,
+        x_fragment: str | None = Header(default=None),
+    ) -> HTMLResponse:
+        catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
+        model = {
+            "summary": catalog_for_request.failure_summary(),
+            "items": catalog_for_request.failing_episodes(limit=min(limit, 200)),
+        }
+        if x_fragment:
+            return HTMLResponse(failures_fragment(model))
+        return HTMLResponse(failures_page(model, _theme(theme)))
+
+    @app.get("/ui/slices", response_class=HTMLResponse)
+    def ui_slices(
+        request: Request,
+        theme: str | None = None,
+        x_fragment: str | None = Header(default=None),
+    ) -> HTMLResponse:
+        catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
+        model = {"items": catalog_for_request.list_slices(limit=50)}
+        if x_fragment:
+            return HTMLResponse(slices_fragment(model))
+        return HTMLResponse(slices_page(model, _theme(theme)))
+
     @app.get("/ui/metrics", response_class=HTMLResponse)
     def ui_metrics(
         request: Request,
@@ -535,6 +575,100 @@ def create_app(
                 limit=limit, state=state or None, flag=flag or None
             )
         }
+
+    @app.get("/api/v1/failures", response_model=FailureSummaryResponse)
+    def failures_summary(request: Request) -> dict[str, Any]:
+        """What is failing, how often, and under which profiles (read-only)."""
+        catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
+        summary = catalog_for_request.failure_summary()
+        if summary is None:
+            return {
+                "reason_codes": {},
+                "by_profile": [],
+                "by_format": [],
+                "quarantined_count": 0,
+                "episodes_evaluated": 0,
+            }
+        return summary
+
+    @app.get("/api/v1/failures/episodes", response_model=FailingEpisodesResponse)
+    def failures_episodes(
+        request: Request,
+        limit: int = 50,
+        before: str | None = None,
+        reason_code: str | None = None,
+    ) -> dict[str, Any]:
+        """Quarantined episodes with the reason codes that put them there."""
+        if limit < 1 or limit > 500:
+            raise HTTPException(status_code=422, detail="limit must be between 1 and 500")
+        if reason_code is not None and reason_code not in REASON_CODES:
+            raise HTTPException(status_code=422, detail=f"unknown reason_code: {reason_code}")
+        catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
+        rows = catalog_for_request.failing_episodes(
+            limit=limit, before=_parse_cursor(before), reason_code=reason_code or None
+        )
+        return {"items": rows}
+
+    @app.post("/api/v1/slices", response_model=SliceDetailResponse, status_code=201)
+    def create_slice(
+        body: SliceCreateRequest, request: Request, response: Response
+    ) -> dict[str, Any]:
+        """Save a named curation filter.
+
+        Membership is recomputed on the next manifest read, so creating a slice is
+        cheap and the slice never goes stale as episodes change.
+        """
+        catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
+        row = catalog_for_request.register_slice(
+            name=body.name, notes=body.notes, filter_config=body.filter_config
+        )
+        response.headers["X-Correlation-Id"] = request.state.correlation_id or str(uuid4())
+        detail = catalog_for_request.get_slice(str(row["id"]))
+        if detail is None:
+            raise KeyError(str(row["id"]))
+        return detail
+
+    @app.get("/api/v1/slices", response_model=SliceListResponse)
+    def list_slices(request: Request, limit: int = 50, before: str | None = None) -> dict[str, Any]:
+        if limit < 1 or limit > 500:
+            raise HTTPException(status_code=422, detail="limit must be between 1 and 500")
+        catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
+        rows = catalog_for_request.list_slices(limit=limit, before=_parse_cursor(before))
+        return {"items": rows}
+
+    @app.get("/api/v1/slices/{slice_id}", response_model=SliceDetailResponse)
+    def get_slice(slice_id: str, request: Request) -> dict[str, Any]:
+        catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
+        row = catalog_for_request.get_slice(slice_id)
+        if row is None:
+            raise KeyError(slice_id)
+        return row
+
+    @app.get("/api/v1/slices/{slice_id}/manifest", response_model=SliceManifestResponse)
+    def slice_manifest(slice_id: str, request: Request) -> dict[str, Any]:
+        """The curated manifest for a saved slice: identity, state, quality."""
+        catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
+        manifest = catalog_for_request.slice_manifest(slice_id)
+        if manifest is None:
+            raise KeyError(slice_id)
+        return manifest
+
+    @app.patch("/api/v1/slices/{slice_id}", response_model=SliceDetailResponse)
+    def update_slice(slice_id: str, body: SliceUpdateRequest, request: Request) -> dict[str, Any]:
+        catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
+        row = catalog_for_request.update_slice(
+            slice_id, name=body.name, notes=body.notes, filter_config=body.filter_config
+        )
+        if row is None:
+            raise KeyError(slice_id)
+        return row
+
+    @app.delete("/api/v1/slices/{slice_id}", status_code=204)
+    def delete_slice(slice_id: str, request: Request) -> Response:
+        catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
+        if not catalog_for_request.delete_slice(slice_id):
+            raise KeyError(slice_id)
+        return Response(status_code=204)
 
     @app.get("/api/v1/episodes/export", response_model=EpisodeExportResponse)
     def export_episodes_api(

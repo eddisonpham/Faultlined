@@ -32,6 +32,8 @@ NAV_LINKS = (
     ("/ui", "Status"),
     ("/ui/jobs", "Jobs"),
     ("/ui/episodes", "Episodes"),
+    ("/ui/failures", "Failures"),
+    ("/ui/slices", "Slices"),
     ("/ui/insights", "Insights"),
     ("/ui/metrics", "Metrics"),
     ("/ui/artifacts", "Artifacts"),
@@ -41,9 +43,11 @@ NAV_LINKS = (
 FONT_URL = "/ui/vendor/departure-mono/DepartureMono-Regular.woff2"
 FONT_PATH = HERE / "vendor" / "departure-mono" / "DepartureMono-Regular.woff2"
 
-# Curation views on the Episodes page; mirrors catalog.list_episodes flags.
-EPISODE_FLAGS = ("", "jerky", "stalled", "short", "long")
-EPISODE_STATES = ("", "ingested", "valid", "quarantined")
+# Curation views on the Episodes page; the vocabulary and its SQL predicates live
+# in data_engine.curation so the API, the catalog, and a saved slice cannot drift.
+from data_engine.curation import EPISODE_FLAGS, EPISODE_STATES  # noqa: E402
+
+__all__ = ["EPISODE_FLAGS", "EPISODE_STATES"]
 
 JOB_STATES = (
     "queued",
@@ -788,6 +792,124 @@ def _p95(summaries: list[dict[str, Any]]) -> str:
     if not summaries:
         return "-"
     return _ms(max(float(s["p95"]) for s in summaries))
+
+
+# ---------------------------------------------------------------- failures
+
+
+def failures_page(model: dict[str, Any], theme: str) -> str:
+    """What is failing, by reason code, and the episodes it quarantined."""
+    body = (
+        '<p class="de-sub">quarantine triage // read-only</p>'
+        f"<div data-poll>{_failures_body(model)}</div>"
+    )
+    return _page("Failures", "/ui/failures", body, theme, _script("/ui/failures", 10000))
+
+
+def failures_fragment(model: dict[str, Any]) -> str:
+    return _failures_body(model)
+
+
+def _code_list(codes: Any) -> str:
+    """Reason codes as inline chips; a row with none shows a muted dash."""
+    values = codes or []
+    if not values:
+        return '<span class="text-comment">-</span>'
+    return " ".join(f"<code>{escape(str(code))}</code>" for code in values)
+
+
+def _failures_body(model: dict[str, Any]) -> str:
+    summary = model.get("summary") or {}
+    rows = model.get("items") or []
+    codes = summary.get("reason_codes") or {}
+    readouts = _readouts(
+        [
+            ("quarantined", str(int(summary.get("quarantined_count", 0))), "error"),
+            ("evaluated", str(int(summary.get("episodes_evaluated", 0))), "info"),
+            ("reason codes", str(len(codes)), "warning"),
+            ("listed", str(len(rows)), "comment"),
+        ]
+    )
+    code_chips = "".join(
+        f'<code class="de-chip text-warning">{escape(str(code))}'
+        f"&nbsp;&times;&nbsp;{int(count)}</code>"
+        for code, count in sorted(codes.items(), key=lambda kv: -kv[1])
+    )
+    profile_rows = "".join(
+        f"<tr><td><code>{escape(str(p.get('profile_name') or '-'))}</code></td>"
+        f'<td class="num">{int(p.get("failed", 0))}</td></tr>'
+        for p in (summary.get("by_profile") or [])
+    )
+    episode_rows = "".join(
+        f'<tr><td><a href="/ui/episodes/{escape(str(e.get("id")))}">'
+        f"<code>{escape(str(e.get('id'))[:12])}</code></a></td>"
+        f"<td>{escape(str(e.get('episode_key') or '-'))}</td>"
+        f"<td>{escape(str(e.get('format') or '-'))}</td>"
+        f"<td>{_state_badge(str(e.get('state') or 'quarantined'))}</td>"
+        f"<td>{escape(str(e.get('profile_name') or '-'))}</td>"
+        f"<td>{_code_list(e.get('reason_codes'))}</td>"
+        f"<td>{_verdict_cell(e)}</td>"
+        "</tr>"
+        for e in rows
+    )
+    return (
+        readouts
+        + '<section class="de-section"><h2>Reason codes</h2>'
+        + (code_chips or '<p class="de-empty">// nothing quarantined</p>')
+        + "</section>"
+        + (
+            '<table class="de-table"><thead><tr><th>Profile</th><th class="num">Failed</th>'
+            f"</tr></thead><tbody>{profile_rows}</tbody></table>"
+            if profile_rows
+            else ""
+        )
+        + '<section class="de-section"><h2>Quarantined episodes</h2>'
+        + (
+            '<table class="de-table"><thead><tr><th>Episode</th><th>Key</th><th>Format</th>'
+            f"<th>State</th><th>Profile</th><th>Reason codes</th><th>Verdict</th></tr></thead>"
+            f"<tbody>{episode_rows}</tbody></table>"
+            if episode_rows
+            else '<p class="de-empty">// no quarantined episodes</p>'
+        )
+        + "</section>"
+    )
+
+
+# ---------------------------------------------------------------- slices
+
+
+def slices_page(model: dict[str, Any], theme: str) -> str:
+    """Named curation filters and a link to each slice's manifest."""
+    body = f"<div data-poll>{_slices_body(model)}</div>"
+    return _page("Slices", "/ui/slices", body, theme, _script("/ui/slices", 10000))
+
+
+def slices_fragment(model: dict[str, Any]) -> str:
+    return _slices_body(model)
+
+
+def _slices_body(model: dict[str, Any]) -> str:
+    items = model.get("items") or []
+    if not items:
+        return '<p class="de-empty">// no saved slices // POST /api/v1/slices to create one</p>'
+    rows = "".join(
+        "<tr>"
+        f"<td><code>{escape(str(s.get('name')))}</code></td>"
+        f'<td class="num">{int(s.get("member_count", 0))}</td>'
+        f"<td>{escape(str(s.get('notes') or '-'))}</td>"
+        f"<td><code>{escape(str((s.get('filter_config') or {}).get('state') or 'any'))}"
+        f" / {escape(str((s.get('filter_config') or {}).get('flag') or 'any'))}</code></td>"
+        f"<td>{_when(s.get('updated_at'))}</td>"
+        f'<td><a href="/api/v1/slices/{escape(str(s.get("id")))}/manifest">// manifest</a></td>'
+        "</tr>"
+        for s in items
+    )
+    return (
+        '<p class="de-sub">named curation filters // membership recomputed on read</p>'
+        '<table class="de-table"><thead><tr><th>Name</th><th class="num">Members</th>'
+        f"<th>Notes</th><th>Filter</th><th>Updated</th><th>Manifest</th></tr></thead>"
+        f"<tbody>{rows}</tbody></table>"
+    )
 
 
 # ---------------------------------------------------------------- episodes

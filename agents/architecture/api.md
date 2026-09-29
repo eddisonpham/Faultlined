@@ -116,6 +116,14 @@ Added for the Status / Jobs / Artifacts pages; all are read-only, cursor-paginat
 | GET | `/api/v1/metrics` | Aggregated runtime telemetry from the JSONL sink (ADR 0017): per-metric+label summaries with p50/p95/p99, bucketed mean series for sparklines, live job-state counts, and derived worker heartbeat age. Optional `window_seconds`, `bucket_seconds`. |
 | GET | `/api/v1/episodes` | Episode catalog with the same curation views as the UI: filters `state` (ingested/valid/quarantined), `flag` (jerky/stalled/short/long), `limit` (1–500). Rows carry the quality columns for ranking. |
 | GET | `/api/v1/episodes/export` | Curated manifest for curation and dataset builds: the same filters plus content identity (source/artifact hashes) per row, with `generated_at` + echoed `filters` for provenance. Registered before `/api/v1/episodes/{episode_id}` so `export` is never read as an id. |
+| GET | `/api/v1/failures` | Read-only aggregate of what is failing: reason-code counts, failures per profile and per format, `quarantined_count`, `episodes_evaluated`. An empty database returns zeroed counts rather than 404. |
+| GET | `/api/v1/failures/episodes` | Quarantined episodes with the profile, reason codes, and violations that put them there. Filters: `reason_code` (must be a known code, else 422), `limit` (1–500), cursor `before`. |
+| POST | `/api/v1/slices` | Save a named curation filter (`name`, `notes`, `filter_config` = `{state, flag}`). 409 `SLICE_NAME_CONFLICT` when the name is taken. Membership is recomputed on read, so the slice never goes stale. |
+| GET | `/api/v1/slices` | Newest-first slice page with `member_count`; bounded and cursor-paginated. |
+| GET | `/api/v1/slices/{id}` | One slice's metadata, filter config, and current member count. 404 for unknown ids. |
+| PATCH | `/api/v1/slices/{id}` | Update name, notes, or filter config. Membership recomputes on the next manifest read. |
+| DELETE | `/api/v1/slices/{id}` | Drop a slice (204). Episodes themselves are untouched — a slice is a view, not an ownership record. |
+| GET | `/api/v1/slices/{id}/manifest` | The curated manifest for one slice: the export shape plus `slice_id`/`name`, with content identity per row. A filter that no longer parses yields 404 rather than silently widening to "everything". |
 | GET | `/api/v1/episodes/{episode_id}/validation` | Validation verdicts per profile (ADR 0016): passed flag, reason codes, and full violations — why an episode passed or was quarantined. 404 for unknown episodes. |
 | GET | `/api/v1/jobs/{job_id}/episodes` | Episodes a job produced, following the `produced_by` lineage edge (run inspection). 404 for unknown jobs. |
 | GET | `/api/v1/jobs/{job_id}/report` | Run triage card: job summary + rollup of the episodes it produced (state/verdict/flag counts, length summary, mean movement/jerk/stall) + validation verdict counts with reason-code frequencies over those episodes. 404 for unknown jobs. |

@@ -299,3 +299,87 @@ class MetricsResponse(BaseModel):
     series: dict[str, list[MetricSeriesPoint]]
     jobs_queue_depth: dict[str, int]
     worker_heartbeat_age_seconds: float | None = None
+
+
+# ---- curated slices (curated build-ready layer) ----
+
+
+class SliceCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=200)
+    notes: str = ""
+    filter_config: dict[str, Any] = Field(default_factory=dict)
+
+
+class SliceUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    notes: str | None = None
+    filter_config: dict[str, Any] | None = None
+
+
+class SlicePayload(BaseModel):
+    """Common fields for a saved slice."""
+
+    id: str
+    name: str
+    notes: str
+    filter_config: dict[str, Any]
+    created_at: Any
+    updated_at: Any
+    member_count: int
+
+
+class SliceListResponse(BaseModel):
+    items: list[SlicePayload]
+
+
+class SliceDetailResponse(SlicePayload):
+    pass
+
+
+class SliceManifestResponse(EpisodeExportResponse):
+    """Same manifest shape as the episodes export endpoint, but for one saved slice."""
+
+    slice_id: str
+    name: str | None = None
+
+
+# ---- validation failures read view ----
+
+
+class FailureSummaryResponse(BaseModel):
+    """Read-only aggregate of what is failing across episodes and profiles."""
+
+    reason_codes: dict[str, int]
+    by_profile: list[dict[str, Any]]
+    by_format: list[dict[str, Any]]
+    quarantined_count: int
+    episodes_evaluated: int
+
+
+class FailingEpisodeRow(BaseModel):
+    """One quarantined episode with its current failed validation result."""
+
+    id: str
+    episode_key: str = ""
+    format: str
+    state: str
+    created_at: Any
+    frame_count: int | None = None
+    movement_score: float | None = None
+    jerk_score: float | None = None
+    stall_ratio: float | None = None
+    verdict: str | None = None
+    source_hash: str | None = None
+    artifact_hash: str | None = None
+    profile_name: str = ""
+    profile_version: str = ""
+    reason_codes: list[str] = Field(default_factory=list)
+    violations: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class FailingEpisodesResponse(BaseModel):
+    items: list[FailingEpisodeRow]

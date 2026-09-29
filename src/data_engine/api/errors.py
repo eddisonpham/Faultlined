@@ -9,7 +9,11 @@ from typing import Any
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from data_engine.catalog.repository import IdempotencyConflict, InvalidTransition
+from data_engine.catalog.repository import (
+    IdempotencyConflict,
+    InvalidTransition,
+    SliceNameConflict,
+)
 from data_engine.observability.logging import correlation_id_var
 
 logger = logging.getLogger(__name__)
@@ -40,6 +44,22 @@ def install_error_handling(app: FastAPI) -> None:
                 "status": 409,
                 "code": "IDEMPOTENCY_KEY_CONFLICT",
                 "detail": "The idempotency key was already used for a different request.",
+                "correlation_id": correlation_id_var.get(),
+            },
+        )
+
+    @app.exception_handler(SliceNameConflict)
+    async def slice_name_conflict_handler(
+        _request: Request, exc: SliceNameConflict
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=409,
+            content={
+                "type": "about:blank",
+                "title": "Slice name conflict",
+                "status": 409,
+                "code": "SLICE_NAME_CONFLICT",
+                "detail": f"A curation slice already uses that name: {exc}",
                 "correlation_id": correlation_id_var.get(),
             },
         )

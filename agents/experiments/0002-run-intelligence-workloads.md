@@ -102,6 +102,21 @@ catalog): `api-job-report` (run triage card over 50 produced episodes) P50 6.692
 P95 9.492 ms, 0/10 failures. Later the same day, `api-episodes-export` (50-row curated
 manifest with content identity) P50 6.922 ms / P95 7.722 ms, 0/10 failures.
 
+## Addendum (2026-09-29, curated layer: slices + failures read view)
+
+Three more B-014 workloads, each measured in its own process (3 warmups, 10 trials, in-process
+TestClient + stub catalog), 0/10 failures each:
+
+| Workload | Shape | P50 (ms) | P95 (ms) | Mean (ms) | Std dev (ms) |
+|---|---|---|---|---|---|
+| `api-failures-summary` | reason-code/profile/format aggregate | 5.532 | 7.102 | 5.886 | 1.057 |
+| `api-failing-episodes` | 50 quarantined episodes with codes + violations | 6.996 | 9.490 | 7.314 | 1.316 |
+| `api-slice-manifest` | saved-slice manifest over 50 episodes | 6.991 | 8.631 | 7.171 | 1.158 |
+
+All three land in the same 5.5–7.0 ms p50 band as the existing read endpoints, so the new
+curation surfaces cost no more per request than the catalog listing they reuse. No baselines written
+for any of them (owner authorization required).
+
 ## Follow-ups
 
 - Owner authorization to promote any of these numbers to committed baselines (`--write-baseline` per workload).

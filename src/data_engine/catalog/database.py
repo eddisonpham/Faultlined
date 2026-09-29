@@ -88,6 +88,26 @@ CREATE TABLE IF NOT EXISTS lineage_edges (
     created_at timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (from_type, from_ref, to_type, to_ref, relation)
 );
+
+CREATE TABLE IF NOT EXISTS episode_slices (
+    id text PRIMARY KEY,
+    name text NOT NULL DEFAULT '',
+    notes text NOT NULL DEFAULT '',
+    filter_config jsonb NOT NULL DEFAULT '{}',
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (name)
+);
+
+CREATE INDEX IF NOT EXISTS episode_slices_name_idx ON episode_slices (name);
+
+CREATE TABLE IF NOT EXISTS slice_memberships (
+    slice_id text NOT NULL REFERENCES episode_slices(id) ON DELETE CASCADE,
+    episode_id text NOT NULL REFERENCES episodes(id) ON DELETE CASCADE,
+    included_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (slice_id, episode_id)
+);
+CREATE INDEX IF NOT EXISTS slice_memberships_slice_idx ON slice_memberships (slice_id);
 """
 
 # Columns the job lifecycle (retry / timeout / cancel) needs, added to pre-existing
@@ -106,6 +126,13 @@ CREATE UNIQUE INDEX IF NOT EXISTS episodes_source_key_idx ON episodes (source_ha
 CREATE INDEX IF NOT EXISTS episodes_state_idx ON episodes (state);
 ALTER TABLE validation_results ADD COLUMN IF NOT EXISTS profile_name text NOT NULL DEFAULT '';
 ALTER TABLE validation_results ADD COLUMN IF NOT EXISTS profile_version text NOT NULL DEFAULT '';
+
+ALTER TABLE episode_slices ADD COLUMN IF NOT EXISTS name text NOT NULL DEFAULT '';
+ALTER TABLE episode_slices ADD COLUMN IF NOT EXISTS notes text NOT NULL DEFAULT '';
+ALTER TABLE episode_slices ADD COLUMN IF NOT EXISTS filter_config jsonb NOT NULL DEFAULT '{}';
+ALTER TABLE episode_slices ADD COLUMN IF NOT EXISTS updated_at timestamptz NOT NULL DEFAULT now();
+ALTER TABLE slice_memberships
+  ADD COLUMN IF NOT EXISTS included_at timestamptz NOT NULL DEFAULT now();
 """
 
 

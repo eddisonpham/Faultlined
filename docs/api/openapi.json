@@ -350,6 +350,202 @@
         "title": "EpisodeValidationResponse",
         "type": "object"
       },
+      "FailingEpisodeRow": {
+        "description": "One quarantined episode with its current failed validation result.",
+        "properties": {
+          "artifact_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Artifact Hash"
+          },
+          "created_at": {
+            "title": "Created At"
+          },
+          "episode_key": {
+            "default": "",
+            "title": "Episode Key",
+            "type": "string"
+          },
+          "format": {
+            "title": "Format",
+            "type": "string"
+          },
+          "frame_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Frame Count"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "jerk_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Jerk Score"
+          },
+          "movement_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Movement Score"
+          },
+          "profile_name": {
+            "default": "",
+            "title": "Profile Name",
+            "type": "string"
+          },
+          "profile_version": {
+            "default": "",
+            "title": "Profile Version",
+            "type": "string"
+          },
+          "reason_codes": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Reason Codes",
+            "type": "array"
+          },
+          "source_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Hash"
+          },
+          "stall_ratio": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stall Ratio"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          },
+          "verdict": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verdict"
+          },
+          "violations": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Violations",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "format",
+          "state",
+          "created_at"
+        ],
+        "title": "FailingEpisodeRow",
+        "type": "object"
+      },
+      "FailingEpisodesResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/FailingEpisodeRow"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "FailingEpisodesResponse",
+        "type": "object"
+      },
+      "FailureSummaryResponse": {
+        "description": "Read-only aggregate of what is failing across episodes and profiles.",
+        "properties": {
+          "by_format": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "By Format",
+            "type": "array"
+          },
+          "by_profile": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "By Profile",
+            "type": "array"
+          },
+          "episodes_evaluated": {
+            "title": "Episodes Evaluated",
+            "type": "integer"
+          },
+          "quarantined_count": {
+            "title": "Quarantined Count",
+            "type": "integer"
+          },
+          "reason_codes": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Reason Codes",
+            "type": "object"
+          }
+        },
+        "required": [
+          "reason_codes",
+          "by_profile",
+          "by_format",
+          "quarantined_count",
+          "episodes_evaluated"
+        ],
+        "title": "FailureSummaryResponse",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -999,6 +1195,225 @@
         "title": "ResourceSample",
         "type": "object"
       },
+      "SliceCreateRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "filter_config": {
+            "additionalProperties": true,
+            "title": "Filter Config",
+            "type": "object"
+          },
+          "name": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "notes": {
+            "default": "",
+            "title": "Notes",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "SliceCreateRequest",
+        "type": "object"
+      },
+      "SliceDetailResponse": {
+        "properties": {
+          "created_at": {
+            "title": "Created At"
+          },
+          "filter_config": {
+            "additionalProperties": true,
+            "title": "Filter Config",
+            "type": "object"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "member_count": {
+            "title": "Member Count",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "notes": {
+            "title": "Notes",
+            "type": "string"
+          },
+          "updated_at": {
+            "title": "Updated At"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "notes",
+          "filter_config",
+          "created_at",
+          "updated_at",
+          "member_count"
+        ],
+        "title": "SliceDetailResponse",
+        "type": "object"
+      },
+      "SliceListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SlicePayload"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "SliceListResponse",
+        "type": "object"
+      },
+      "SliceManifestResponse": {
+        "description": "Same manifest shape as the episodes export endpoint, but for one saved slice.",
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "filters": {
+            "additionalProperties": true,
+            "title": "Filters",
+            "type": "object"
+          },
+          "generated_at": {
+            "title": "Generated At",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/EpisodeSummary"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "slice_id": {
+            "title": "Slice Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "generated_at",
+          "filters",
+          "count",
+          "items",
+          "slice_id"
+        ],
+        "title": "SliceManifestResponse",
+        "type": "object"
+      },
+      "SlicePayload": {
+        "description": "Common fields for a saved slice.",
+        "properties": {
+          "created_at": {
+            "title": "Created At"
+          },
+          "filter_config": {
+            "additionalProperties": true,
+            "title": "Filter Config",
+            "type": "object"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "member_count": {
+            "title": "Member Count",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "notes": {
+            "title": "Notes",
+            "type": "string"
+          },
+          "updated_at": {
+            "title": "Updated At"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "notes",
+          "filter_config",
+          "created_at",
+          "updated_at",
+          "member_count"
+        ],
+        "title": "SlicePayload",
+        "type": "object"
+      },
+      "SliceUpdateRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "filter_config": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Filter Config"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          }
+        },
+        "title": "SliceUpdateRequest",
+        "type": "object"
+      },
       "SourceIngestPayload": {
         "additionalProperties": false,
         "description": "A real episode on disk, described by path rather than by body.",
@@ -1634,6 +2049,98 @@
         "summary": "Get Episode Validation"
       }
     },
+    "/api/v1/failures": {
+      "get": {
+        "description": "What is failing, how often, and under which profiles (read-only).",
+        "operationId": "failures_summary_api_v1_failures_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FailureSummaryResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Failures Summary"
+      }
+    },
+    "/api/v1/failures/episodes": {
+      "get": {
+        "description": "Quarantined episodes with the reason codes that put them there.",
+        "operationId": "failures_episodes_api_v1_failures_episodes_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "before",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Before"
+            }
+          },
+          {
+            "in": "query",
+            "name": "reason_code",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Reason Code"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FailingEpisodesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Failures Episodes"
+      }
+    },
     "/api/v1/health": {
       "get": {
         "operationId": "health_api_v1_health_get",
@@ -2043,6 +2550,255 @@
         "summary": "Get Quality Summary"
       }
     },
+    "/api/v1/slices": {
+      "get": {
+        "operationId": "list_slices_api_v1_slices_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "before",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Before"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SliceListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Slices"
+      },
+      "post": {
+        "description": "Save a named curation filter.\n\nMembership is recomputed on the next manifest read, so creating a slice is\ncheap and the slice never goes stale as episodes change.",
+        "operationId": "create_slice_api_v1_slices_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SliceCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SliceDetailResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Slice"
+      }
+    },
+    "/api/v1/slices/{slice_id}": {
+      "delete": {
+        "operationId": "delete_slice_api_v1_slices__slice_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slice_id",
+            "required": true,
+            "schema": {
+              "title": "Slice Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Slice"
+      },
+      "get": {
+        "operationId": "get_slice_api_v1_slices__slice_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slice_id",
+            "required": true,
+            "schema": {
+              "title": "Slice Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SliceDetailResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Slice"
+      },
+      "patch": {
+        "operationId": "update_slice_api_v1_slices__slice_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slice_id",
+            "required": true,
+            "schema": {
+              "title": "Slice Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SliceUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SliceDetailResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Slice"
+      }
+    },
+    "/api/v1/slices/{slice_id}/manifest": {
+      "get": {
+        "description": "The curated manifest for a saved slice: identity, state, quality.",
+        "operationId": "slice_manifest_api_v1_slices__slice_id__manifest_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slice_id",
+            "required": true,
+            "schema": {
+              "title": "Slice Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SliceManifestResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Slice Manifest"
+      }
+    },
     "/api/v1/status": {
       "get": {
         "description": "Health, queue depth by state, entity counts, and host telemetry.",
@@ -2335,6 +3091,78 @@
           }
         },
         "summary": "Ui Episode Detail"
+      }
+    },
+    "/ui/failures": {
+      "get": {
+        "operationId": "ui_failures_ui_failures_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "theme",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Theme"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-fragment",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Fragment"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ui Failures"
       }
     },
     "/ui/faultlined.css": {
@@ -2680,6 +3508,68 @@
           }
         },
         "summary": "Ui Metrics"
+      }
+    },
+    "/ui/slices": {
+      "get": {
+        "operationId": "ui_slices_ui_slices_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "theme",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Theme"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-fragment",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Fragment"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ui Slices"
       }
     },
     "/ui/vendor/departure-mono/DepartureMono-Regular.woff2": {

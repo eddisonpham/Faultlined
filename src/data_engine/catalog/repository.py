@@ -15,6 +15,7 @@ from psycopg.types.json import Jsonb
 from data_engine.canonical import canonical_json as _canonical_json
 from data_engine.catalog.database import connect
 from data_engine.config import Settings
+from data_engine.curation import EPISODE_FLAGS, EPISODE_STATES, episode_predicates
 from data_engine.jobs.state import (
     ACTIVE_STATES,
     ALLOWED_TRANSITIONS,
@@ -41,6 +42,15 @@ def _timed_operation[Method: Callable[..., Any]](method: Method) -> Method:
 
 class IdempotencyConflict(ValueError):
     """An idempotency key was reused for a different request."""
+
+
+class SliceNameConflict(ValueError):
+    """A curation slice already exists under that name.
+
+    Distinct from `IdempotencyConflict`: the clash is on the slice's own name, not
+    on a request key, so it gets its own problem code rather than borrowing the
+    idempotency wording.
+    """
 
 
 class InvalidTransition(ValueError):
@@ -699,22 +709,7 @@ class PostgresCatalog:
         rank by the signal, `short`/`long` reorder by frame count so the tails of
         the length distribution surface first. Default is newest first.
         """
-        where = []
-        params: list[Any] = []
-        order = "e.created_at DESC"
-        if state:
-            where.append("e.state = %s")
-            params.append(state)
-        if flag == "jerky":
-            where.append("q.verdict = 'jerky'")
-            order = "q.jerk_score DESC"
-        elif flag == "stalled":
-            where.append("q.stall_ratio >= 0.5")
-            order = "q.stall_ratio DESC"
-        elif flag == "short":
-            order = "COALESCE(q.frame_count, 0) ASC"
-        elif flag == "long":
-            order = "COALESCE(q.frame_count, 0) DESC"
+        where, params, order = episode_predicates(state, flag, prefix="e.")
         clause = " WHERE " + " AND ".join(where) if where else ""
         with connect(self.settings) as connection:
             rows = connection.execute(
@@ -836,6 +831,239 @@ class PostgresCatalog:
 
     def close(self) -> None:
         """Compatibility no-op; connections are short lived."""
+
+    # ---- episode slices (curated build-ready layer) ----
+
+    def list_slices(
+        self, *, limit: int = 50, before: datetime | None = None
+    ) -> list[dict[str, Any]]:
+        """Newest-first saved slices; bounded and cursor-based."""
+        params: list[Any] = []
+        clause = ""
+        if before is not None:
+            clause = "WHERE s.created_at < %s"
+            params.append(before)
+        params.append(limit)
+        with connect(self.settings) as connection:
+            rows = connection.execute(
+                f"""SELECT s.id, s.name, s.notes, s.filter_config,
+                          s.created_at, s.updated_at,
+                          coalesce(
+                              (SELECT count(*) FROM slice_memberships sm
+                               WHERE sm.slice_id = s.id),
+                              0
+                          ) AS member_count
+                   FROM episode_slices s
+                   {clause}
+                   ORDER BY s.created_at DESC, s.id DESC
+                   LIMIT %s""",
+                params,
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def get_slice(self, slice_id: str) -> dict[str, Any] | None:
+        with connect(self.settings) as connection:
+            row = connection.execute(
+                """SELECT s.id, s.name, s.notes, s.filter_config,
+                          s.created_at, s.updated_at,
+                          coalesce(
+                              (SELECT count(*) FROM slice_memberships sm
+                               WHERE sm.slice_id = s.id),
+                              0
+                          ) AS member_count
+                   FROM episode_slices s WHERE s.id = %s""",
+                (slice_id,),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def register_slice(
+        self,
+        *,
+        name: str,
+        notes: str = "",
+        filter_config: dict[str, Any] | None = None,
+        slice_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Create or refresh a named slice; idempotent on name.
+
+        Membership is recomputed on the next manifest read, not here, so the create
+        path stays fast and the slice is always correct.
+        """
+        config = dict(filter_config or {})
+        id_ = slice_id or str(uuid.uuid4())
+        with connect(self.settings) as connection:
+            existing = connection.execute(
+                "SELECT id FROM episode_slices WHERE name = %s", (name,)
+            ).fetchone()
+            if existing is not None:
+                raise SliceNameConflict(f"slice name {name!r} already exists")
+            row = connection.execute(
+                """INSERT INTO episode_slices
+                       (id, name, notes, filter_config)
+                   VALUES (%s, %s, %s, %s)
+                   RETURNING *""",
+                (id_, name, notes, Jsonb(config)),
+            ).fetchone()
+            if row is None:
+                raise RuntimeError("slice insert returned no row")
+        return dict(row)
+
+    def update_slice(
+        self,
+        slice_id: str,
+        *,
+        name: str | None = None,
+        notes: str | None = None,
+        filter_config: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        with connect(self.settings) as connection:
+            existing = connection.execute(
+                "SELECT * FROM episode_slices WHERE id = %s", (slice_id,)
+            ).fetchone()
+            if existing is None:
+                return None
+            updates: list[str] = ["updated_at = now()"]
+            params: list[Any] = []
+            if name is not None:
+                updates.append("name = %s")
+                params.append(name)
+            if notes is not None:
+                updates.append("notes = %s")
+                params.append(notes)
+            if filter_config is not None:
+                updates.append("filter_config = %s")
+                params.append(Jsonb(filter_config))
+            params.append(slice_id)
+            connection.execute(
+                f"UPDATE episode_slices SET {', '.join(updates)} WHERE id = %s",
+                params,
+            )
+        return self.get_slice(slice_id)
+
+    def delete_slice(self, slice_id: str) -> bool:
+        with connect(self.settings) as connection:
+            row = connection.execute(
+                "DELETE FROM episode_slices WHERE id = %s RETURNING id",
+                (slice_id,),
+            ).fetchone()
+        return bool(row)
+
+    def slice_manifest(self, slice_id: str, *, limit: int = 100) -> dict[str, Any] | None:
+        """Manifest for a saved slice: what episodes it includes, with identity.
+
+        Membership is recomputed from the filter config at read time so the slice is
+        always correct; the membership row is only an audit trail of inclusion.
+        """
+        slice_ = self.get_slice(slice_id)
+        if slice_ is None:
+            return None
+        config = dict(slice_.get("filter_config") or {})
+        state = config.get("state")
+        flag = config.get("flag")
+        if state is not None and state not in EPISODE_STATES:
+            return None
+        if flag is not None and flag not in EPISODE_FLAGS:
+            return None
+        items = self._slice_members(slice_id, state, flag, limit)
+        return {
+            "slice_id": slice_id,
+            "name": slice_.get("name"),
+            "filters": {"state": state, "flag": flag},
+            "generated_at": datetime.now(UTC).isoformat(),
+            "count": len(items),
+            "items": items,
+        }
+
+    def _slice_members(
+        self,
+        slice_id: str,
+        state: str | None,
+        flag: str | None,
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        """Recompute membership from the filter config and register it in the audit trail."""
+        rows = self.list_episodes(limit=limit, state=state, flag=flag)
+        with connect(self.settings) as connection:
+            for row in rows:
+                connection.execute(
+                    """INSERT INTO slice_memberships (slice_id, episode_id)
+                       VALUES (%s, %s)
+                       ON CONFLICT (slice_id, episode_id) DO NOTHING""",
+                    (slice_id, row["id"]),
+                )
+        return rows
+
+    # ---- validation failures read view ----
+
+    def failure_summary(self) -> dict[str, Any] | None:
+        """Aggregate of what is failing across episodes and profiles; read-only."""
+        with connect(self.settings) as connection:
+            total = connection.execute(
+                "SELECT count(*) AS total FROM episodes WHERE state = 'quarantined'"
+            ).fetchone()
+            evaluated = connection.execute(
+                "SELECT count(DISTINCT episode_id) AS evaluated FROM validation_results"
+            ).fetchone()
+            rows = connection.execute("""SELECT reason_codes FROM validation_results""").fetchall()
+            by_profile = connection.execute(
+                """SELECT profile_name, count(*) AS failed
+                   FROM validation_results vr
+                   JOIN episodes e ON e.id = vr.episode_id
+                   WHERE NOT vr.passed
+                   GROUP BY profile_name"""
+            ).fetchall()
+            by_format = connection.execute(
+                """SELECT e.format, count(*) AS failed
+                   FROM validation_results vr
+                   JOIN episodes e ON e.id = vr.episode_id
+                   WHERE NOT vr.passed
+                   GROUP BY e.format"""
+            ).fetchall()
+        if rows is None or total is None or evaluated is None:
+            return None
+        reason_codes: dict[str, int] = {}
+        for row in rows:
+            for code in cast(list[Any], row["reason_codes"] or []):
+                reason_codes[str(code)] = reason_codes.get(str(code), 0) + 1
+        return {
+            "reason_codes": reason_codes,
+            "by_profile": [dict(row) for row in by_profile],
+            "by_format": [dict(row) for row in by_format],
+            "quarantined_count": int(cast(int, total["total"])),
+            "episodes_evaluated": int(cast(int, evaluated["evaluated"])),
+        }
+
+    def failing_episodes(
+        self, *, limit: int = 50, before: datetime | None = None, reason_code: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Quarantined episodes with their current result's reason codes and violations."""
+        clauses: list[str] = ["e.state = 'quarantined'"]
+        params: list[Any] = []
+        if reason_code is not None:
+            clauses.append("vr.reason_codes @> %s")
+            params.append(Jsonb([reason_code]))
+        if before is not None:
+            clauses.append("e.created_at < %s")
+            params.append(before)
+        where = f"WHERE {' AND '.join(clauses)}"
+        params.append(limit)
+        with connect(self.settings) as connection:
+            rows = connection.execute(
+                f"""SELECT e.id, e.episode_key, e.format, e.state, e.created_at,
+                          q.frame_count, q.movement_score, q.jerk_score,
+                          q.stall_ratio, q.verdict,
+                          vr.profile_name, vr.profile_version, vr.passed,
+                          vr.reason_codes, vr.violations
+                   FROM episodes e
+                   LEFT JOIN episode_quality q ON q.episode_id = e.id
+                   JOIN validation_results vr
+                     ON vr.episode_id = e.id AND NOT vr.passed
+                   {where}
+                   ORDER BY e.created_at DESC, e.id DESC
+                   LIMIT %s""",
+                params,
+            ).fetchall()
+        return [dict(row) for row in rows]
 
 
 # Public operations are wrapped once here so every current and future repository

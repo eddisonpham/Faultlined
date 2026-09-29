@@ -1,10 +1,13 @@
 # Slice: Run Intelligence — monitor, analyze, inspect robot data runs
 
 **Status: packages A–D landed 2026-09-29 (`b4d70a1`, `499249b`, `419a4ca`, `b0052a3`); run-inspection
-extension (package F below) lands on top.** The validation stage is closed (commit `6f16adb`).
-This slice turns Faultlined from a pipeline that *moves* episodes into one that *understands* them: expanded
-runtime monitoring, robotics-native quality analytics, and an interactive instrument UI to inspect how runs
-perform. Every feature is latency-tested and recorded under [../experiments/](../experiments/).
+extension (package F below) lands on top.** The validation stage is closed (commit `6f16adb`). This slice turns Faultlined from a pipeline that *moves* episodes
+into one that *understands* them: expanded runtime monitoring, robotics-native quality analytics, and an interactive
+instrument UI to inspect how runs perform. **A curated, build-ready layer sits on top of the quality signals: dataset
+slices for named filter sets and a curated export manifest with content identity.** Every feature is latency-tested and
+recorded under [../experiments/](../experiments/).
+
+The release this slice feeds is tracked alongside it: `agents/implementation/telldown-plan.md`.
 
 ## Why these features (production-system research)
 
@@ -132,9 +135,13 @@ UI neatness. These extend the API and UI with run-inspection queries over data t
 4. C: UI pages + design revamp + font vendoring + tests → commit.
 5. D: benchmark workloads + runs + experiment records → commit.
 6. F: run inspection endpoints + UI sections + tests + latency measurements → commit.
+7. G + H: curated build-ready layer (slices + export manifest) and validation-failures read view → commits.
+8. Telldown: contract the three lanes as one versioned release (schema + repo + API + UI + tests + benchmarks +
+   docs), then blackbox smoke test the running server and walk back only if something fails there.
 
 ## Explicitly out of scope
 
 Video decode/playback, 3D/URDF views, distributed tracing (ADR 0008 trigger not met), lease-based heartbeat
 schema, ML model workloads (the platform is the product), any committed performance baseline without owner
-review.
+review. The curated build-ready layer is *not* an ML feature — it is a SQL/API/UI curation primitive that the
+curated export manifest feeds. The automated-monitoring ML plan is a forward-looking document only.

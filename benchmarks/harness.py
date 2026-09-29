@@ -547,6 +547,79 @@ class _BenchApiCatalog:
             },
         }
 
+    def failure_summary(self) -> dict[str, Any] | None:
+        return {
+            "reason_codes": {"TOO_FEW_FRAMES": 5, "VALIDATION_FAILED": 2},
+            "by_profile": [{"profile_name": "staged-strict", "failed": 7}],
+            "by_format": [{"format": "lerobot-v3", "failed": 7}],
+            "quarantined_count": 7,
+            "episodes_evaluated": 50,
+        }
+
+    def failing_episodes(
+        self, *, limit: int = 50, before: Any = None, reason_code: str | None = None
+    ) -> list[dict[str, Any]]:
+        # A cursor shortens the page, the way a real page would be a strict subset.
+        rows = [
+            {
+                "id": f"episode-{i:03d}",
+                "episode_key": f"episode_index={i}",
+                "format": "lerobot-v3",
+                "state": "quarantined",
+                "created_at": "2026-09-29T00:00:00Z",
+                "frame_count": 12 + i,
+                "movement_score": 0.001,
+                "jerk_score": 0.09,
+                "stall_ratio": 0.8,
+                "verdict": "jerky",
+                "profile_name": "staged-strict",
+                "profile_version": "1",
+                "reason_codes": ["TOO_FEW_FRAMES"],
+                "violations": [{"code": "TOO_FEW_FRAMES", "message": "too short"}],
+            }
+            for i in range(50)
+        ]
+        if reason_code is not None and reason_code != "TOO_FEW_FRAMES":
+            rows = []
+        if before is not None:
+            rows = rows[:-1]
+        return rows[:limit]
+
+    def list_slices(self, *, limit: int = 50, before: Any = None) -> list[dict[str, Any]]:
+        return [
+            {
+                "id": f"slice-{i:03d}",
+                "name": f"slice-{i}",
+                "notes": "curation",
+                "filter_config": {"state": "valid", "flag": ""},
+                "created_at": "2026-09-29T00:00:00Z",
+                "updated_at": "2026-09-29T00:00:00Z",
+                "member_count": 40 + i,
+            }
+            for i in range(20)
+        ][: limit - 1 if before is not None else limit]
+
+    def get_slice(self, slice_id: str) -> dict[str, Any] | None:
+        return {
+            "id": slice_id,
+            "name": "slice-000",
+            "notes": "curation",
+            "filter_config": {"state": "valid", "flag": ""},
+            "created_at": "2026-09-29T00:00:00Z",
+            "updated_at": "2026-09-29T00:00:00Z",
+            "member_count": 40,
+        }
+
+    def slice_manifest(self, slice_id: str, *, limit: int = 100) -> dict[str, Any] | None:
+        return {
+            "slice_id": slice_id,
+            "name": "slice-000",
+            "generated_at": "2026-09-29T00:00:00Z",
+            "filters": {"state": "valid", "flag": ""},
+            "count": 50,
+            "items": self.list_episodes(limit=limit),
+        }
+
     def get_validation_results(self, _episode_id: str) -> list[dict[str, Any]]:
         return [
             {
@@ -627,6 +700,36 @@ def _api_episodes_benchmark(*, trials: int = 10, warmups: int = 3) -> BenchmarkR
     return _client_benchmark(
         name="api-episodes-catalog",
         path="/api/v1/episodes?limit=50",
+        dataset="synthetic-catalog-50e-v1",
+        trials=trials,
+        warmups=warmups,
+    )
+
+
+def _api_failures_summary_benchmark(*, trials: int = 10, warmups: int = 3) -> BenchmarkResult:
+    return _client_benchmark(
+        name="api-failures-summary",
+        path="/api/v1/failures",
+        dataset="synthetic-failures-50e-v1",
+        trials=trials,
+        warmups=warmups,
+    )
+
+
+def _api_failing_episodes_benchmark(*, trials: int = 10, warmups: int = 3) -> BenchmarkResult:
+    return _client_benchmark(
+        name="api-failing-episodes",
+        path="/api/v1/failures/episodes?limit=50",
+        dataset="synthetic-failures-50e-v1",
+        trials=trials,
+        warmups=warmups,
+    )
+
+
+def _api_slice_manifest_benchmark(*, trials: int = 10, warmups: int = 3) -> BenchmarkResult:
+    return _client_benchmark(
+        name="api-slice-manifest",
+        path="/api/v1/slices/slice-000/manifest",
         dataset="synthetic-catalog-50e-v1",
         trials=trials,
         warmups=warmups,
@@ -720,6 +823,9 @@ WORKLOADS: dict[str, Callable[[], BenchmarkResult | None]] = {
     "api-episode-validation": lambda: _api_validation_benchmark(),
     "api-job-report": lambda: _api_job_report_benchmark(),
     "api-episodes-export": lambda: _api_episodes_export_benchmark(),
+    "api-failures-summary": lambda: _api_failures_summary_benchmark(),
+    "api-failing-episodes": lambda: _api_failing_episodes_benchmark(),
+    "api-slice-manifest": lambda: _api_slice_manifest_benchmark(),
     "ui-insights-page": lambda: _ui_insights_benchmark(),
     "lerobot-ingest-v3": lambda: _lerobot_benchmark(),
 }
