@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import sys
 import time
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -22,9 +23,19 @@ from benchmarks.schema import (
     Trial,
 )
 from benchmarks.statistics import summarize
-from data_engine.ingest.service import SyntheticEpisodeIngestService
+from data_engine.analysis.quality import analyze
+from data_engine.ingest.readers.base import ChannelStats, EpisodeExtraction
+from data_engine.ingest.service import EpisodeIngestService, SyntheticEpisodeIngestService
+from data_engine.observability.aggregate import (
+    series as metric_series,
+)
+from data_engine.observability.aggregate import (
+    summarize as metric_summarize,
+)
 from data_engine.observability.telemetry import sample_resources
 from data_engine.storage.artifacts import FileArtifactStore
+from data_engine.validation.profile import profile_from_dict
+from data_engine.validation.service import ValidationService
 
 BASELINE_DIR = ROOT / "benchmarks" / "baselines"
 RESULTS_DIR = ROOT / "benchmarks" / "results"
@@ -291,57 +302,358 @@ def _ingest_microbenchmark() -> BenchmarkResult:
     )
 
 
+# ------------------------------------------------------- run-intelligence workloads
+#
+# One workload per feature (backlog B-003, B-012..B-015). Micro workloads follow the
+# methodology defaults (3 warmups, 10 trials); the real-data ingest workload is
+# end-to-end (1 warmup, 5 trials). Every workload is deterministic: no RNG, no clock
+# reads inside the operation.
+
+
+def _series(frames: int, dims: int = 12) -> dict[str, list[float]]:
+    """Deterministic motion-like series: two sin mixtures per dim."""
+    return {
+        f"action[{d}]": [
+            math.sin(0.07 * t + d) + 0.1 * math.sin(0.9 * t + 2 * d) for t in range(frames)
+        ]
+        for d in range(dims)
+    }
+
+
+def _quality_benchmark(frames: int = 303, *, trials: int = 10, warmups: int = 3) -> BenchmarkResult:
+    data = _series(frames)
+    return run_benchmark(
+        lambda: analyze(data),
+        name=f"quality-analysis-{frames}f",
+        warmups=warmups,
+        trials=trials,
+        config={
+            "frames": frames,
+            "dims": 12,
+            "warmups": warmups,
+            "trials": trials,
+            "database": "none; pure analysis over an in-memory series",
+        },
+        dataset=f"synthetic-series-{frames}f-v1",
+    )
+
+
+def _validation_benchmark(*, trials: int = 10, warmups: int = 3) -> BenchmarkResult:
+    extraction = EpisodeExtraction(
+        format="lerobot-v3",
+        format_version="v3.0",
+        episode_key="episode_index=7",
+        source_path=Path("bench.parquet"),
+        robot_type="so100_follower",
+        task="pick",
+        tasks=("pick",),
+        frame_count=303,
+        duration_seconds=10.0667,
+        fps=30.0,
+        channels=(
+            ChannelStats(name="action", dtype="float32", count=303, min=-2.0, max=80.0),
+            ChannelStats(name="observation.state", dtype="float32", count=303, min=-2.0, max=80.0),
+        ),
+    )
+    profile = profile_from_dict(
+        {
+            "name": "bench-profile",
+            "version": "1",
+            "required_channels": ["action", "observation.state"],
+            "forbidden_channels": ["debug"],
+            "min_frames": 10,
+            "max_frames": 100_000,
+            "min_duration_seconds": 0.5,
+            "max_duration_seconds": 3600.0,
+            "min_fps": 5.0,
+            "max_fps": 120.0,
+        }
+    )
+    samples = {name: [float(i % 7) for i in range(303)] for name in ("action", "observation.state")}
+    service = ValidationService(catalog=None)
+    return run_benchmark(
+        lambda: service.evaluate(extraction, profile, samples=samples),
+        name="validation-eval",
+        warmups=warmups,
+        trials=trials,
+        config={
+            "rules": 7,
+            "frames": 303,
+            "channels": 2,
+            "warmups": warmups,
+            "trials": trials,
+            "database": "none; pure rule evaluation",
+        },
+        dataset="synthetic-extraction-303f-v1",
+    )
+
+
+def _aggregation_benchmark(
+    record_count: int = 20_000, *, trials: int = 10, warmups: int = 3
+) -> BenchmarkResult:
+    start = datetime(2026, 9, 29, tzinfo=UTC)
+    label_sets = (
+        {"job_type": "ingest", "state": "succeeded"},
+        {"job_type": "ingest", "state": "failed"},
+        {"job_type": "validate", "state": "succeeded"},
+    )
+    records = [
+        {
+            "name": "jobs_run_time_seconds",
+            "value": (i % 97) / 1000.0,
+            "unit": "seconds",
+            "labels": label_sets[i % 3],
+            "timestamp": (start + timedelta(seconds=i)).isoformat(),
+            "source": "runtime",
+            "correlation_id": None,
+        }
+        for i in range(record_count)
+    ]
+
+    def operation() -> Any:
+        return metric_summarize(records), metric_series(records, bucket_seconds=60.0)
+
+    return run_benchmark(
+        operation,
+        name="metrics-aggregation",
+        warmups=warmups,
+        trials=trials,
+        config={
+            "records": record_count,
+            "bucket_seconds": 60.0,
+            "warmups": warmups,
+            "trials": trials,
+            "database": "none; in-memory record list",
+        },
+        dataset=f"synthetic-metrics-{record_count}r-v1",
+    )
+
+
+def _summary_model(episodes: int = 50, dims: int = 12) -> dict[str, Any]:
+    dim_names = [f"action[{d}]" for d in range(dims)]
+    return {
+        "episode_count": episodes,
+        "verdicts": {
+            "smooth": episodes // 2,
+            "moderate": episodes // 3,
+            "jerky": episodes // 6,
+        },
+        "length": {
+            "count": episodes,
+            "mean": 300.0,
+            "std": 80.0,
+            "min": 200,
+            "max": 420,
+            "histogram": [
+                {"lo": 200 + 22 * i, "hi": 222 + 22 * i, "count": (i * 3) % 11} for i in range(10)
+            ],
+        },
+        "speed_distribution": [
+            {
+                "episode_id": f"episode-{i}",
+                "movement_score": 0.5 + (i % 17) / 10,
+                "verdict": "smooth",
+            }
+            for i in range(episodes)
+        ],
+        "heat_matrix": {
+            "dims": dim_names,
+            "episodes": [
+                {
+                    "episode_id": f"episode-{i}",
+                    "values": [((i + d) % 13) / 50 for d in range(dims)],
+                }
+                for i in range(episodes)
+            ],
+        },
+        "outliers": {"jerk": [], "stall": [], "length": []},
+    }
+
+
+class _BenchApiCatalog:
+    """Deterministic read surface for the endpoint render benchmarks (no DB)."""
+
+    def count_jobs(self, _state: Any) -> int:
+        return 3
+
+    def quality_summary(self) -> dict[str, Any]:
+        return _summary_model()
+
+
+def _seed_metrics(path: Path, records: int) -> None:
+    start = datetime(2026, 9, 29, tzinfo=UTC)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8", newline="\n") as stream:
+        for i in range(records):
+            record = {
+                "name": "api_request_duration_seconds",
+                "value": (i % 89) / 1000.0,
+                "unit": "seconds",
+                "labels": {"route": "/api/v1/jobs", "method": "GET", "status_class": "2xx"},
+                "timestamp": (start + timedelta(seconds=i)).isoformat(),
+                "source": "runtime",
+                "correlation_id": None,
+            }
+            stream.write(json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n")
+
+
+def _client_benchmark(
+    *, name: str, path: str, dataset: str, trials: int, warmups: int, seed_records: int = 0
+) -> BenchmarkResult:
+    """In-process request latency via TestClient and a stub catalog (B-014)."""
+    from fastapi.testclient import TestClient
+
+    from data_engine.api.app import create_app
+    from data_engine.config import Settings
+
+    metrics_path = Path("var/benchmark-artifacts/metrics-scratch.jsonl")
+    if seed_records:
+        _seed_metrics(metrics_path, seed_records)
+    app = create_app(
+        Settings(_env_file=None, metrics_path=metrics_path),
+        initialize_database=False,
+        catalog=_BenchApiCatalog(),  # type: ignore[arg-type]
+    )
+    client = TestClient(app)
+    return run_benchmark(
+        lambda: client.get(path).text,
+        name=name,
+        warmups=warmups,
+        trials=trials,
+        config={
+            "path": path,
+            "seed_records": seed_records,
+            "warmups": warmups,
+            "trials": trials,
+            "database": "none; in-process TestClient, stub catalog, no network",
+        },
+        dataset=dataset,
+    )
+
+
+def _api_metrics_benchmark(*, trials: int = 10, warmups: int = 3) -> BenchmarkResult:
+    return _client_benchmark(
+        name="api-metrics-endpoint",
+        path="/api/v1/metrics",
+        dataset="synthetic-metrics-5000r-v1",
+        trials=trials,
+        warmups=warmups,
+        seed_records=5_000,
+    )
+
+
+def _ui_insights_benchmark(*, trials: int = 10, warmups: int = 3) -> BenchmarkResult:
+    return _client_benchmark(
+        name="ui-insights-page",
+        path="/ui/insights",
+        dataset="synthetic-quality-50e-12d-v1",
+        trials=trials,
+        warmups=warmups,
+    )
+
+
+def _lerobot_benchmark(*, trials: int = 5, warmups: int = 1) -> BenchmarkResult | None:
+    """B-003: real LeRobot v3 ingest (read + slice + quality + artifact). Skips when
+    the network fixture has not been downloaded (run the `network`-marked tests first)."""
+    root = Path("var/real-data/svla_so101_pickplace")
+    if not (root / "meta" / "info.json").exists():
+        return None
+    service = EpisodeIngestService(
+        _BenchmarkCatalog(), FileArtifactStore(Path("var/benchmark-artifacts"))
+    )
+    sequence = 0
+
+    def operation() -> Any:
+        nonlocal sequence
+        sequence += 1
+        return service.ingest_path(
+            root, job_id=f"bench-job-{sequence:05d}", episode_key="episode_index=7"
+        )
+
+    return run_benchmark(
+        operation,
+        name="lerobot-ingest-v3",
+        warmups=warmups,
+        trials=trials,
+        config={
+            "episode_key": "episode_index=7",
+            "frames": 203,
+            "warmups": warmups,
+            "trials": trials,
+            "database": "in-memory benchmark catalog; production filesystem artifact store",
+        },
+        dataset="lerobot/svla_so101_pickplace tabular slice (v3.0)",
+        workload_version="1.0.0",
+    )
+
+
+# Entries are late-bound lambdas so tests can monkeypatch the workload functions.
+WORKLOADS: dict[str, Callable[[], BenchmarkResult | None]] = {
+    "synthetic-episode-ingest": lambda: _ingest_microbenchmark(),
+    "quality-analysis-303f": lambda: _quality_benchmark(303),
+    "quality-analysis-3000f": lambda: _quality_benchmark(3000),
+    "validation-eval": lambda: _validation_benchmark(),
+    "metrics-aggregation": lambda: _aggregation_benchmark(),
+    "api-metrics-endpoint": lambda: _api_metrics_benchmark(),
+    "ui-insights-page": lambda: _ui_insights_benchmark(),
+    "lerobot-ingest-v3": lambda: _lerobot_benchmark(),
+}
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="de bench")
     parser.add_argument("--write-baseline", action="store_true")
     parser.add_argument("--baseline", type=Path, default=DEFAULT_BASELINE)
-    args = parser.parse_args(argv)
-    result = _ingest_microbenchmark()
-    output = persist_result(result)
-    if args.write_baseline:
-        if result.status != "ok":
-            raise SystemExit("refusing to write a baseline from a failed benchmark result")
-        baseline_path = write_baseline(result, args.baseline)
-        print(
-            json.dumps(
-                {
-                    "result": str(output),
-                    "baseline": str(baseline_path),
-                    "summary": result.summary.model_dump(),
-                },
-                indent=2,
-            )
-        )
-        return
-    if result.status != "ok":
-        print(
-            json.dumps(
-                {
-                    "result": str(output),
-                    "status": result.status,
-                    "failure": result.failure.model_dump(),
-                },
-                indent=2,
-            )
-        )
-        raise SystemExit(1)
-    try:
-        comparison = compare_to_baseline(result, args.baseline)
-    except BaselineFormatError as exc:
-        print(f"benchmark comparison skipped: {exc}", file=sys.stderr)
-        print(f"raw result preserved at {output}", file=sys.stderr)
-        raise SystemExit(1) from exc
-    print(
-        json.dumps(
-            {
-                "result": str(output),
-                "summary": result.summary.model_dump(),
-                "comparison": comparison,
-            },
-            indent=2,
-        )
+    parser.add_argument(
+        "--workload",
+        choices=("all", *sorted(WORKLOADS)),
+        default="all",
+        help="which workload to run (default: all; skipped ones need fixtures)",
     )
-    if comparison["regression"]:
+    args = parser.parse_args(argv)
+    if args.write_baseline and args.workload == "all":
+        raise SystemExit("--write-baseline needs exactly one --workload name")
+
+    names = sorted(WORKLOADS) if args.workload == "all" else [args.workload]
+    reports: list[dict[str, Any]] = []
+    skipped: list[str] = []
+    failed = False
+    regression = False
+    for name in names:
+        outcome = WORKLOADS[name]()
+        if outcome is None:
+            skipped.append(name)
+            continue
+        output = persist_result(outcome)
+        report: dict[str, Any] = {
+            "workload": name,
+            "result": str(output),
+            "status": outcome.status,
+            "summary": outcome.summary.model_dump(mode="json"),
+        }
+        if args.write_baseline and outcome.status != "ok":
+            raise SystemExit("refusing to write a baseline from a failed benchmark result")
+        if outcome.status != "ok":
+            report["failure"] = outcome.failure.model_dump() if outcome.failure else None
+            failed = True
+        elif args.write_baseline:
+            report["baseline"] = str(write_baseline(outcome, args.baseline))
+        elif name == "synthetic-episode-ingest":
+            try:
+                comparison = compare_to_baseline(outcome, args.baseline)
+                report["comparison"] = comparison
+                regression = regression or bool(comparison["regression"])
+            except BaselineFormatError as exc:
+                print(f"benchmark comparison skipped: {exc}", file=sys.stderr)
+                print(f"raw result preserved at {output}", file=sys.stderr)
+                report["comparison"] = f"skipped: {exc}"
+                failed = True
+        else:
+            report["comparison"] = "skipped (no committed baseline; results recorded for review)"
+        reports.append(report)
+
+    print(json.dumps({"reports": reports, "skipped": skipped}, indent=2))
+    if failed or regression:
         raise SystemExit(1)
 
 

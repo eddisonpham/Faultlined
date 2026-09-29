@@ -280,7 +280,9 @@ def test_main_reports_missing_baseline_without_traceback(
     monkeypatch.setattr(harness, "RESULTS_DIR", tmp_path)
 
     with pytest.raises(SystemExit) as exit_info:
-        harness.main(["--baseline", str(tmp_path / "absent.json")])
+        harness.main(
+            ["--workload", "synthetic-episode-ingest", "--baseline", str(tmp_path / "absent.json")]
+        )
 
     assert exit_info.value.code == 1
     captured = capsys.readouterr()
@@ -309,7 +311,15 @@ def test_main_refuses_to_write_baseline_from_failed_result(
     monkeypatch.setattr(harness, "persist_result", _fake_persist)
 
     with pytest.raises(SystemExit, match="failed benchmark result"):
-        harness.main(["--write-baseline", "--baseline", str(tmp_path / "b.json")])
+        harness.main(
+            [
+                "--workload",
+                "synthetic-episode-ingest",
+                "--write-baseline",
+                "--baseline",
+                str(tmp_path / "b.json"),
+            ]
+        )
     assert not (tmp_path / "b.json").exists()
 
 

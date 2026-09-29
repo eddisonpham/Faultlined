@@ -1,6 +1,6 @@
 # Experiment Registry
 
-EXP-0001 holds the first reviewed result and committed baseline. A harness unit test is still not an experiment record. See [benchmark backlog](../benchmarking/backlog.md) and [methodology](../benchmarking/methodology.md).
+EXP-0001 holds the first reviewed result and committed baseline. EXP-0002 records the first run-intelligence workload measurements (no baselines written). A harness unit test is still not an experiment record. See [benchmark backlog](../benchmarking/backlog.md) and [methodology](../benchmarking/methodology.md).
 
 ## Current production configuration
 | Setting | Value | Why (EXP / ADR) |
@@ -11,6 +11,7 @@ EXP-0001 holds the first reviewed result and committed baseline. A harness unit 
 | ID | What | Outcome | Link |
 |---|---|---|---|
 | EXP-0001 | Synthetic episode ingest microbenchmark baseline | P50 0.6084 ms over 10 trials, 0 failures, clean tree at `f7ffbeb`; verification pass −23.5%, no regression. Synthetic 199-byte payload only — not a throughput or production claim | [EXP-0001](0001-synthetic-ingest-baseline.md) |
+| EXP-0002 | Run-intelligence workloads (B-003, B-012..B-015) | Isolated P50s: synthetic-ingest 0.539 ms (no regression vs EXP-0001), lerobot-ingest-v3 17.6 ms (203f real), quality 2.58 ms@303f / 23.1 ms@3000f, validation-eval 0.151 ms, metrics-aggregation 43.8 ms, api-metrics 47.6 ms, ui-insights 6.9 ms. Key finding: batch in-process runs inflate micro benchmarks ~24× (ADR 0019) | [EXP-0002](0002-run-intelligence-workloads.md) |
 
 ## Rejected approaches
 | ID | What | Why rejected | Link |
