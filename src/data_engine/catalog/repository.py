@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
 from psycopg.types.json import Jsonb
 
+from data_engine.canonical import canonical_json as _canonical_json
 from data_engine.catalog.database import connect
 from data_engine.config import Settings
 from data_engine.jobs.state import (
@@ -18,6 +18,7 @@ from data_engine.jobs.state import (
     DEFAULT_MAX_ATTEMPTS,
     JobState,
 )
+from data_engine.validation.profile import ValidationProfile, profile_hash
 
 
 class IdempotencyConflict(ValueError):
@@ -29,10 +30,9 @@ class InvalidTransition(ValueError):
 
 
 def canonical_json(value: Any) -> bytes:
-    """Stable UTF-8 JSON bytes; rejects non-finite numbers by default."""
-    return json.dumps(
-        value, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False
-    ).encode()
+    """Re-exported from [data_engine.canonical](../canonical.py); kept here because the
+    idempotency request hash has always been imported from this module."""
+    return _canonical_json(value)
 
 
 class PostgresCatalog:
@@ -297,6 +297,89 @@ class PostgresCatalog:
                 (row["id"], job_id),
             )
             return dict(row)
+
+    def register_validation_profile(self, profile: ValidationProfile) -> dict[str, Any]:
+        """Persist a profile under its content address (ADR 0016).
+
+        Idempotent on both the hash and (name, version): two submissions of the same
+        document are the same profile, and a name/version collision with different content
+        is a conflict rather than a silent overwrite, because a build manifest citing a
+        hash must never resolve to two different policies.
+        """
+        document = profile.to_dict()
+        payload_hash = profile_hash(profile)
+        with connect(self.settings) as connection:
+            existing = connection.execute(
+                "SELECT hash FROM validation_profiles WHERE name = %s AND version = %s",
+                (profile.name, profile.version),
+            ).fetchone()
+            if existing is not None:
+                if existing["hash"] != payload_hash:
+                    raise IdempotencyConflict(f"{profile.name}@{profile.version}")
+                return {"hash": payload_hash, "created": False}
+            row = connection.execute(
+                """INSERT INTO validation_profiles (hash, name, version, document)
+                   VALUES (%s, %s, %s, %s) RETURNING hash""",
+                (payload_hash, profile.name, profile.version, Jsonb(document)),
+            ).fetchone()
+        if row is None:
+            raise RuntimeError("validation profile insert returned no row")
+        return {"hash": payload_hash, "created": True}
+
+    def record_validation(
+        self,
+        *,
+        episode_id: str,
+        profile_hash: str,
+        profile_name: str,
+        profile_version: str,
+        passed: bool,
+        reason_codes: list[str],
+        violations: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Record an immutable result and move the episode to `valid` or `quarantined`.
+
+        Re-validating the same episode under the same profile replaces the row, because
+        re-running an identical check must not accumulate duplicate "history" of a
+        statement that has not changed. A *different* profile is a new row.
+        """
+        state = "valid" if passed else "quarantined"
+        with connect(self.settings) as connection:
+            row = connection.execute(
+                """INSERT INTO validation_results
+                       (episode_id, profile_hash, profile_name, profile_version,
+                        passed, reason_codes, violations)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s)
+                   ON CONFLICT (episode_id, profile_hash) DO UPDATE
+                       SET passed = EXCLUDED.passed,
+                           reason_codes = EXCLUDED.reason_codes,
+                           violations = EXCLUDED.violations,
+                           created_at = now()
+                   RETURNING id, passed""",
+                (
+                    episode_id,
+                    profile_hash,
+                    profile_name,
+                    profile_version,
+                    passed,
+                    Jsonb(reason_codes),
+                    Jsonb(violations),
+                ),
+            ).fetchone()
+            connection.execute("UPDATE episodes SET state = %s WHERE id = %s", (state, episode_id))
+        if row is None:
+            raise RuntimeError("validation result insert returned no row")
+        return {"id": row["id"], "passed": row["passed"], "state": state}
+
+    def get_validation_results(self, episode_id: str) -> list[dict[str, Any]]:
+        with connect(self.settings) as connection:
+            rows = connection.execute(
+                """SELECT id, profile_hash, profile_name, profile_version,
+                          passed, reason_codes, violations, created_at
+                   FROM validation_results WHERE episode_id = %s ORDER BY id""",
+                (episode_id,),
+            ).fetchall()
+        return [dict(row) for row in rows]
 
     def count_jobs(self, state: JobState) -> int:
         """Number of jobs currently in ``state``; feeds the queue-depth gauge."""

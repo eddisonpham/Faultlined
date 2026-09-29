@@ -172,3 +172,134 @@ def test_unreadable_source_fails_without_retrying(
     assert finished["attempts"] == 1, "an unparseable episode must not burn the budget"
     assert finished["state"] == JobState.FAILED.value
     assert finished["error"]["type"] == "ReaderError"
+
+
+def _ingest_one(
+    catalog: PostgresCatalog, worker: IngestWorker, source: Path, episode_key: str
+) -> dict[str, Any]:
+    job, _ = catalog.submit_job(
+        "ingest_source",
+        {"source": str(source), "episode_key": episode_key},
+        f"real-validate-{uuid.uuid4()}",
+        "test-correlation",
+    )
+    finished = _run(catalog, worker, job["id"])
+    assert finished["state"] == JobState.SUCCEEDED.value, finished.get("error")
+    return finished["result"]
+
+
+def _validate(
+    catalog: PostgresCatalog, worker: IngestWorker, episode_id: str, profile: dict[str, Any]
+) -> dict[str, Any]:
+    job, _ = catalog.submit_job(
+        "validate",
+        {"episode_id": episode_id, "profile": profile},
+        f"real-validate-{uuid.uuid4()}",
+        "test-correlation",
+    )
+    finished = _run(catalog, worker, job["id"])
+    assert finished["state"] == JobState.SUCCEEDED.value, finished.get("error")
+    return finished["result"]
+
+
+def _results_for(catalog: PostgresCatalog, episode_id: str, profile_name: str) -> list[Any]:
+    """Only the results this test's profile produced.
+
+    Episode identity is content-addressed, so the same dataset yields the same catalog
+    row on every run and the test database accumulates results across runs. Asserting
+    on *all* results for an episode would make the test depend on how many times it had
+    been run before, which is exactly the kind of statefulness this suite avoids.
+    """
+    return [
+        row
+        for row in catalog.get_validation_results(episode_id)
+        if row["profile_name"] == profile_name
+    ]
+
+
+@pytest.mark.integration
+def test_real_episode_passes_a_profile_that_matches_its_shape(
+    tmp_path: Path, real_lerobot_dataset: Callable[[str], Path]
+) -> None:
+    """The published SO-101 dataset must validate cleanly against its own profile."""
+    settings = _settings(tmp_path)
+    catalog = PostgresCatalog(settings)
+    worker = IngestWorker(settings)
+    result = _ingest_one(catalog, worker, real_lerobot_dataset("v3"), "episode_index=0")
+
+    outcome = _validate(
+        catalog,
+        worker,
+        result["episode_id"],
+        {
+            "name": "so101-manipulation",
+            "version": "1",
+            "required_channels": ["action", "observation.state"],
+            "min_frames": 100,
+            "max_fps": 60,
+            "min_fps": 1,
+        },
+    )
+
+    assert outcome["passed"] is True
+    assert outcome["reason_codes"] == []
+    episode = catalog.get_episode(result["episode_id"])
+    assert episode["state"] == "valid"
+    results = _results_for(catalog, result["episode_id"], "so101-manipulation")
+    assert len(results) == 1
+    assert results[0]["passed"] is True
+
+
+@pytest.mark.integration
+def test_a_mismatched_profile_quarantines_the_episode_with_reasons(
+    tmp_path: Path, real_lerobot_dataset: Callable[[str], Path]
+) -> None:
+    """F2: quarantine records *why*, and the bytes are not re-ingested to find out."""
+    settings = _settings(tmp_path)
+    catalog = PostgresCatalog(settings)
+    worker = IngestWorker(settings)
+    result = _ingest_one(catalog, worker, real_lerobot_dataset("v3"), "episode_index=0")
+
+    outcome = _validate(
+        catalog,
+        worker,
+        result["episode_id"],
+        {"name": "too-strict", "version": "1", "required_channels": ["force_torque"]},
+    )
+
+    assert outcome["passed"] is False
+    assert "VALIDATION_FAILED" in outcome["reason_codes"]
+    assert "REQUIRED_CHANNEL_MISSING" in outcome["reason_codes"]
+    episode = catalog.get_episode(result["episode_id"])
+    assert episode["state"] == "quarantined"
+    violations = _results_for(catalog, result["episode_id"], "too-strict")[0]["violations"]
+    assert [v["channel"] for v in violations] == ["force_torque"]
+
+
+@pytest.mark.integration
+def test_remediation_revalidates_without_reingesting(
+    tmp_path: Path, real_lerobot_dataset: Callable[[str], Path]
+) -> None:
+    """FR-003: a fixed profile produces a second result; the artifact is not re-read."""
+    settings = _settings(tmp_path)
+    catalog = PostgresCatalog(settings)
+    worker = IngestWorker(settings)
+    result = _ingest_one(catalog, worker, real_lerobot_dataset("v3"), "episode_index=0")
+    artifact_hash = result["artifact_hash"]
+
+    strict = {"name": "staged-strict", "version": "1", "required_channels": ["force_torque"]}
+    assert _validate(catalog, worker, result["episode_id"], strict)["passed"] is False
+    relaxed = {"name": "staged-relaxed", "version": "2", "required_channels": ["action"]}
+    assert _validate(catalog, worker, result["episode_id"], relaxed)["passed"] is True
+
+    episode = catalog.get_episode(result["episode_id"])
+    assert episode["state"] == "valid"
+    assert episode["artifact_hash"] == artifact_hash, "no re-ingest should have happened"
+    assert _results_for(catalog, result["episode_id"], "staged-strict")[0]["passed"] is False
+    assert _results_for(catalog, result["episode_id"], "staged-relaxed")[0]["passed"] is True
+    hashes = {
+        row["profile_hash"]
+        for name in ("staged-strict", "staged-relaxed")
+        for row in _results_for(catalog, result["episode_id"], name)
+    }
+    assert len(hashes) == 2, "two profiles are two different policies"

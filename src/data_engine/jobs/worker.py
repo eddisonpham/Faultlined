@@ -17,6 +17,8 @@ from data_engine.observability.logging import correlation_id_var
 from data_engine.observability.metrics import RuntimeMetrics
 from data_engine.observability.reason_codes import ReasonCode
 from data_engine.storage.artifacts import FileArtifactStore
+from data_engine.validation.profile import profile_from_dict
+from data_engine.validation.service import ValidationService
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +83,7 @@ class IngestWorker:
         self.catalog = PostgresCatalog(self.settings)
         self.artifacts = FileArtifactStore(self.settings.artifact_root)
         self.ingest = EpisodeIngestService(self.catalog, self.artifacts, metrics=metrics)
+        self.validation = ValidationService(self.catalog, metrics=metrics)
         self.metrics = metrics or RuntimeMetrics()
 
     def _run_handler(self, job: dict[str, Any], job_type: str) -> dict[str, Any]:
@@ -89,7 +92,9 @@ class IngestWorker:
         Two ingest shapes share the job pipeline on purpose: an episode in the payload
         (synthetic) and a dataset path (real formats). They differ only in where the
         bytes come from, and splitting them into separate workers would double the
-        process management for no isolation benefit.
+        process management for no isolation benefit. Validation is a third shape, on the
+        same reasoning, but it is chained rather than submitted directly: it re-reads the
+        source and records an immutable result against an existing episode.
         """
         payload = job["payload"]
         if job_type == JobType.INGEST_SOURCE:
@@ -107,7 +112,28 @@ class IngestWorker:
             if not isinstance(episode, dict):
                 raise InvalidJobPayload("payload.episode must be an object")
             return self.ingest.ingest(episode, job_id=str(job["id"]))
+        if job_type == JobType.VALIDATE:
+            return self._validate(payload)
         raise UnsupportedJobType(f"unsupported job type: {job_type}")
+
+    def _validate(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Record a validation result for an episode already in the catalog (FR-002)."""
+        episode_id = payload.get("episode_id")
+        if not isinstance(episode_id, str) or not episode_id:
+            raise InvalidJobPayload("payload.episode_id must be a non-empty id")
+        profile = payload.get("profile")
+        if not isinstance(profile, dict):
+            raise InvalidJobPayload("payload.profile must be a profile document")
+        document = profile_from_dict(profile)
+        self.catalog.register_validation_profile(document)
+        result = self.validation.validate_stored_episode(episode_id, document)
+        return {
+            "episode_id": episode_id,
+            "profile_hash": result.profile_hash,
+            "profile_name": result.profile_name,
+            "passed": result.passed,
+            "reason_codes": list(result.reason_codes),
+        }
 
     def _respect_deadline(self, job: dict[str, Any]) -> None:
         """Time the job out before running if its deadline already passed."""
