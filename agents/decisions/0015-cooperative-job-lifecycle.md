@@ -52,6 +52,27 @@ database flag.
   every startup. `worker_id` and `lease_expires_at` are added now because worker leases are the
   documented next step, and adding a column later would need another migration.
 
+## Addendum (2026-09-29): not every failure is retryable
+
+The decision above says a failed attempt is requeued while budget remains. That is wrong for a
+specific and predictable class of failure, and the architecture had already said so: F1 and F3 in
+[failure-handling.md](../architecture/failure-handling.md) require that unparseable data and an
+invalid payload be *terminal*, because "retrying won't fix data".
+
+The implementation now distinguishes the two. `_TERMINAL_FAILURES` in `jobs/worker.py` lists
+`ReaderError`, `InvalidJobPayload`, and `UnsupportedJobType`; `_settle_failure` skips the retry
+branch for them and the job goes to `failed` on its first attempt. Everything else keeps its budget.
+
+The classification is attached to the exception types rather than kept in a side table, so a failure
+mode nobody has thought about yet is terminal by default. That is the right default: a wasted retry
+is cheap, a job that retries forever is not. The synthetic ingest service now validates its own
+contract and raises `ReaderError` instead of leaking a bare `KeyError`, so the synthetic path and the
+reader path agree on what "this data is not valid" means.
+
+One transition was missing from the state machine as a result. `requeue_for_retry` refuses once the
+budget is spent, and `RETRYING` had no edge out, so a job caught in that window was a dead end. The
+contract gains `retrying -> failed`. The architecture diagram only ever drew the happy path.
+
 ## Consequences
 
 - (+) A job cannot be retried forever, and cannot silently disappear when a worker dies mid-attempt.

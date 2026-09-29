@@ -14,12 +14,13 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 
 from data_engine.api.errors import install_error_handling
 from data_engine.api.schemas import (
+    AnyJobRequest,
     ArtifactListResponse,
     EpisodeResponse,
     JobListResponse,
     JobResponse,
     StatusResponse,
-    SubmitJobRequest,
+    SubmitSourceJobRequest,
 )
 from data_engine.catalog.database import initialize_schema
 from data_engine.catalog.repository import InvalidTransition, PostgresCatalog
@@ -151,16 +152,28 @@ def create_app(
 
     @app.post("/api/v1/jobs", response_model=JobResponse, status_code=202)
     def submit_job(
-        body: SubmitJobRequest,
+        body: AnyJobRequest,
         response: Response,
         request: Request,
         idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
     ) -> dict[str, Any]:
+        """Queue an ingest job.
+
+        Two request shapes, one endpoint: `ingest` carries an episode in the request
+        body (the synthetic contract), `ingest_source` names a dataset on disk and
+        lets a reader interpret it. They are separate types rather than one optional
+        payload because "either a body or a path" is exactly the kind of either/or that
+        a typo turns into a confusing 422.
+        """
         correlation_id = request.state.correlation_id or str(uuid4())
         catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
+        if isinstance(body, SubmitSourceJobRequest):
+            payload = body.payload.model_dump(mode="json")
+        else:
+            payload = {"episode": body.payload.episode.model_dump(mode="json")}
         row, created = catalog_for_request.submit_job(
             body.type,
-            {"episode": body.payload.episode.model_dump(mode="json")},
+            payload,
             idempotency_key,
             correlation_id,
             max_attempts=body.max_attempts,

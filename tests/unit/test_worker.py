@@ -116,6 +116,105 @@ def test_worker_processes_episode_and_stores_content_addressed_artifact(
 
 
 @pytest.mark.unit
+def test_worker_ingests_a_real_dataset_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The `ingest_source` job type routes a path through the reader, not the API body."""
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    root = tmp_path / "ds"
+    (root / "meta").mkdir(parents=True)
+    (root / "meta" / "info.json").write_text(
+        '{"codebase_version": "v3.0", "robot_type": "arm", "fps": 10, "features": {}}',
+        encoding="utf-8",
+    )
+    data_dir = root / "data" / "chunk-000"
+    data_dir.mkdir(parents=True)
+    pq.write_table(
+        pa.table(
+            {
+                "action": [[0.0], [0.5], [1.0]],
+                "timestamp": [0.0, 1.0, 2.0],
+                "frame_index": [0, 1, 2],
+                "episode_index": [0, 0, 0],
+                "index": [0, 1, 2],
+                "task_index": [0, 0, 0],
+            }
+        ),
+        data_dir / "file-000.parquet",
+    )
+    index_dir = root / "meta" / "episodes" / "chunk-000"
+    index_dir.mkdir(parents=True)
+    pq.write_table(
+        pa.table(
+            {
+                "episode_index": [0],
+                "data/chunk_index": [0],
+                "data/file_index": [0],
+                "dataset_from_index": [0],
+                "dataset_to_index": [3],
+                "tasks": [["reach"]],
+                "length": [3],
+            }
+        ),
+        index_dir / "file-000.parquet",
+    )
+
+    job = _job()
+    job["type"] = "ingest_source"
+    job["payload"] = {"source": str(root), "episode_key": "episode_index=0"}
+    catalog = FakeCatalog(job)
+    monkeypatch.setattr("data_engine.jobs.worker.PostgresCatalog", lambda _settings: catalog)
+    worker = IngestWorker(Settings(artifact_root=tmp_path / "store", _env_file=None))
+
+    result = worker.process_one()
+
+    assert result is not None
+    assert result["state"] == "succeeded"
+    assert result["result"]["format"] == "lerobot-v3"
+    assert result["result"]["frame_count"] == 3
+    assert worker.artifacts.get_bytes(result["result"]["artifact_hash"])
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "payload", [{}, {"source": ""}, {"source": 5}, {"source": "x", "episode_key": 1}]
+)
+def test_worker_rejects_a_malformed_source_payload(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, payload: dict[str, Any]
+) -> None:
+    job = _job()
+    job["type"] = "ingest_source"
+    job["payload"] = payload
+    catalog = FakeCatalog(job)
+    monkeypatch.setattr("data_engine.jobs.worker.PostgresCatalog", lambda _settings: catalog)
+    worker = IngestWorker(Settings(artifact_root=tmp_path, _env_file=None))
+
+    assert worker.process_one()["state"] == "failed"
+
+
+@pytest.mark.unit
+def test_worker_reports_a_missing_source_file_as_an_io_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    job = _job()
+    job["type"] = "ingest_source"
+    job["payload"] = {"source": str(tmp_path / "nope")}
+    catalog = FakeCatalog(job)
+    monkeypatch.setattr("data_engine.jobs.worker.PostgresCatalog", lambda _settings: catalog)
+    metrics_path = tmp_path / "metrics" / "runtime.jsonl"
+    worker = IngestWorker(
+        Settings(artifact_root=tmp_path, _env_file=None),
+        metrics=RuntimeMetrics(JsonlMetricSink(metrics_path)),
+    )
+
+    assert worker.process_one()["state"] == "failed"
+    failures = [p for p in _points(metrics_path) if p["name"] == "jobs_failures_total"]
+    assert failures[0]["labels"]["reason_code"] == "INGEST_PARSE_FAILED"
+
+
+@pytest.mark.unit
 def test_worker_returns_none_when_no_job(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     catalog = FakeCatalog(None)
     monkeypatch.setattr("data_engine.jobs.worker.PostgresCatalog", lambda _settings: catalog)
@@ -254,13 +353,33 @@ def _failing_worker(
     return worker, metrics_path
 
 
+class _TransientFailure:
+    """Stands in for a failure that may not repeat: a lost connection, a busy disk."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def ingest(self, episode: dict[str, Any], *, job_id: str) -> dict[str, Any]:
+        self.calls += 1
+        raise ConnectionResetError("the artifact store went away")
+
+
+def _flaky_worker(
+    catalog: FakeCatalog, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> tuple[IngestWorker, Path, _TransientFailure]:
+    worker, metrics_path = _failing_worker(catalog, tmp_path, monkeypatch)
+    failure = _TransientFailure()
+    monkeypatch.setattr(worker.ingest, "ingest", failure.ingest)
+    return worker, metrics_path, failure
+
+
 @pytest.mark.unit
 def test_worker_requeues_while_attempts_remain_then_fails_when_exhausted(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """F6: a broken payload is retried up to max_attempts, then parked as failed."""
-    catalog = FakeCatalog(_job({"task": "missing-fields"}, attempts=0, max_attempts=2))
-    worker, metrics_path = _failing_worker(catalog, tmp_path, monkeypatch)
+    """F6: a transient failure is retried up to max_attempts, then parked as failed."""
+    catalog = FakeCatalog(_job(attempts=0, max_attempts=2))
+    worker, metrics_path, _ = _flaky_worker(catalog, tmp_path, monkeypatch)
 
     worker.process_one()
 
@@ -295,6 +414,36 @@ def test_worker_cancels_a_failing_job_when_cancellation_was_requested(
     assert result["state"] == JobState.CANCELED.value
     assert catalog.requeues == 0
     assert "jobs_cancellations_total" in {point["name"] for point in _points(metrics_path)}
+
+
+@pytest.mark.unit
+def test_worker_does_not_retry_a_failure_that_cannot_improve(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """F1: unparseable data is terminal, so the attempt budget is not spent on it."""
+    job = _job({"task": "missing-fields"}, attempts=0, max_attempts=5)
+    catalog = FakeCatalog(job)
+    worker, metrics_path = _failing_worker(catalog, tmp_path, monkeypatch)
+
+    result = worker.process_one()
+
+    assert result is not None
+    assert result["state"] == JobState.FAILED.value
+    assert catalog.requeues == 0, "an identical second attempt cannot parse the same bytes"
+    assert "jobs_retries_total" not in {point["name"] for point in _points(metrics_path)}
+
+
+@pytest.mark.unit
+def test_worker_retries_a_transient_failure_with_budget_left(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The counterpart: an unexpected error is retried, because it may not repeat."""
+    catalog = FakeCatalog(_job(attempts=0, max_attempts=3))
+    worker, _, failure = _flaky_worker(catalog, tmp_path, monkeypatch)
+
+    assert worker.process_one()["state"] == JobState.QUEUED.value
+    assert catalog.requeues == 1
+    assert failure.calls == 1
 
 
 @pytest.mark.unit

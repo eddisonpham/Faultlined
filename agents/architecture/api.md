@@ -20,17 +20,18 @@ OpenAPI JSON committed at `docs/api/openapi.json` and drift-checked in CI (MVP c
 
 ## Endpoints (v1)
 
-**Phase-05 implemented subset:** `POST /api/v1/jobs`, `GET /api/v1/jobs`, `GET /api/v1/jobs/{id}`,
-`POST /api/v1/jobs/{id}/cancel`, `GET /api/v1/episodes/{id}`, and `GET /api/v1/health`. Remaining
+**Phase-05 implemented subset:** `POST /api/v1/jobs` (both `ingest` and `ingest_source`),
+`GET /api/v1/jobs`, `GET /api/v1/jobs/{id}`, `POST /api/v1/jobs/{id}/cancel`,
+`GET /api/v1/episodes/{id}`, and `GET /api/v1/health`. Remaining
 endpoints in the table are architecture targets, not implemented yet.
 
 | Method + path | Purpose | Notes |
 |---|---|---|
-| `POST /api/v1/jobs` | Submit job | `Idempotency-Key` header; returns 202 + job. Optional `max_attempts` (1-10) and `deadline_seconds` set the retry budget and deadline (ADR 0015); both are part of the idempotency request, so replaying a key with a different budget is a 409 |
+| `POST /api/v1/jobs` | Submit job | `Idempotency-Key` header; returns 202 + job. Optional `max_attempts` (1-10) and `deadline_seconds` set the retry budget and deadline (ADR 0015); both are part of the idempotency request, so replaying a key with a different budget is a 409. Two request shapes share the endpoint — `ingest` carries the episode in the body, `ingest_source` names a dataset path and lets a reader interpret it |
 | `GET /api/v1/jobs` | List jobs | Cursor pagination; filters: type, state, since |
 | `GET /api/v1/jobs/{id}` | Job detail | Includes attempts + transitions |
 | `POST /api/v1/jobs/{id}/cancel` | Cancel | Cooperative semantics (data-flow.md §4). Queued → `canceled`; running → `cancel_requested`. 404 unknown, 409 on a terminal job |
-| `POST /api/v1/episodes/ingest` | Convenience: submit ingest for source | Creates `ingest` job |
+| `POST /api/v1/episodes/ingest` | Convenience: submit ingest for source | Creates an `ingest_source` job; the direct `POST /api/v1/jobs` with `type: ingest_source` is the same thing and is what exists |
 | `GET /api/v1/episodes` | Search episodes | Metadata predicate query (FR-005); cursor pagination |
 | `GET /api/v1/episodes/{id}` | Episode detail | Includes metadata + lineage edges (phase 05 slice); validation results join in later MVP work |
 | `POST /api/v1/episodes/{id}/revalidate` | Re-validate with profile | FR-003 (no re-ingest) |

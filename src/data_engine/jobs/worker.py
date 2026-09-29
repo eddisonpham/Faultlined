@@ -5,12 +5,14 @@ from __future__ import annotations
 import logging
 import time
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 from data_engine.catalog.repository import PostgresCatalog
 from data_engine.config import Settings
-from data_engine.ingest.service import SyntheticEpisodeIngestService
-from data_engine.jobs.state import JobState
+from data_engine.ingest.readers.base import ReaderError
+from data_engine.ingest.service import EpisodeIngestService
+from data_engine.jobs.state import JobState, JobType
 from data_engine.observability.logging import correlation_id_var
 from data_engine.observability.metrics import RuntimeMetrics
 from data_engine.observability.reason_codes import ReasonCode
@@ -31,11 +33,30 @@ class _JobTimedOut(Exception):
     """Internal signal that a job exceeded its deadline before or during execution."""
 
 
+#: Failures that retrying cannot fix. `architecture/failure-handling.md` F1/F3: a
+#: payload the handler cannot parse, a job type nobody handles, or a source the reader
+#: rejects will fail identically on every attempt, so burning the retry budget only
+#: delays the operator's signal and inflates the failure metrics with noise.
+_TERMINAL_FAILURES: tuple[type[Exception], ...] = (
+    ReaderError,
+    InvalidJobPayload,
+    UnsupportedJobType,
+)
+
+
+def _is_terminal(exc: Exception) -> bool:
+    return isinstance(exc, _TERMINAL_FAILURES)
+
+
 def _failure_reason_code(exc: Exception) -> ReasonCode:
     if isinstance(exc, InvalidJobPayload):
         return ReasonCode.INGEST_PARSE_FAILED
+    if isinstance(exc, ReaderError):
+        return ReasonCode.INGEST_PARSE_FAILED
     if isinstance(exc, UnsupportedJobType):
         return ReasonCode.INGEST_FORMAT_UNKNOWN
+    if isinstance(exc, FileNotFoundError):
+        return ReasonCode.IO_ARTIFACT_MISSING
     if isinstance(exc, KeyError):
         return ReasonCode.INGEST_PARSE_FAILED
     return ReasonCode.INTERNAL_ERROR
@@ -59,8 +80,34 @@ class IngestWorker:
         self.settings = settings or Settings()
         self.catalog = PostgresCatalog(self.settings)
         self.artifacts = FileArtifactStore(self.settings.artifact_root)
-        self.ingest = SyntheticEpisodeIngestService(self.catalog, self.artifacts, metrics=metrics)
+        self.ingest = EpisodeIngestService(self.catalog, self.artifacts, metrics=metrics)
         self.metrics = metrics or RuntimeMetrics()
+
+    def _run_handler(self, job: dict[str, Any], job_type: str) -> dict[str, Any]:
+        """Dispatch one claimed job to its handler.
+
+        Two ingest shapes share the job pipeline on purpose: an episode in the payload
+        (synthetic) and a dataset path (real formats). They differ only in where the
+        bytes come from, and splitting them into separate workers would double the
+        process management for no isolation benefit.
+        """
+        payload = job["payload"]
+        if job_type == JobType.INGEST_SOURCE:
+            source = payload.get("source")
+            if not isinstance(source, str) or not source:
+                raise InvalidJobPayload("payload.source must be a non-empty path")
+            episode_key = payload.get("episode_key")
+            if episode_key is not None and not isinstance(episode_key, str):
+                raise InvalidJobPayload("payload.episode_key must be a string when present")
+            return self.ingest.ingest_path(
+                Path(source), job_id=str(job["id"]), episode_key=episode_key
+            )
+        if job_type == JobType.INGEST:
+            episode = payload.get("episode")
+            if not isinstance(episode, dict):
+                raise InvalidJobPayload("payload.episode must be an object")
+            return self.ingest.ingest(episode, job_id=str(job["id"]))
+        raise UnsupportedJobType(f"unsupported job type: {job_type}")
 
     def _respect_deadline(self, job: dict[str, Any]) -> None:
         """Time the job out before running if its deadline already passed."""
@@ -70,8 +117,18 @@ class IngestWorker:
             self.metrics.job_timeout(job_type=str(job["type"]))
             raise _JobTimedOut(str(job["id"]))
 
-    def _settle_failure(self, job: dict[str, Any], error: dict[str, Any]) -> dict[str, Any] | None:
+    def _settle_failure(
+        self,
+        job: dict[str, Any],
+        error: dict[str, Any],
+        *,
+        terminal: bool = False,
+    ) -> dict[str, Any] | None:
         """Decide between retrying and failing, honouring attempts and cancellation.
+
+        `terminal` is set for failures that a later attempt cannot fix (see
+        `_TERMINAL_FAILURES`); those skip the retry branch entirely rather than
+        consuming the budget one identical failure at a time.
 
         Returns the updated job row, or None when the job went back to the queue and a
         later attempt will pick it up.
@@ -85,7 +142,7 @@ class IngestWorker:
 
         attempts = int(job.get("attempts") or 0)
         max_attempts = int(job.get("max_attempts") or 1)
-        if attempts < max_attempts:
+        if not terminal and attempts < max_attempts:
             self.catalog.finish_job(job_id, JobState.RETRYING, error=error)
             self.catalog.requeue_for_retry(job_id)
             # `attempts` is 1-based here: claim_job already incremented it, so this is
@@ -111,6 +168,7 @@ class IngestWorker:
                 "event": "job_failed_permanently",
                 "job_id": job_id,
                 "attempts": attempts,
+                "terminal": terminal,
                 "correlation_id": str(job["correlation_id"]),
             },
         )
@@ -140,13 +198,7 @@ class IngestWorker:
         started = time.perf_counter()
         try:
             self._respect_deadline(job)
-            if job["type"] != "ingest":
-                raise UnsupportedJobType(f"unsupported job type: {job['type']}")
-            payload = job["payload"]
-            episode = payload.get("episode")
-            if not isinstance(episode, dict):
-                raise InvalidJobPayload("payload.episode must be an object")
-            result = self.ingest.ingest(episode, job_id=str(job["id"]))
+            result = self._run_handler(job, job_type)
             episode_id = str(result["episode_id"])
             completed = self.catalog.finish_job(str(job["id"]), JobState.SUCCEEDED, result=result)
             stage_seconds = time.perf_counter() - started
@@ -184,7 +236,11 @@ class IngestWorker:
                     "reason_code": reason_code.value,
                 },
             )
-            self._settle_failure(job, {"type": type(exc).__name__, "message": "job handler failed"})
+            self._settle_failure(
+                job,
+                {"type": type(exc).__name__, "message": "job handler failed"},
+                terminal=_is_terminal(exc),
+            )
             return self.catalog.get_job(str(job["id"]))
         finally:
             correlation_id_var.reset(token)

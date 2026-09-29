@@ -159,8 +159,16 @@ def test_claim_job_never_returns_a_job_with_spent_attempts(tmp_path: Path) -> No
 
 
 @pytest.mark.integration
-def test_retry_loop_parks_the_job_as_failed(tmp_path: Path) -> None:
-    """F6: every attempt runs, the last one is not requeued, and the job ends failed."""
+def test_retry_budget_is_enforced_by_the_repository(tmp_path: Path) -> None:
+    """F6 against real SQL: the requeue/claim cycle spends the budget exactly once.
+
+    Driven through the repository rather than the worker, because the worker's
+    decision to retry is now conditional on the failure being transient
+    (`failure-handling.md` F1) and injecting a transient fault into a real worker
+    would need a seam that does not exist yet. What still needs Postgres to be true is
+    the SQL: that `requeue_for_retry` and `claim_job` advance `attempts` correctly and
+    that an exhausted job is never handed out again.
+    """
     settings = _settings(tmp_path)
     catalog = PostgresCatalog(settings)
     job, _ = catalog.submit_job(
@@ -170,17 +178,25 @@ def test_retry_loop_parks_the_job_as_failed(tmp_path: Path) -> None:
         "test-correlation",
         max_attempts=2,
     )
-    worker = IngestWorker(settings)
 
-    first = _run_until_attempt(worker, catalog, job["id"], 1)
-    # Attempt one failed but the budget is not spent: back to the queue.
-    assert first["attempts"] == 1
-    assert first["state"] in {JobState.QUEUED.value, JobState.RETRYING.value}
+    claimed = _claim_until(catalog, job["id"])
+    assert claimed["attempts"] == 1
+    catalog.finish_job(job["id"], JobState.RETRYING, error={"type": "ConnectionResetError"})
+    requeued = catalog.requeue_for_retry(job["id"])
+    assert requeued["state"] == JobState.QUEUED.value
+    assert requeued["error"] is None, "a fresh attempt must not inherit the old error"
 
-    last = _run_until_attempt(worker, catalog, job["id"], 2)
-    assert last["attempts"] == 2
-    assert last["state"] == JobState.FAILED.value
-    assert last["error"]["type"] == "KeyError"
+    second = _claim_until(catalog, job["id"])
+    assert second["attempts"] == 2
+    # Budget spent: the requeue is refused rather than silently allowing attempt three.
+    catalog.finish_job(job["id"], JobState.RETRYING)
+    with pytest.raises(ValueError, match="attempts exhausted"):
+        catalog.requeue_for_retry(job["id"])
+    catalog.finish_job(job["id"], JobState.FAILED, error={"type": "ConnectionResetError"})
+
+    final = catalog.get_job(job["id"])
+    assert final["attempts"] == 2
+    assert final["state"] == JobState.FAILED.value
 
 
 @pytest.mark.integration

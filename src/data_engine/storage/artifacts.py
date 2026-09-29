@@ -21,7 +21,47 @@ class FileArtifactStore:
 
     def put_bytes(self, data: bytes) -> str:
         """Atomically store bytes and return their lowercase SHA-256 digest."""
-        digest = hashlib.sha256(data).hexdigest()
+        return self._publish(hashlib.sha256(data).hexdigest(), data)
+
+    def put_file(self, source: Path, *, chunk_bytes: int = 1 << 20) -> str:
+        """Content-address a file on disk without loading it into memory.
+
+        Real episodes are files, not dicts: a single LeRobot Parquet shard is hundreds
+        of megabytes, so the digest is computed by streaming and the bytes are then
+        copied in chunks. The source is not mutated, and a half-written blob never
+        becomes visible because publication is the same atomic `os.link` as
+        `put_bytes`.
+        """
+        digest = hashlib.sha256()
+        size = 0
+        with source.open("rb") as handle:
+            while chunk := handle.read(chunk_bytes):
+                digest.update(chunk)
+                size += len(chunk)
+        if size == 0:
+            raise ValueError(f"refusing to store an empty artifact: {source}")
+        destination = self.path_for(digest.hexdigest())
+        if destination.exists():
+            self._verify(destination, digest.hexdigest())
+            return digest.hexdigest()
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        fd, temp_name = tempfile.mkstemp(prefix=".pending-", dir=destination.parent)
+        try:
+            with os.fdopen(fd, "wb") as output, source.open("rb") as handle:
+                while chunk := handle.read(chunk_bytes):
+                    output.write(chunk)
+                output.flush()
+                os.fsync(output.fileno())
+            try:
+                os.link(temp_name, destination)
+            except FileExistsError:
+                self._verify(destination, digest.hexdigest())
+        finally:
+            os.unlink(temp_name)
+        return digest.hexdigest()
+
+    def _publish(self, digest: str, data: bytes) -> str:
+        """Shared tail of the in-memory write path."""
         destination = self.path_for(digest)
         if destination.exists():
             self._verify(destination, digest)

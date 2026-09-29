@@ -124,6 +124,30 @@ microservice-per-component decomposition, Delta/Iceberg lakehouse, Jaeger/Tempo.
 while outsourcing or inventing problems the specification says we must engineer ourselves (job lifecycle, lineage,
 benchmarking). The matrix above records the *trigger* that would make each of them legitimate.
 
+## Re-verification pass 2026-09-29 (before building the real readers)
+
+The scaffolding matrix classified LeRobot v3 and MCAP as **core** in 2026-09-28 from documentation. Before
+writing a reader against them, the two formats were checked against live artifacts rather than against the
+docs, and the matrix is corrected where reality differed. Sources appended to [source-log.md](source-log.md)
+as #41–#45.
+
+| Row | What the 2026-09-28 assumption was | What the live artifact showed | Consequence |
+|---|---|---|---|
+| LeRobot dataset format (v3) | "the" LeRobot format, read with PyArrow | **v3.0 is the live mainline** (`codebase_version: v3.0`), but a large share of the Hub is still **v2.0/v2.1** with a *structurally different* layout: v2 puts one episode per Parquet file and indexes episodes in `meta/episodes.jsonl`; v3 packs many episodes per file and indexes them in `meta/episodes/chunk-*/file-*.parquet` with `dataset_from_index`/`dataset_to_index` row ranges. Format detection is the `codebase_version` field in `meta/info.json`, nothing else | One reader must support **both** v2.x and v3.0. Version is a first-class field on the episode record, not a build-time constant. A v2-only reader would silently mis-slice v3 episodes; a v3-only reader would miss most of the Hub |
+| LeRobot episode statistics | would be computed by the engine | v3 ships **per-episode** `stats/<feature>/{min,max,mean,std,count}` columns in the episode index, and v2 ships them in `meta/episodes_stats.jsonl` | The engine reads published statistics rather than recomputing them per episode. Validation can still recompute as a cross-check; the published values are the reference |
+| LeRobot video features | part of the episode | Camera streams are MP4 shards resolved by `videos/<key>/from_timestamp`/`to_timestamp`; the Parquet carries only low-dimensional columns | Ingest registers the *tabular* episode and records video shards as referenced artifacts. Decoding video is a workload, not ingest |
+| Hugging Face Hub (`huggingface_hub`) | optional, "only needed once we pull real datasets in phase 05" | Real datasets are reachable over plain `GET /datasets/<id>/resolve/main/<path>` with no SDK and no token for public repos | **Not adopted.** The per-file HTTP fetch is ~15 lines and avoids a dependency whose only job is to wrap that URL. `HF_KEY` stays reserved for genuinely private repos |
+| PyArrow | core | Confirmed sufficient for both layouts via `read_table` on the exact file an episode references | Unchanged, **core** (ADR 0006) |
+| `pandas` / `datasets` / `lerobot` SDK | not in the matrix | Not needed: PyArrow covers both Parquet layouts, and `meta/*.json(l)` is stdlib JSON | **excluded.** Pulling the `lerobot` package would drag in PyTorch, ffmpeg bindings, and video codecs to read two JSON files and one Parquet table |
+
+**Real fixtures adopted for the reader tests** (downloaded on demand into gitignored `var/real-data/`, never
+committed, so the suite still runs offline against the synthetic contract):
+
+| Fixture | Format | Why this one |
+|---|---|---|
+| `lerobot/svla_so101_pickplace` | v3.0 | Official SO-101 pick-place, 50 episodes / 11 939 frames, 6-dim action + 6-dim state, two cameras. The real thing, and the tabular slice is only ~450 KB because the video shards (85 MB) are skipped |
+| `yaak-ai/lerobot-driving-school` | v2.1 | Small (10 episodes), genuinely v2.1, and an *embodiment we do not care about* — which is the point: it proves the reader keys off `codebase_version` and the declared features rather than off a hard-coded SO-101 schema |
+
 ## Verification notes
 
 - Every seed-list technology has a row; none left at "considered" without a class.
@@ -131,3 +155,6 @@ benchmarking). The matrix above records the *trigger* that would make each of th
 - Classes finalized against ADRs 0004–0009 after the owner accepted ADR 0003 (problem: robot episode data engine).
   Deferral triggers for optional/excluded rows are recorded in the ADRs and
   [../architecture/technology-decision-matrix.md](../architecture/technology-decision-matrix.md).
+- 2026-09-29 re-verification pass re-checked the two **core** format rows against live Hub artifacts before any
+  reader code was written. It produced one substantive correction (LeRobot v2 and v3 need one reader, not one
+  format), two dependency exclusions (`huggingface_hub`, the `lerobot` SDK), and the fixture table above.

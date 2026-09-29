@@ -2,7 +2,7 @@
 
 **Status: Scaffolding; review verdict is accept-with-follow-ups (2026-09-28).** The project is **Faultlined**. All engineering findings are resolved and gated; the only blocker is publishing a measured benchmark baseline, which requires the owner's explicit green flag. See [engineering review](reviews/2026-09-28-scaffolding.md) and [definition of done](spec/definition-of-done.md). All work is committed on `main` and pushed. Do not tag `scaffold-complete` until the baseline and the residual verifications below are closed.
 
-**Update 2026-09-29 (stage 2 / MVP).** Three slices are now on `main` since the scaffolding tag: the minimal server-rendered UI ([ADR 0014](decisions/0014-minimal-ui-server-rendered.md)), the committed OpenAPI contract with a drift gate, and the job lifecycle — bounded retries, job deadlines, and cooperative cancellation ([ADR 0015](decisions/0015-cooperative-job-lifecycle.md)). The suite is at 147 passing with 91% coverage. The next MVP criterion is the full `ingest → validation → indexing → builds` workflow on a real public dataset.
+**Update 2026-09-29 (stage 2 / MVP).** Four slices are now on `main` since the scaffolding tag: the minimal server-rendered UI ([ADR 0014](decisions/0014-minimal-ui-server-rendered.md)), the committed OpenAPI contract with a drift gate, the job lifecycle — bounded retries, job deadlines, cooperative cancellation, and terminal-vs-retryable failure classification ([ADR 0015](decisions/0015-cooperative-job-lifecycle.md)) — and **real-format ingest**: a LeRobot reader covering v2.1 and v3.0, exercised end to end against real Hub datasets. The suite is at 199 passing with 91% coverage, 18 of them against a live Postgres. The next MVP criteria are the rest of the `ingest → validation → indexing → builds` workflow: validation, indexing, and builds are all still open, and MCAP ingest is the remaining format.
 
 ## 1. Current problem definition
 
@@ -30,7 +30,8 @@ Python 3.14, uv/uv.lock, just, Ruff, mypy, pytest/pytest-cov, FastAPI/Pydantic, 
 
 **Implemented foundations (current checkout):**
 - FastAPI POST job submission and GET job/episode/health subset; correlation middleware and typed request/response schema.
-- Postgres schema/repository for jobs, artifacts, episodes, and lineage; idempotent submission and atomic queue claim; queue-depth query; **job lifecycle** — attempt counting in the claim, `max_attempts` / `deadline_seconds` on submission, cooperative cancel, deadline sweep (ADR 0015).
+- Postgres schema/repository for jobs, artifacts, episodes, and lineage; idempotent submission and atomic queue claim; queue-depth query; **job lifecycle** — attempt counting in the claim, `max_attempts` / `deadline_seconds` on submission, cooperative cancel, deadline sweep, and terminal-vs-retryable failure classification (ADR 0015).
+- **Real-format ingest**: `ingest_source` job type + a LeRobot reader (v2.1 and v3.0) behind a sniff-based registry, verified end to end against `lerobot/svla_so101_pickplace` and `yaak-ai/lerobot-driving-school`. Episode identity is `(source_hash, episode_key)`, so many episodes in one Parquet shard each get a catalog row while the file itself is stored once.
 - Minimal server-rendered UI at `/ui` (Status / Jobs / Artifacts) with a committed OpenAPI contract and a drift check in `just ci` (ADR 0014).
 - One ingest worker process; atomic SHA-256 filesystem artifact writes; synthetic JSON canonicalization and lineage readback.
 - Unit/contract/E2E tests and Postgres-marked integration tests.
@@ -39,7 +40,7 @@ Python 3.14, uv/uv.lock, just, Ruff, mypy, pytest/pytest-cov, FastAPI/Pydantic, 
 - Benchmark schema v2, deterministic statistics, provenance capture, and a CLI that validates results and baselines, refuses to publish from a failed run, and fails closed with an actionable message.
 
 **Not implemented or incomplete:**
-- MCAP/LeRobot readers, real-data ingest, validation rules/quarantine, Parquet indexing, LeRobot v3 builds, workload execution, the stage-3 UI pages, retry backoff, worker leases/heartbeats, mid-call cancellation, GC, formal DB migrations (schema changes are still inline idempotent DDL plus an `ALTER TABLE` block), and a committed benchmark baseline.
+- MCAP ingest, validation rules/quarantine, Parquet indexing, LeRobot v3 builds, workload execution, the stage-3 UI pages, retry backoff, worker leases/heartbeats, mid-call cancellation, GC, formal DB migrations (schema changes are still inline idempotent DDL plus an `ALTER TABLE` block), and a committed benchmark baseline.
 - `just bench` runs and produces a valid result, then exits 1 because no baseline is committed. That is the intended, awaited state.
 
 See [implementation status](implementation/status.md), [failure modes](testing/failure-modes.md), and [review findings](reviews/2026-09-28-scaffolding.md).

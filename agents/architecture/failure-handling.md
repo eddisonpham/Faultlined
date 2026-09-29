@@ -18,6 +18,20 @@ Stance: fail closed on data, fail open on telemetry, never silently drop (overvi
 | F10 | Catalog (Postgres) down / connection loss | catalog, api | Connection errors | API 503 retry-after; workers retry claim with backoff; jobs survive in DB (no in-memory-only state) | integration: stop/start Postgres mid-job |
 | F11 | Restart with in-flight jobs | jobs, worker | Startup reconciliation sweep | `running` rows with expired leases → `queued` (NFR-006) | integration: restart worker/API mid-job |
 | F12 | GPU OOM / GPU absent | workloads | CUDA OOM error; NVML absence | Run record `failed` (`GPU_OOM`, retriable once at lower batch if workload declares it); `gpu_required` rejected at admission without GPU; telemetry `gpu_present=false` | unit: fake workload raising OOM; CI runs the no-GPU path |
+
+## Retryable vs terminal
+
+F1 and F3 are not just "failures" — they are failures that **retrying cannot improve**, because the
+input bytes are the input bytes. The worker encodes that as `_TERMINAL_FAILURES` in
+`jobs/worker.py`: `ReaderError`, `InvalidJobPayload`, and `UnsupportedJobType` skip the retry branch
+in `_settle_failure` and go straight to `failed`, spending exactly one attempt. Everything else
+(connection reset, disk full, a lost artifact) keeps its retry budget, because those may well not
+repeat.
+
+Without this split, a bad episode burns `max_attempts` identical failures before the operator sees
+`failed`, and `jobs_retries_total` counts noise. The classification lives with the exception types
+rather than in a lookup table so a new reader failure is terminal by default, which is the safe
+direction: a wasted retry is cheap, a retried-forever job is not.
 | F13 | Telemetry/log sink failure | observability | Handler exceptions | Degrade to stderr; never block pipeline | unit: broken log sink during stage run |
 | F14 | Build nondeterminism (hash mismatch on rebuild) | builds | CI determinism test | Release gate: failing NFR-004 test blocks merge; diff manifest to locate nondeterministic field | test: rebuild-twice comparison (CI) |
 | F15 | Orphaned blobs / stale tmp dirs | storage | Refcount audit / age sweep | `gc` job removes unreferenced blobs and stale staging dirs | integration: kill build mid-materialize, run GC |

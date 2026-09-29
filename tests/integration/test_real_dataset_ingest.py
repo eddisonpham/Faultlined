@@ -1,0 +1,174 @@
+"""Real LeRobot ingest, end to end, against a real database.
+
+The unit tests prove the reader is internally consistent. This proves the *pipeline*
+is: a genuine Hub dataset goes through the API contract, the job queue, the worker,
+the artifact store, and the catalog, and comes back as a queryable episode with
+correct lineage.
+
+Marked `network`: the dataset is fetched once into gitignored `var/real-data/` and
+reused after that, so a second run is offline. It skips cleanly if the hub is
+unreachable, because a laptop on a train still has to run the suite.
+"""
+
+from __future__ import annotations
+
+import uuid
+from collections.abc import Callable
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+from data_engine.catalog.database import initialize_schema
+from data_engine.catalog.repository import PostgresCatalog
+from data_engine.config import Settings
+from data_engine.jobs.state import JobState
+from data_engine.jobs.worker import IngestWorker
+from tests.conftest import postgres_test_dsn
+
+pytestmark = [pytest.mark.integration, pytest.mark.network]
+
+
+def _settings(tmp_path: Path) -> Settings:
+    dsn = postgres_test_dsn()
+    if not dsn:
+        pytest.skip("DE_DATABASE_URL is required for PostgreSQL integration tests")
+    settings = Settings(database_url=dsn, artifact_root=tmp_path, _env_file=None)
+    initialize_schema(settings)
+    return settings
+
+
+def _run(catalog: PostgresCatalog, worker: IngestWorker, job_id: str, limit: int = 100) -> Any:
+    """Drain the shared queue until this job leaves it, then return its row.
+
+    The test database is shared with the rest of the suite, so the worker claims the
+    oldest queued job, not necessarily the one under test.
+    """
+    for _ in range(limit):
+        row = catalog.get_job(job_id)
+        if row is None or row["state"] != JobState.QUEUED.value:
+            break
+        if worker.process_one() is None:
+            break
+    return catalog.get_job(job_id)
+
+
+@pytest.mark.integration
+def test_real_v3_dataset_ingests_through_the_pipeline(
+    tmp_path: Path, real_lerobot_dataset: Callable[[str], Path]
+) -> None:
+    """lerobot/svla_so101_pickplace episode 7, real bytes, real Postgres."""
+    settings = _settings(tmp_path)
+    catalog = PostgresCatalog(settings)
+    root = real_lerobot_dataset("v3")
+    job, created = catalog.submit_job(
+        "ingest_source",
+        {"source": str(root), "episode_key": "episode_index=7"},
+        f"real-v3-{uuid.uuid4()}",
+        "test-correlation",
+    )
+    assert created is True
+
+    worker = IngestWorker(settings)
+    finished = _run(catalog, worker, job["id"])
+
+    assert finished["state"] == JobState.SUCCEEDED.value, finished.get("error")
+    result = finished["result"]
+    assert result["format"] == "lerobot-v3"
+    assert result["episode_key"] == "episode_index=7"
+    assert result["frame_count"] > 0
+
+    episode = catalog.get_episode(result["episode_id"])
+    assert episode is not None
+    assert episode["format"] == "lerobot-v3"
+    assert episode["episode_key"] == "episode_index=7"
+    assert episode["metadata"]["robot"] == "so100_follower"
+    assert episode["metadata"]["frame_count"] == result["frame_count"]
+    assert episode["metadata"]["dataset"]["codebase_version"] == "v3.0"
+    assert "action" in episode["metadata"]["channel_stats"]
+
+    # The artifact is the file the rows came from, and it round-trips byte for byte.
+    assert (
+        worker.artifacts.get_bytes(episode["artifact_hash"])
+        == (root / "data" / "chunk-000" / "file-000.parquet").read_bytes()
+    )
+
+    # And the episode records which job produced it.
+    assert job["id"] in [edge["to_ref"] for edge in episode["lineage"]]
+
+
+@pytest.mark.integration
+def test_two_episodes_from_one_file_become_two_rows(
+    tmp_path: Path, real_lerobot_dataset: Callable[[str], Path]
+) -> None:
+    """A v3 Parquet shard holds many episodes; identity is (file, episode), not file."""
+    settings = _settings(tmp_path)
+    catalog = PostgresCatalog(settings)
+    root = real_lerobot_dataset("v3")
+    worker = IngestWorker(settings)
+
+    submitted = []
+    for episode in (0, 1):
+        job, _ = catalog.submit_job(
+            "ingest_source",
+            {"source": str(root), "episode_key": f"episode_index={episode}"},
+            f"real-v3-pair-{uuid.uuid4()}",
+            "test-correlation",
+        )
+        submitted.append((episode, job["id"]))
+    for _, job_id in submitted:
+        assert _run(catalog, worker, job_id)["state"] == JobState.SUCCEEDED.value
+
+    rows = [catalog.get_job(job_id)["result"] for _, job_id in submitted]
+    assert rows[0]["artifact_hash"] == rows[1]["artifact_hash"], "one file, one address"
+    assert rows[0]["episode_id"] != rows[1]["episode_id"]
+    assert rows[0]["frame_count"] != rows[1]["frame_count"], "distinct row ranges"
+
+
+@pytest.mark.integration
+def test_reingesting_the_same_episode_is_idempotent(
+    tmp_path: Path, real_lerobot_dataset: Callable[[str], Path]
+) -> None:
+    """The catalog upserts on (source_hash, episode_key); a repeat is not a duplicate."""
+    settings = _settings(tmp_path)
+    catalog = PostgresCatalog(settings)
+    root = real_lerobot_dataset("v3")
+    worker = IngestWorker(settings)
+
+    job_ids = []
+    for _ in range(2):
+        job, _ = catalog.submit_job(
+            "ingest_source",
+            {"source": str(root), "episode_key": "episode_index=3"},
+            f"real-v3-idem-{uuid.uuid4()}",
+            "test-correlation",
+        )
+        job_ids.append(job["id"])
+    for job_id in job_ids:
+        assert _run(catalog, worker, job_id)["state"] == JobState.SUCCEEDED.value
+
+    episodes = {catalog.get_job(job_id)["result"]["episode_id"] for job_id in job_ids}
+    assert len(episodes) == 1, "the same episode from the same file is one catalog row"
+
+
+@pytest.mark.integration
+def test_unreadable_source_fails_without_retrying(
+    tmp_path: Path, real_lerobot_dataset: Callable[[str], Path]
+) -> None:
+    """F1: bad data is terminal. Retrying identical bytes cannot change the answer."""
+    settings = _settings(tmp_path)
+    catalog = PostgresCatalog(settings)
+    root = real_lerobot_dataset("v3")
+    job, _ = catalog.submit_job(
+        "ingest_source",
+        {"source": str(root), "episode_key": "episode_index=9999"},
+        f"real-v3-bad-{uuid.uuid4()}",
+        "test-correlation",
+        max_attempts=3,
+    )
+
+    finished = _run(catalog, IngestWorker(settings), job["id"])
+
+    assert finished["attempts"] == 1, "an unparseable episode must not burn the budget"
+    assert finished["state"] == JobState.FAILED.value
+    assert finished["error"]["type"] == "ReaderError"

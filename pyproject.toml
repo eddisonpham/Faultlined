@@ -78,6 +78,7 @@ markers = [
     "e2e: full workflow through public interfaces",
     "gpu: requires a CUDA GPU; skips cleanly when absent",
     "slow: long-running; excluded from the default test run",
+    "network: needs outbound HTTPS; skips cleanly when the hub is unreachable",
 ]
 
 [tool.coverage.run]

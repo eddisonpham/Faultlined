@@ -13,6 +13,7 @@ class FakeCatalog:
         self.jobs_by_key: dict[str, dict[str, Any]] = {}
         self.jobs_by_id: dict[str, dict[str, Any]] = {}
         self.submissions: list[dict[str, Any]] = []
+        self.last_payload: dict[str, Any] = {}
 
     def submit_job(
         self,
@@ -27,6 +28,7 @@ class FakeCatalog:
         self.submissions.append(
             {"max_attempts": max_attempts, "deadline_seconds": deadline_seconds}
         )
+        self.last_payload = payload
         if key and key in self.jobs_by_key:
             return self.jobs_by_key[key], False
         job = {
@@ -58,11 +60,11 @@ class FakeCatalog:
         job["state"] = "canceled"
         return job
 
-    def get_job(self, job_id: str) -> dict[str, Any] | None:
-        return self.jobs_by_id.get(job_id)
-
     def get_episode(self, episode_id: str) -> dict[str, Any] | None:
         return None
+
+    def get_job(self, job_id: str) -> dict[str, Any] | None:
+        return self.jobs_by_id.get(job_id)
 
 
 def _client() -> TestClient:
@@ -150,6 +152,73 @@ def test_submission_rejects_an_out_of_range_lifecycle_policy(field: str) -> None
 def test_submission_rejects_unknown_policy_fields() -> None:
     body = _payload() | {"retries": 3}
     assert _client().post("/api/v1/jobs", json=body).status_code == 422
+
+
+@pytest.mark.contract
+def test_source_ingest_submits_a_path_rather_than_a_body() -> None:
+    app = create_app(Settings(_env_file=None), initialize_database=False)
+    catalog = FakeCatalog()
+    app.state.catalog = catalog
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/v1/jobs",
+        json={
+            "type": "ingest_source",
+            "payload": {"source": "C:/data/so101", "episode_key": "episode_index=7"},
+        },
+    )
+
+    assert response.status_code == 202, response.text
+    assert response.json()["type"] == "ingest_source"
+    assert catalog.last_payload == {
+        "source": "C:/data/so101",
+        "episode_key": "episode_index=7",
+    }
+
+
+@pytest.mark.contract
+def test_source_ingest_rejects_a_payload_that_names_nothing() -> None:
+    """`either a body or a path` must be two types, not one optional field."""
+    client = _client()
+    assert (
+        client.post("/api/v1/jobs", json={"type": "ingest_source", "payload": {}}).status_code
+        == 422
+    )
+    assert (
+        client.post(
+            "/api/v1/jobs", json={"type": "ingest_source", "payload": {"episode": {}}}
+        ).status_code
+        == 422
+    )
+    assert (
+        client.post(
+            "/api/v1/jobs",
+            json={"type": "ingest", "payload": {"source": "C:/data"}},
+        ).status_code
+        == 422
+    )
+
+
+@pytest.mark.contract
+def test_source_ingest_carries_the_same_retry_policy() -> None:
+    app = create_app(Settings(_env_file=None), initialize_database=False)
+    catalog = FakeCatalog()
+    app.state.catalog = catalog
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/v1/jobs",
+        json={
+            "type": "ingest_source",
+            "payload": {"source": "C:/data/so101"},
+            "max_attempts": 1,
+            "deadline_seconds": 120,
+        },
+    )
+
+    assert response.status_code == 202, response.text
+    assert catalog.submissions == [{"max_attempts": 1, "deadline_seconds": 120.0}]
 
 
 @pytest.mark.contract

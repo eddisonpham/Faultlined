@@ -43,7 +43,10 @@ ALLOWED_TRANSITIONS: dict[JobState, frozenset[JobState]] = {
         }
     ),
     JobState.CANCEL_REQUESTED: frozenset({JobState.CANCELED, JobState.SUCCEEDED}),
-    JobState.RETRYING: frozenset({JobState.QUEUED}),
+    # `retrying -> failed` exists because a requeue can be refused: if the budget turns
+    # out to be spent between the claim and the requeue, `retrying` would otherwise be a
+    # dead end with no transition out. The architecture diagram only drew the happy path.
+    JobState.RETRYING: frozenset({JobState.QUEUED, JobState.FAILED}),
     JobState.SUCCEEDED: frozenset(),
     JobState.FAILED: frozenset(),
     JobState.CANCELED: frozenset(),
@@ -53,6 +56,7 @@ ALLOWED_TRANSITIONS: dict[JobState, frozenset[JobState]] = {
 
 class JobType(StrEnum):
     INGEST = "ingest"
+    INGEST_SOURCE = "ingest_source"
     VALIDATE = "validate"
     INDEX = "index"
     BUILD = "build"

@@ -33,16 +33,43 @@ class IngestPayload(BaseModel):
     episode: SyntheticEpisode
 
 
-class SubmitJobRequest(BaseModel):
+class SourceIngestPayload(BaseModel):
+    """A real episode on disk, described by path rather than by body."""
+
     model_config = ConfigDict(extra="forbid")
 
-    type: Literal["ingest"]
-    payload: IngestPayload
+    source: str = Field(min_length=1, max_length=1024)
+    """Path to a dataset directory or file. Resolved by a reader via sniffing."""
+
+    episode_key: str | None = Field(default=None, max_length=128)
+    """Which episode inside the source, e.g. `episode_index=7`. First one if omitted."""
+
+
+class _JobPolicy(BaseModel):
+    """Retry/deadline policy shared by every job submission (ADR 0015)."""
+
     max_attempts: int = Field(default=DEFAULT_MAX_ATTEMPTS, ge=1, le=10)
     """Retry budget (F6): how many times the worker may try before parking the job."""
 
     deadline_seconds: float | None = Field(default=None, gt=0)
     """Wall-clock budget from submission (F6); the reaper times the job out after it."""
+
+
+class SubmitJobRequest(_JobPolicy):
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["ingest"]
+    payload: IngestPayload
+
+
+class SubmitSourceJobRequest(_JobPolicy):
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["ingest_source"]
+    payload: SourceIngestPayload
+
+
+AnyJobRequest = SubmitJobRequest | SubmitSourceJobRequest
 
 
 class JobResponse(BaseModel):
@@ -72,6 +99,7 @@ class LineageEdgeResponse(BaseModel):
 class EpisodeResponse(BaseModel):
     id: str
     source_hash: str
+    episode_key: str = ""
     artifact_hash: str
     format: str
     metadata: dict[str, Any]

@@ -36,11 +36,13 @@ CREATE TABLE IF NOT EXISTS artifacts (
 
 CREATE TABLE IF NOT EXISTS episodes (
     id text PRIMARY KEY,
-    source_hash text NOT NULL UNIQUE,
+    source_hash text NOT NULL,
+    episode_key text NOT NULL DEFAULT '',
     artifact_hash text NOT NULL REFERENCES artifacts(hash),
     format text NOT NULL,
     metadata jsonb NOT NULL,
-    created_at timestamptz NOT NULL DEFAULT now()
+    created_at timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (source_hash, episode_key)
 );
 
 CREATE TABLE IF NOT EXISTS lineage_edges (
@@ -63,6 +65,9 @@ ALTER TABLE jobs ADD COLUMN IF NOT EXISTS max_attempts integer NOT NULL DEFAULT 
 ALTER TABLE jobs ADD COLUMN IF NOT EXISTS deadline_at timestamptz;
 ALTER TABLE jobs ADD COLUMN IF NOT EXISTS worker_id text;
 ALTER TABLE jobs ADD COLUMN IF NOT EXISTS lease_expires_at timestamptz;
+ALTER TABLE episodes ADD COLUMN IF NOT EXISTS episode_key text NOT NULL DEFAULT '';
+ALTER TABLE episodes DROP CONSTRAINT IF EXISTS episodes_source_hash_key;
+CREATE UNIQUE INDEX IF NOT EXISTS episodes_source_key_idx ON episodes (source_hash, episode_key);
 """
 
 

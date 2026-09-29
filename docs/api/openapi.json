@@ -64,6 +64,11 @@
           "created_at": {
             "title": "Created At"
           },
+          "episode_key": {
+            "default": "",
+            "title": "Episode Key",
+            "type": "string"
+          },
           "format": {
             "title": "Format",
             "type": "string"
@@ -391,6 +396,35 @@
         "title": "ResourceSample",
         "type": "object"
       },
+      "SourceIngestPayload": {
+        "additionalProperties": false,
+        "description": "A real episode on disk, described by path rather than by body.",
+        "properties": {
+          "episode_key": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Episode Key"
+          },
+          "source": {
+            "maxLength": 1024,
+            "minLength": 1,
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source"
+        ],
+        "title": "SourceIngestPayload",
+        "type": "object"
+      },
       "StatusResponse": {
         "description": "Backs the Status page: health, queue depth, and host telemetry.",
         "properties": {
@@ -463,6 +497,44 @@
           "payload"
         ],
         "title": "SubmitJobRequest",
+        "type": "object"
+      },
+      "SubmitSourceJobRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "deadline_seconds": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deadline Seconds"
+          },
+          "max_attempts": {
+            "default": 3,
+            "maximum": 10.0,
+            "minimum": 1.0,
+            "title": "Max Attempts",
+            "type": "integer"
+          },
+          "payload": {
+            "$ref": "#/components/schemas/SourceIngestPayload"
+          },
+          "type": {
+            "const": "ingest_source",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "payload"
+        ],
+        "title": "SubmitSourceJobRequest",
         "type": "object"
       },
       "SyntheticEpisode": {
@@ -796,6 +868,7 @@
         "summary": "List Jobs"
       },
       "post": {
+        "description": "Queue an ingest job.\n\nTwo request shapes, one endpoint: `ingest` carries an episode in the request\nbody (the synthetic contract), `ingest_source` names a dataset on disk and\nlets a reader interpret it. They are separate types rather than one optional\npayload because \"either a body or a path\" is exactly the kind of either/or that\na typo turns into a confusing 422.",
         "operationId": "submit_job_api_v1_jobs_post",
         "parameters": [
           {
@@ -819,7 +892,15 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/SubmitJobRequest"
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/SubmitJobRequest"
+                  },
+                  {
+                    "$ref": "#/components/schemas/SubmitSourceJobRequest"
+                  }
+                ],
+                "title": "Body"
               }
             }
           },

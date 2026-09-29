@@ -262,8 +262,18 @@ class PostgresCatalog:
         size_bytes: int,
         metadata: dict[str, Any],
         job_id: str,
+        episode_key: str | None = None,
+        episode_format: str = "synthetic-json",
     ) -> dict[str, Any]:
+        """Register one episode, idempotently on (source_hash, episode_key).
+
+        A content-addressed source file can hold many episodes: a LeRobot v3 Parquet
+        shard carries every episode in its chunk. So the identity is the pair, not the
+        file hash alone, and re-ingesting the same episode is a no-op rather than a
+        second row.
+        """
         episode_id = str(uuid.uuid4())
+        key = episode_key or ""
         with connect(self.settings) as connection:
             connection.execute(
                 """INSERT INTO artifacts (hash, size_bytes)
@@ -271,11 +281,13 @@ class PostgresCatalog:
                 (artifact_hash, size_bytes),
             )
             row = connection.execute(
-                """INSERT INTO episodes (id, source_hash, artifact_hash, format, metadata)
-                   VALUES (%s, %s, %s, 'synthetic-json', %s)
-                   ON CONFLICT (source_hash) DO UPDATE SET source_hash = EXCLUDED.source_hash
+                """INSERT INTO episodes
+                       (id, source_hash, episode_key, artifact_hash, format, metadata)
+                   VALUES (%s, %s, %s, %s, %s, %s)
+                   ON CONFLICT (source_hash, episode_key) DO UPDATE
+                       SET episode_key = EXCLUDED.episode_key
                    RETURNING *""",
-                (episode_id, source_hash, artifact_hash, Jsonb(metadata)),
+                (episode_id, source_hash, key, artifact_hash, episode_format, Jsonb(metadata)),
             ).fetchone()
             if row is None:
                 raise RuntimeError("episode upsert returned no row")
