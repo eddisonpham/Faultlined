@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import functools
 import hashlib
+import time
 import uuid
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
@@ -18,7 +21,22 @@ from data_engine.jobs.state import (
     DEFAULT_MAX_ATTEMPTS,
     JobState,
 )
+from data_engine.observability.metrics import RuntimeMetrics
 from data_engine.validation.profile import ValidationProfile, profile_hash
+
+
+def _timed_operation[Method: Callable[..., Any]](method: Method) -> Method:
+    """Emit ``catalog_query_duration_seconds`` for one repository operation."""
+
+    @functools.wraps(method)
+    def wrapper(self: PostgresCatalog, *args: Any, **kwargs: Any) -> Any:
+        started = time.perf_counter()
+        try:
+            return method(self, *args, **kwargs)
+        finally:
+            self._metrics.catalog_query(time.perf_counter() - started, operation=method.__name__)
+
+    return cast(Method, wrapper)
 
 
 class IdempotencyConflict(ValueError):
@@ -38,8 +56,12 @@ def canonical_json(value: Any) -> bytes:
 class PostgresCatalog:
     """Persistence operations used by the phase-05 ingest-job slice."""
 
-    def __init__(self, settings: Settings | None = None) -> None:
+    def __init__(
+        self, settings: Settings | None = None, *, metrics: RuntimeMetrics | None = None
+    ) -> None:
         self.settings = settings
+        # No sink means a no-op recorder: callers opt in to query telemetry.
+        self._metrics = metrics or RuntimeMetrics()
 
     def submit_job(
         self,
@@ -489,3 +511,13 @@ class PostgresCatalog:
 
     def close(self) -> None:
         """Compatibility no-op; connections are short lived."""
+
+
+# Public operations are wrapped once here so every current and future repository
+# method reports `catalog_query_duration_seconds` without per-method decorator
+# noise. Underscore helpers are internal and stay unwrapped (ADR 0017).
+for _name, _method in list(vars(PostgresCatalog).items()):
+    if _name.startswith("_") or not callable(_method):
+        continue
+    setattr(PostgresCatalog, _name, _timed_operation(_method))
+del _name, _method

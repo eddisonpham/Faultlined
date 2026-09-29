@@ -26,7 +26,7 @@ numeric readouts — executed consistently on top of the already-vendored termin
 
 ## Work packages
 
-### A. Monitoring: runtime metrics expansion (ADR 0018)
+### A. Monitoring: runtime metrics expansion (ADR 0017)
 
 - `data_engine/observability/aggregate.py`: summarize the JSONL metrics sink into per-metric summaries
   (count, sum, mean, p50/p95/p99, rate) + time-bucketed series for sparklines. Pure functions over records;
@@ -41,7 +41,7 @@ numeric readouts — executed consistently on top of the already-vendored termin
 - `GET /api/v1/metrics`: aggregated metrics + live job-state counts (JSON, contract-tested). Optional
   `?window_seconds=` for the series.
 
-### B. Analysis: episode quality signals at ingest (ADR 0017)
+### B. Analysis: episode quality signals at ingest (ADR 0018)
 
 Formulas borrowed from the visualizer (exact source-log citations), computed once at ingest while frames are
 already in memory (no byte re-read, matching the validation philosophy) and persisted per episode:

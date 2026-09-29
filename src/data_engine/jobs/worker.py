@@ -80,7 +80,7 @@ class IngestWorker:
         metrics: RuntimeMetrics | None = None,
     ) -> None:
         self.settings = settings or Settings()
-        self.catalog = PostgresCatalog(self.settings)
+        self.catalog = PostgresCatalog(self.settings, metrics=metrics)
         self.artifacts = FileArtifactStore(self.settings.artifact_root)
         self.ingest = EpisodeIngestService(self.catalog, self.artifacts, metrics=metrics)
         self.validation = ValidationService(self.catalog, metrics=metrics)
@@ -212,7 +212,9 @@ class IngestWorker:
         job = self.catalog.claim_job()
         if job is None:
             self.metrics.queue_depth(self.catalog.count_jobs(JobState.QUEUED))
+            self.metrics.worker_heartbeat(worker_state="idle")
             return None
+        self.metrics.worker_heartbeat(worker_state="busy")
         correlation_id = str(job["correlation_id"])
         token = correlation_id_var.set(correlation_id)
         logger.info(

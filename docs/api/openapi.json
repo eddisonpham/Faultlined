@@ -330,6 +330,192 @@
         "title": "LineageEdgeResponse",
         "type": "object"
       },
+      "MetricSeriesPoint": {
+        "description": "One sparkline point: bucketed mean across the metric's label sets.",
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "t": {
+            "title": "T",
+            "type": "string"
+          },
+          "v": {
+            "title": "V",
+            "type": "number"
+          }
+        },
+        "required": [
+          "t",
+          "v",
+          "count"
+        ],
+        "title": "MetricSeriesPoint",
+        "type": "object"
+      },
+      "MetricSummaryModel": {
+        "description": "Descriptive statistics for one (metric, labels) sample set (ADR 0017).",
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "first_timestamp": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Timestamp"
+          },
+          "label_key": {
+            "title": "Label Key",
+            "type": "string"
+          },
+          "labels": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Labels",
+            "type": "object"
+          },
+          "last_timestamp": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Timestamp"
+          },
+          "max": {
+            "title": "Max",
+            "type": "number"
+          },
+          "mean": {
+            "title": "Mean",
+            "type": "number"
+          },
+          "min": {
+            "title": "Min",
+            "type": "number"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "p50": {
+            "title": "P50",
+            "type": "number"
+          },
+          "p95": {
+            "title": "P95",
+            "type": "number"
+          },
+          "p99": {
+            "title": "P99",
+            "type": "number"
+          },
+          "sum": {
+            "title": "Sum",
+            "type": "number"
+          },
+          "unit": {
+            "title": "Unit",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "labels",
+          "label_key",
+          "unit",
+          "count",
+          "min",
+          "max",
+          "mean",
+          "sum",
+          "p50",
+          "p95",
+          "p99"
+        ],
+        "title": "MetricSummaryModel",
+        "type": "object"
+      },
+      "MetricsResponse": {
+        "description": "Aggregated runtime telemetry read back from the JSONL metrics sink.",
+        "properties": {
+          "generated_at": {
+            "title": "Generated At",
+            "type": "string"
+          },
+          "jobs_queue_depth": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Jobs Queue Depth",
+            "type": "object"
+          },
+          "record_count": {
+            "title": "Record Count",
+            "type": "integer"
+          },
+          "series": {
+            "additionalProperties": {
+              "items": {
+                "$ref": "#/components/schemas/MetricSeriesPoint"
+              },
+              "type": "array"
+            },
+            "title": "Series",
+            "type": "object"
+          },
+          "summaries": {
+            "items": {
+              "$ref": "#/components/schemas/MetricSummaryModel"
+            },
+            "title": "Summaries",
+            "type": "array"
+          },
+          "window_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Window Seconds"
+          },
+          "worker_heartbeat_age_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Worker Heartbeat Age Seconds"
+          }
+        },
+        "required": [
+          "generated_at",
+          "record_count",
+          "summaries",
+          "series",
+          "jobs_queue_depth"
+        ],
+        "title": "MetricsResponse",
+        "type": "object"
+      },
       "ResourceSample": {
         "properties": {
           "cpu_percent": {
@@ -1008,6 +1194,63 @@
           }
         },
         "summary": "Cancel Job"
+      }
+    },
+    "/api/v1/metrics": {
+      "get": {
+        "description": "Aggregated runtime telemetry from the JSONL metrics sink.\n\nSummaries describe every (metric, labels) sample set; series are bucketed\nmeans per metric name for sparklines. Worker heartbeat age is derived from\nthe newest heartbeat record's timestamp, over all records rather than the\nwindow (a dead worker must not vanish from a narrow window).",
+        "operationId": "runtime_metrics_api_v1_metrics_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "window_seconds",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Window Seconds"
+            }
+          },
+          {
+            "in": "query",
+            "name": "bucket_seconds",
+            "required": false,
+            "schema": {
+              "default": 60.0,
+              "title": "Bucket Seconds",
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MetricsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Runtime Metrics"
       }
     },
     "/api/v1/status": {

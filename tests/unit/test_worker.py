@@ -103,7 +103,9 @@ def test_worker_processes_episode_and_stores_content_addressed_artifact(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     catalog = FakeCatalog(_job())
-    monkeypatch.setattr("data_engine.jobs.worker.PostgresCatalog", lambda _settings: catalog)
+    monkeypatch.setattr(
+        "data_engine.jobs.worker.PostgresCatalog", lambda _settings, **_kwargs: catalog
+    )
     worker = IngestWorker(Settings(artifact_root=tmp_path, _env_file=None))
 
     result = worker.process_one()
@@ -165,7 +167,9 @@ def test_worker_ingests_a_real_dataset_path(
     job["type"] = "ingest_source"
     job["payload"] = {"source": str(root), "episode_key": "episode_index=0"}
     catalog = FakeCatalog(job)
-    monkeypatch.setattr("data_engine.jobs.worker.PostgresCatalog", lambda _settings: catalog)
+    monkeypatch.setattr(
+        "data_engine.jobs.worker.PostgresCatalog", lambda _settings, **_kwargs: catalog
+    )
     worker = IngestWorker(Settings(artifact_root=tmp_path / "store", _env_file=None))
 
     result = worker.process_one()
@@ -188,7 +192,9 @@ def test_worker_rejects_a_malformed_source_payload(
     job["type"] = "ingest_source"
     job["payload"] = payload
     catalog = FakeCatalog(job)
-    monkeypatch.setattr("data_engine.jobs.worker.PostgresCatalog", lambda _settings: catalog)
+    monkeypatch.setattr(
+        "data_engine.jobs.worker.PostgresCatalog", lambda _settings, **_kwargs: catalog
+    )
     worker = IngestWorker(Settings(artifact_root=tmp_path, _env_file=None))
 
     assert worker.process_one()["state"] == "failed"
@@ -202,7 +208,9 @@ def test_worker_reports_a_missing_source_file_as_an_io_failure(
     job["type"] = "ingest_source"
     job["payload"] = {"source": str(tmp_path / "nope")}
     catalog = FakeCatalog(job)
-    monkeypatch.setattr("data_engine.jobs.worker.PostgresCatalog", lambda _settings: catalog)
+    monkeypatch.setattr(
+        "data_engine.jobs.worker.PostgresCatalog", lambda _settings, **_kwargs: catalog
+    )
     metrics_path = tmp_path / "metrics" / "runtime.jsonl"
     worker = IngestWorker(
         Settings(artifact_root=tmp_path, _env_file=None),
@@ -217,7 +225,9 @@ def test_worker_reports_a_missing_source_file_as_an_io_failure(
 @pytest.mark.unit
 def test_worker_returns_none_when_no_job(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     catalog = FakeCatalog(None)
-    monkeypatch.setattr("data_engine.jobs.worker.PostgresCatalog", lambda _settings: catalog)
+    monkeypatch.setattr(
+        "data_engine.jobs.worker.PostgresCatalog", lambda _settings, **_kwargs: catalog
+    )
     worker = IngestWorker(Settings(artifact_root=tmp_path, _env_file=None))
     assert worker.process_one() is None
 
@@ -227,7 +237,9 @@ def test_worker_marks_invalid_job_failed_without_leaking_exception(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     catalog = FakeCatalog(_job({"task": "missing-fields"}))
-    monkeypatch.setattr("data_engine.jobs.worker.PostgresCatalog", lambda _settings: catalog)
+    monkeypatch.setattr(
+        "data_engine.jobs.worker.PostgresCatalog", lambda _settings, **_kwargs: catalog
+    )
     worker = IngestWorker(Settings(artifact_root=tmp_path, _env_file=None))
 
     result = worker.process_one()
@@ -248,7 +260,9 @@ def test_worker_emits_queue_job_and_stage_metrics_on_success(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     catalog = FakeCatalog(_job())
-    monkeypatch.setattr("data_engine.jobs.worker.PostgresCatalog", lambda _settings: catalog)
+    monkeypatch.setattr(
+        "data_engine.jobs.worker.PostgresCatalog", lambda _settings, **_kwargs: catalog
+    )
     metrics_path = tmp_path / "metrics" / "runtime.jsonl"
     worker = IngestWorker(
         Settings(artifact_root=tmp_path, _env_file=None),
@@ -278,6 +292,7 @@ def test_worker_emits_queue_job_and_stage_metrics_on_success(
     }
     assert by_name["artifacts_written_bytes_total"]["value"] > 0
     assert by_name["artifacts_written_bytes_total"]["labels"] == {"kind": "blob"}
+    assert by_name["workers_heartbeat_age_seconds"]["labels"] == {"worker_state": "busy"}
     assert all(point["source"] == "runtime" for point in points)
 
 
@@ -286,7 +301,9 @@ def test_worker_emits_failure_metric_with_reason_code(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     catalog = FakeCatalog(_job({"task": "missing-fields"}))
-    monkeypatch.setattr("data_engine.jobs.worker.PostgresCatalog", lambda _settings: catalog)
+    monkeypatch.setattr(
+        "data_engine.jobs.worker.PostgresCatalog", lambda _settings, **_kwargs: catalog
+    )
     metrics_path = tmp_path / "metrics" / "runtime.jsonl"
     worker = IngestWorker(
         Settings(artifact_root=tmp_path, _env_file=None),
@@ -310,7 +327,9 @@ def test_worker_records_queue_depth_when_idle(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     catalog = FakeCatalog(None)
-    monkeypatch.setattr("data_engine.jobs.worker.PostgresCatalog", lambda _settings: catalog)
+    monkeypatch.setattr(
+        "data_engine.jobs.worker.PostgresCatalog", lambda _settings, **_kwargs: catalog
+    )
     metrics_path = tmp_path / "metrics" / "runtime.jsonl"
     worker = IngestWorker(
         Settings(artifact_root=tmp_path, _env_file=None),
@@ -319,7 +338,12 @@ def test_worker_records_queue_depth_when_idle(
 
     assert worker.process_one() is None
 
-    assert [point["name"] for point in _points(metrics_path)] == ["jobs_queue_depth"]
+    points = _points(metrics_path)
+    assert [point["name"] for point in points] == [
+        "jobs_queue_depth",
+        "workers_heartbeat_age_seconds",
+    ]
+    assert points[-1]["labels"] == {"worker_state": "idle"}
 
 
 @pytest.mark.unit
@@ -327,7 +351,9 @@ def test_metrics_do_not_carry_job_or_episode_identifiers(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     catalog = FakeCatalog(_job())
-    monkeypatch.setattr("data_engine.jobs.worker.PostgresCatalog", lambda _settings: catalog)
+    monkeypatch.setattr(
+        "data_engine.jobs.worker.PostgresCatalog", lambda _settings, **_kwargs: catalog
+    )
     metrics_path = tmp_path / "metrics" / "runtime.jsonl"
     worker = IngestWorker(
         Settings(artifact_root=tmp_path, _env_file=None),
@@ -344,7 +370,9 @@ def test_metrics_do_not_carry_job_or_episode_identifiers(
 def _failing_worker(
     catalog: FakeCatalog, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> tuple[IngestWorker, Path]:
-    monkeypatch.setattr("data_engine.jobs.worker.PostgresCatalog", lambda _settings: catalog)
+    monkeypatch.setattr(
+        "data_engine.jobs.worker.PostgresCatalog", lambda _settings, **_kwargs: catalog
+    )
     metrics_path = tmp_path / "metrics" / "runtime.jsonl"
     worker = IngestWorker(
         Settings(artifact_root=tmp_path, _env_file=None),

@@ -33,7 +33,10 @@ Implemented: JSON logging, correlation IDs, host/GPU telemetry with per-field fa
 | `jobs_retries_total` | counter | count | `job_type`, `attempt` | Whether a flaky source is being retried into the same failure (ADR 0015) |
 | `jobs_cancellations_total` | counter | count | `job_type` | How often operators cancel work, and which types |
 | `jobs_timeouts_total` | counter | count | `job_type` | Whether job deadlines are sized correctly (ADR 0015) |
-| `workers_heartbeat_age_seconds` | gauge | seconds | `worker_state` | Detect dead/stuck workers (once heartbeat leases are implemented) |
+| `workers_heartbeat_age_seconds` | heartbeat record | seconds | `worker_state` | Detect dead/stuck workers; age derived at read time from the newest record's timestamp (ADR 0017) |
+| `api_request_duration_seconds` | histogram/sample | seconds | `route`, `method`, `status_class` | Which endpoints are slow; route is the template, never a raw path |
+| `api_requests_total` | counter | count | `route`, `method`, `status_class` | Request rate and error-share per route |
+| `catalog_query_duration_seconds` | histogram/sample | seconds | `operation` | Which catalog operations deserve indexing or batching |
 | `system_cpu_percent` | gauge | percent | none | Whether pipeline is CPU-bound |
 | `system_memory_used_bytes` | gauge | bytes | none | Stay within laptop memory budget |
 | `process_rss_bytes` | gauge | bytes | `process_role` | Attribute memory usage to API/worker |
@@ -48,7 +51,9 @@ Implemented: JSON logging, correlation IDs, host/GPU telemetry with per-field fa
 
 Labels are deliberately low-cardinality; IDs belong in logs/result provenance, never metric labels.
 
-**Emission status.** `RuntimeMetrics` emits these signals at their call sites: `jobs_queue_depth`, `jobs_queue_time_seconds`, `jobs_run_time_seconds`, `jobs_failures_total`, `jobs_retries_total`, `jobs_cancellations_total`, `jobs_timeouts_total`, `pipeline_stage_duration_seconds`, `episodes_ingested_total`, and `artifacts_written_bytes_total`. They are appended as JSONL to `DE_METRICS_PATH` (default `var/metrics/runtime.jsonl`, gitignored) by `de worker`/`de dev`. Sink failures are logged and swallowed so telemetry never breaks the pipeline. Not yet emitted: the `system_*` host/GPU gauges, `workers_heartbeat_age_seconds` (no heartbeat leases yet), and per-format validation/episode signals from unimplemented stages.
+**Emission status.** `RuntimeMetrics` emits these signals at their call sites: `jobs_queue_depth`, `jobs_queue_time_seconds`, `jobs_run_time_seconds`, `jobs_failures_total`, `jobs_retries_total`, `jobs_cancellations_total`, `jobs_timeouts_total`, `pipeline_stage_duration_seconds`, `episodes_ingested_total`, `artifacts_written_bytes_total`, `api_request_duration_seconds`/`api_requests_total` (API middleware), `catalog_query_duration_seconds` (repository wrapper), and `workers_heartbeat_age_seconds` (worker, every claim attempt; value 0, the record timestamp is the heartbeat). They are appended as JSONL to `DE_METRICS_PATH` (default `var/metrics/runtime.jsonl`, gitignored) by `de worker`/`de dev`/the API process. Sink failures are logged and swallowed so telemetry never breaks the pipeline. Not yet emitted: the `system_*` host/GPU gauges and per-format validation/episode signals from unimplemented stages.
+
+**Read-back (ADR 0017).** `data_engine.observability.aggregate` derives summaries (nearest-rank p50/p95/p99 per metric+labels), bucketed mean series, and worker heartbeat age from the sink; `GET /api/v1/metrics` serves it (newest 200k records, optional `?window_seconds=`/`?bucket_seconds=`). The sink remains the source of truth — no metrics server, no scraper.
 
 **Lifecycle counter semantics (ADR 0015).** `jobs_failures_total` counts *attempts* that failed, including ones that are about to be retried; the job's final resting state is not derivable from it alone — subtract nothing, read `jobs_retries_total` alongside it. `jobs_retries_total` is labelled with the attempt that just failed (1-based), not the attempt that will run next. `jobs_timeouts_total` is emitted only when the deadline check is what ended the job: a job that times out is not also counted in `jobs_failures_total`, because it never reached the handler.
 

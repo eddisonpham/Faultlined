@@ -113,6 +113,7 @@ Added for the Status / Jobs / Artifacts pages; all are read-only, cursor-paginat
 | GET | `/api/v1/jobs` | Newest-first job page. Filters: `state`, `type`. Cursor: `before` (ISO timestamp). Returns `items` + `next_before`. |
 | GET | `/api/v1/artifacts` | Newest-first artifact page with `episode_ids` per row. Cursor: `before`. |
 | GET | `/api/v1/status` | Health, `queue_depth` by job state, artifact/episode counts, and host telemetry. |
+| GET | `/api/v1/metrics` | Aggregated runtime telemetry from the JSONL sink (ADR 0017): per-metric+label summaries with p50/p95/p99, bucketed mean series for sparklines, live job-state counts, and derived worker heartbeat age. Optional `window_seconds`, `bucket_seconds`. |
 
 The UI pages themselves live under `/ui` and are not part of the versioned API surface. They poll the
 same read model by re-requesting their own page with `X-Fragment: 1`, which returns only the polling body

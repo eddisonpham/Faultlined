@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import re
+import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 from uuid import uuid4
 
@@ -19,6 +20,7 @@ from data_engine.api.schemas import (
     EpisodeResponse,
     JobListResponse,
     JobResponse,
+    MetricsResponse,
     StatusResponse,
     SubmitSourceJobRequest,
 )
@@ -26,6 +28,16 @@ from data_engine.catalog.database import initialize_schema
 from data_engine.catalog.repository import InvalidTransition, PostgresCatalog
 from data_engine.config import Settings, load_settings
 from data_engine.jobs.state import DEFAULT_MAX_ATTEMPTS, JobState
+from data_engine.observability.aggregate import (
+    heartbeat_age_seconds,
+    read_metric_records,
+    summarize,
+    window_records,
+)
+from data_engine.observability.aggregate import (
+    series as metric_series,
+)
+from data_engine.observability.metrics import JsonlMetricSink, RuntimeMetrics
 from data_engine.observability.telemetry import sample_resources
 from data_engine.web import (
     DEFAULT_THEME,
@@ -77,6 +89,20 @@ def _status_model(catalog: PostgresCatalog) -> dict[str, Any]:
     }
 
 
+def _route_template(app: FastAPI, request: Request) -> str:
+    """Route template for the matched endpoint, or `unmatched` for 404s.
+
+    Raw paths are high-cardinality and banned as metric labels; the template
+    (`/api/v1/jobs/{job_id}`) is the label.
+    """
+    endpoint = request.scope.get("endpoint")
+    if endpoint is not None:
+        for route in app.routes:
+            if getattr(route, "endpoint", None) is endpoint:
+                return str(getattr(route, "path", "unmatched"))
+    return "unmatched"
+
+
 def _parse_cursor(before: str | None) -> datetime | None:
     if before is None:
         return None
@@ -106,9 +132,11 @@ def create_app(
     *,
     initialize_database: bool = True,
     catalog: PostgresCatalog | None = None,
+    metrics: RuntimeMetrics | None = None,
 ) -> FastAPI:
     configured = settings or load_settings()
-    app_catalog = catalog or PostgresCatalog(configured)
+    app_metrics = metrics or RuntimeMetrics(JsonlMetricSink(configured.metrics_path))
+    app_catalog = catalog or PostgresCatalog(configured, metrics=app_metrics)
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
@@ -123,6 +151,19 @@ def create_app(
     )
     app.state.catalog = app_catalog
     install_error_handling(app)
+
+    @app.middleware("http")
+    async def request_latency_middleware(request: Request, call_next: Any) -> Any:
+        """Record `api_request_duration_seconds` per route template (ADR 0017)."""
+        started = time.perf_counter()
+        response = await call_next(request)
+        app_metrics.api_request(
+            time.perf_counter() - started,
+            route=_route_template(app, request),
+            method=request.method,
+            status_class=f"{response.status_code // 100}xx",
+        )
+        return response
 
     @app.get("/")
     def root() -> dict[str, object]:
@@ -243,6 +284,39 @@ def create_app(
         """Health, queue depth by state, entity counts, and host telemetry."""
         catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
         return _status_model(catalog_for_request)
+
+    @app.get("/api/v1/metrics", response_model=MetricsResponse)
+    def runtime_metrics(
+        request: Request,
+        window_seconds: float | None = None,
+        bucket_seconds: float = 60.0,
+    ) -> dict[str, Any]:
+        """Aggregated runtime telemetry from the JSONL metrics sink.
+
+        Summaries describe every (metric, labels) sample set; series are bucketed
+        means per metric name for sparklines. Worker heartbeat age is derived from
+        the newest heartbeat record's timestamp, over all records rather than the
+        window (a dead worker must not vanish from a narrow window).
+        """
+        catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
+        records = read_metric_records(configured.metrics_path, max_records=200_000)
+        since = (
+            datetime.now(UTC) - timedelta(seconds=window_seconds)
+            if window_seconds is not None
+            else None
+        )
+        windowed = window_records(records, since=since)
+        return {
+            "generated_at": datetime.now(UTC).isoformat(),
+            "window_seconds": window_seconds,
+            "record_count": len(windowed),
+            "summaries": summarize(windowed),
+            "series": metric_series(windowed, bucket_seconds=bucket_seconds),
+            "jobs_queue_depth": {
+                state.value: catalog_for_request.count_jobs(state) for state in JobState
+            },
+            "worker_heartbeat_age_seconds": heartbeat_age_seconds(records),
+        }
 
     @app.get("/ui/faultlined.css")
     def ui_layout_css() -> Response:

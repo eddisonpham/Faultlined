@@ -141,3 +141,16 @@ class RuntimeMetrics:
 
     def artifact_written(self, size_bytes: int, *, kind: str = "blob") -> None:
         self._emit("artifacts_written_bytes_total", size_bytes, "bytes", {"kind": kind})
+
+    def api_request(self, seconds: float, *, route: str, method: str, status_class: str) -> None:
+        """Per-request latency; ``route`` is the route template, never a raw path."""
+        labels = {"route": route, "method": method, "status_class": status_class}
+        self._emit("api_request_duration_seconds", seconds, "seconds", labels)
+        self._emit("api_requests_total", 1, "count", labels)
+
+    def catalog_query(self, seconds: float, *, operation: str) -> None:
+        self._emit("catalog_query_duration_seconds", seconds, "seconds", {"operation": operation})
+
+    def worker_heartbeat(self, *, worker_state: str) -> None:
+        """Liveness ping; the record's timestamp is the heartbeat, its value is 0."""
+        self._emit("workers_heartbeat_age_seconds", 0, "seconds", {"worker_state": worker_state})

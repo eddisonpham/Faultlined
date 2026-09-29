@@ -156,3 +156,42 @@ class StatusResponse(BaseModel):
     artifact_count: int
     episode_count: int
     resources: ResourceSample
+
+
+class MetricSummaryModel(BaseModel):
+    """Descriptive statistics for one (metric, labels) sample set (ADR 0017)."""
+
+    name: str
+    labels: dict[str, str]
+    label_key: str
+    unit: str
+    count: int
+    min: float
+    max: float
+    mean: float
+    sum: float
+    p50: float
+    p95: float
+    p99: float
+    first_timestamp: str | None = None
+    last_timestamp: str | None = None
+
+
+class MetricSeriesPoint(BaseModel):
+    """One sparkline point: bucketed mean across the metric's label sets."""
+
+    t: str
+    v: float
+    count: int
+
+
+class MetricsResponse(BaseModel):
+    """Aggregated runtime telemetry read back from the JSONL metrics sink."""
+
+    generated_at: str
+    window_seconds: float | None = None
+    record_count: int
+    summaries: list[MetricSummaryModel]
+    series: dict[str, list[MetricSeriesPoint]]
+    jobs_queue_depth: dict[str, int]
+    worker_heartbeat_age_seconds: float | None = None
