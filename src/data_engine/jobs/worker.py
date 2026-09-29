@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import time
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from data_engine.catalog.repository import PostgresCatalog
@@ -25,6 +25,10 @@ class UnsupportedJobType(ValueError):
 
 class InvalidJobPayload(ValueError):
     """A claimed job's payload does not match the handler contract."""
+
+
+class _JobTimedOut(Exception):
+    """Internal signal that a job exceeded its deadline before or during execution."""
 
 
 def _failure_reason_code(exc: Exception) -> ReasonCode:
@@ -58,6 +62,60 @@ class IngestWorker:
         self.ingest = SyntheticEpisodeIngestService(self.catalog, self.artifacts, metrics=metrics)
         self.metrics = metrics or RuntimeMetrics()
 
+    def _respect_deadline(self, job: dict[str, Any]) -> None:
+        """Time the job out before running if its deadline already passed."""
+        deadline = job.get("deadline_at")
+        if isinstance(deadline, datetime) and deadline < datetime.now(UTC):
+            self.catalog.mark_deadline_expired(str(job["id"]))
+            self.metrics.job_timeout(job_type=str(job["type"]))
+            raise _JobTimedOut(str(job["id"]))
+
+    def _settle_failure(self, job: dict[str, Any], error: dict[str, Any]) -> dict[str, Any] | None:
+        """Decide between retrying and failing, honouring attempts and cancellation.
+
+        Returns the updated job row, or None when the job went back to the queue and a
+        later attempt will pick it up.
+        """
+        job_id = str(job["id"])
+        job_type = str(job["type"])
+        if self.catalog.is_cancel_requested(job_id):
+            cancelled = self.catalog.finish_job(job_id, JobState.CANCELED, error=error)
+            self.metrics.job_cancel(job_type=job_type)
+            return cancelled
+
+        attempts = int(job.get("attempts") or 0)
+        max_attempts = int(job.get("max_attempts") or 1)
+        if attempts < max_attempts:
+            self.catalog.finish_job(job_id, JobState.RETRYING, error=error)
+            self.catalog.requeue_for_retry(job_id)
+            # `attempts` is 1-based here: claim_job already incremented it, so this is
+            # the attempt that just failed, not the one that will run next.
+            self.metrics.job_retry(job_type=job_type, attempt=attempts)
+            logger.warning(
+                "job scheduled for retry",
+                extra={
+                    "event": "job_retry_scheduled",
+                    "job_id": job_id,
+                    "attempt": attempts,
+                    "next_attempt": attempts + 1,
+                    "max_attempts": max_attempts,
+                    "correlation_id": str(job["correlation_id"]),
+                },
+            )
+            return None
+
+        failed = self.catalog.finish_job(job_id, JobState.FAILED, error=error)
+        logger.error(
+            "job failed permanently",
+            extra={
+                "event": "job_failed_permanently",
+                "job_id": job_id,
+                "attempts": attempts,
+                "correlation_id": str(job["correlation_id"]),
+            },
+        )
+        return failed
+
     def _record_queue_signals(self, job: dict[str, Any]) -> None:
         """Queue depth after the claim, plus time spent waiting for this job."""
         self.metrics.queue_depth(self.catalog.count_jobs(JobState.QUEUED))
@@ -81,6 +139,7 @@ class IngestWorker:
         job_type = str(job["type"])
         started = time.perf_counter()
         try:
+            self._respect_deadline(job)
             if job["type"] != "ingest":
                 raise UnsupportedJobType(f"unsupported job type: {job['type']}")
             payload = job["payload"]
@@ -107,6 +166,8 @@ class IngestWorker:
                 },
             )
             return completed
+        except _JobTimedOut:
+            return self.catalog.get_job(str(job["id"]))
         except Exception as exc:
             stage_seconds = time.perf_counter() - started
             reason_code = _failure_reason_code(exc)
@@ -123,11 +184,7 @@ class IngestWorker:
                     "reason_code": reason_code.value,
                 },
             )
-            self.catalog.finish_job(
-                str(job["id"]),
-                JobState.FAILED,
-                error={"type": type(exc).__name__, "message": "job handler failed"},
-            )
+            self._settle_failure(job, {"type": type(exc).__name__, "message": "job handler failed"})
             return self.catalog.get_job(str(job["id"]))
         finally:
             correlation_id_var.reset(token)

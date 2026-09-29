@@ -30,6 +30,9 @@ Implemented: JSON logging, correlation IDs, host/GPU telemetry with per-field fa
 | `jobs_queue_time_seconds` | histogram/sample | seconds | `job_type` | Tune concurrency and user wait time |
 | `jobs_run_time_seconds` | histogram/sample | seconds | `job_type`, `state` | Identify slow stages / failure cost |
 | `jobs_failures_total` | counter | count | `job_type`, `reason_code` | Which failures merit reliability work |
+| `jobs_retries_total` | counter | count | `job_type`, `attempt` | Whether a flaky source is being retried into the same failure (ADR 0015) |
+| `jobs_cancellations_total` | counter | count | `job_type` | How often operators cancel work, and which types |
+| `jobs_timeouts_total` | counter | count | `job_type` | Whether job deadlines are sized correctly (ADR 0015) |
 | `workers_heartbeat_age_seconds` | gauge | seconds | `worker_state` | Detect dead/stuck workers (once heartbeat leases are implemented) |
 | `system_cpu_percent` | gauge | percent | none | Whether pipeline is CPU-bound |
 | `system_memory_used_bytes` | gauge | bytes | none | Stay within laptop memory budget |
@@ -45,7 +48,9 @@ Implemented: JSON logging, correlation IDs, host/GPU telemetry with per-field fa
 
 Labels are deliberately low-cardinality; IDs belong in logs/result provenance, never metric labels.
 
-**Emission status.** `RuntimeMetrics` emits these signals at their call sites: `jobs_queue_depth`, `jobs_queue_time_seconds`, `jobs_run_time_seconds`, `jobs_failures_total`, `pipeline_stage_duration_seconds`, `episodes_ingested_total`, and `artifacts_written_bytes_total`. They are appended as JSONL to `DE_METRICS_PATH` (default `var/metrics/runtime.jsonl`, gitignored) by `de worker`/`de dev`. Sink failures are logged and swallowed so telemetry never breaks the pipeline. Not yet emitted: the `system_*` host/GPU gauges, `workers_heartbeat_age_seconds` (no heartbeat leases yet), and per-format validation/episode signals from unimplemented stages.
+**Emission status.** `RuntimeMetrics` emits these signals at their call sites: `jobs_queue_depth`, `jobs_queue_time_seconds`, `jobs_run_time_seconds`, `jobs_failures_total`, `jobs_retries_total`, `jobs_cancellations_total`, `jobs_timeouts_total`, `pipeline_stage_duration_seconds`, `episodes_ingested_total`, and `artifacts_written_bytes_total`. They are appended as JSONL to `DE_METRICS_PATH` (default `var/metrics/runtime.jsonl`, gitignored) by `de worker`/`de dev`. Sink failures are logged and swallowed so telemetry never breaks the pipeline. Not yet emitted: the `system_*` host/GPU gauges, `workers_heartbeat_age_seconds` (no heartbeat leases yet), and per-format validation/episode signals from unimplemented stages.
+
+**Lifecycle counter semantics (ADR 0015).** `jobs_failures_total` counts *attempts* that failed, including ones that are about to be retried; the job's final resting state is not derivable from it alone — subtract nothing, read `jobs_retries_total` alongside it. `jobs_retries_total` is labelled with the attempt that just failed (1-based), not the attempt that will run next. `jobs_timeouts_total` is emitted only when the deadline check is what ended the job: a job that times out is not also counted in `jobs_failures_total`, because it never reached the handler.
 
 ## Tracing
 

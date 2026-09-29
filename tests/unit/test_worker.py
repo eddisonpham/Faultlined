@@ -10,11 +10,15 @@ from data_engine.observability.metrics import JsonlMetricSink, RuntimeMetrics
 
 
 class FakeCatalog:
+    """In-memory stand-in covering the lifecycle methods the worker calls."""
+
     def __init__(self, job: dict[str, Any] | None) -> None:
         self.job = job
         self.state = "queued" if job else None
         self.episode: dict[str, Any] | None = None
         self.queued = 1 if job else 0
+        self.cancel_requested = False
+        self.requeues = 0
 
     def count_jobs(self, state: JobState) -> int:
         return self.queued
@@ -23,7 +27,22 @@ class FakeCatalog:
         if self.job is None:
             return None
         self.state = "running"
+        if self.job is not None:
+            self.job["attempts"] = int(self.job.get("attempts", 0)) + 1
         return self.job
+
+    def is_cancel_requested(self, job_id: str) -> bool:
+        return self.cancel_requested
+
+    def requeue_for_retry(self, job_id: str) -> dict[str, Any]:
+        self.state = JobState.QUEUED.value
+        self.requeues += 1
+        return {"id": job_id, "state": self.state}
+
+    def mark_deadline_expired(self, job_id: str) -> dict[str, Any]:
+        self.state = JobState.TIMED_OUT.value
+        self.error = {"type": "DeadlineExceeded", "message": "job exceeded its deadline"}
+        return {"id": job_id, "state": self.state}
 
     def register_episode(self, **kwargs: Any) -> dict[str, Any]:
         self.episode = {
@@ -46,7 +65,13 @@ class FakeCatalog:
         return result
 
 
-def _job(episode: dict[str, Any] | None = None) -> dict[str, Any]:
+def _job(
+    episode: dict[str, Any] | None = None,
+    *,
+    attempts: int = 1,
+    max_attempts: int = 1,
+    deadline_at: Any = None,
+) -> dict[str, Any]:
     from datetime import UTC, datetime, timedelta
 
     created = datetime(2026, 9, 28, 12, 0, 0, tzinfo=UTC)
@@ -55,6 +80,8 @@ def _job(episode: dict[str, Any] | None = None) -> dict[str, Any]:
         "type": "ingest",
         "state": "running",
         "correlation_id": "corr-1",
+        "attempts": attempts,
+        "max_attempts": max_attempts,
         "created_at": created,
         "started_at": created + timedelta(seconds=2),
         "payload": {
@@ -67,6 +94,7 @@ def _job(episode: dict[str, Any] | None = None) -> dict[str, Any]:
                 "actions": [[0.1], [0.2]],
             }
         },
+        "deadline_at": deadline_at,
     }
 
 
@@ -212,3 +240,95 @@ def test_metrics_do_not_carry_job_or_episode_identifiers(
     forbidden = {"job_id", "episode_id", "correlation_id"}
     for point in _points(metrics_path):
         assert not forbidden & set(point["labels"])
+
+
+def _failing_worker(
+    catalog: FakeCatalog, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> tuple[IngestWorker, Path]:
+    monkeypatch.setattr("data_engine.jobs.worker.PostgresCatalog", lambda _settings: catalog)
+    metrics_path = tmp_path / "metrics" / "runtime.jsonl"
+    worker = IngestWorker(
+        Settings(artifact_root=tmp_path, _env_file=None),
+        metrics=RuntimeMetrics(JsonlMetricSink(metrics_path)),
+    )
+    return worker, metrics_path
+
+
+@pytest.mark.unit
+def test_worker_requeues_while_attempts_remain_then_fails_when_exhausted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """F6: a broken payload is retried up to max_attempts, then parked as failed."""
+    catalog = FakeCatalog(_job({"task": "missing-fields"}, attempts=0, max_attempts=2))
+    worker, metrics_path = _failing_worker(catalog, tmp_path, monkeypatch)
+
+    worker.process_one()
+
+    assert catalog.state == JobState.QUEUED.value
+    assert catalog.requeues == 1
+    assert {point["name"] for point in _points(metrics_path)} >= {
+        "jobs_retries_total",
+        "jobs_failures_total",
+    }
+
+    # Second attempt is the last one: no requeue, the job settles as failed.
+    worker.process_one()
+
+    assert catalog.state == JobState.FAILED.value
+    assert catalog.requeues == 1
+    retries = [p for p in _points(metrics_path) if p["name"] == "jobs_retries_total"]
+    assert [point["labels"]["attempt"] for point in retries] == ["1"]
+
+
+@pytest.mark.unit
+def test_worker_cancels_a_failing_job_when_cancellation_was_requested(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """F7: a cancel request wins over a would-be retry."""
+    catalog = FakeCatalog(_job({"task": "missing-fields"}, attempts=0, max_attempts=3))
+    catalog.cancel_requested = True
+    worker, metrics_path = _failing_worker(catalog, tmp_path, monkeypatch)
+
+    result = worker.process_one()
+
+    assert result is not None
+    assert result["state"] == JobState.CANCELED.value
+    assert catalog.requeues == 0
+    assert "jobs_cancellations_total" in {point["name"] for point in _points(metrics_path)}
+
+
+@pytest.mark.unit
+def test_worker_times_out_a_job_whose_deadline_already_passed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from datetime import UTC, datetime, timedelta
+
+    catalog = FakeCatalog(
+        _job(attempts=0, max_attempts=3, deadline_at=datetime.now(UTC) - timedelta(seconds=1))
+    )
+    worker, metrics_path = _failing_worker(catalog, tmp_path, monkeypatch)
+
+    result = worker.process_one()
+
+    assert result is not None
+    assert result["state"] == JobState.TIMED_OUT.value
+    assert result["error"]["type"] == "DeadlineExceeded"
+    # A job that never ran must not be recorded as a handler failure.
+    assert "jobs_failures_total" not in {point["name"] for point in _points(metrics_path)}
+    assert "jobs_timeouts_total" in {point["name"] for point in _points(metrics_path)}
+
+
+@pytest.mark.unit
+def test_worker_leaves_a_future_deadline_alone(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from datetime import UTC, datetime, timedelta
+
+    catalog = FakeCatalog(_job(deadline_at=datetime.now(UTC) + timedelta(hours=1)))
+    worker, metrics_path = _failing_worker(catalog, tmp_path, monkeypatch)
+
+    result = worker.process_one()
+
+    assert result is not None
+    assert result["state"] == JobState.SUCCEEDED.value
+    assert "jobs_timeouts_total" not in {point["name"] for point in _points(metrics_path)}

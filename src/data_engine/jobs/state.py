@@ -7,6 +7,8 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Any
 
+DEFAULT_MAX_ATTEMPTS = 3
+
 
 class JobState(StrEnum):
     QUEUED = "queued"
@@ -21,6 +23,11 @@ class JobState(StrEnum):
 
 TERMINAL_STATES: frozenset[JobState] = frozenset(
     {JobState.SUCCEEDED, JobState.FAILED, JobState.CANCELED, JobState.TIMED_OUT}
+)
+
+# States in which a job is still live: eligible to be claimed, retried, or cancelled.
+ACTIVE_STATES: frozenset[JobState] = frozenset(
+    {JobState.QUEUED, JobState.RUNNING, JobState.RETRYING, JobState.CANCEL_REQUESTED}
 )
 
 # Static contract of allowed transitions (enforced in phase 05; documented in data-flow.md §4).
@@ -60,7 +67,7 @@ class Job:
     state: JobState
     priority: int = 0
     attempts: int = 0
-    max_attempts: int = 3
+    max_attempts: int = DEFAULT_MAX_ATTEMPTS
     idempotency_key: str | None = None
     parent_job_id: str | None = None
     payload: dict[str, Any] = field(default_factory=dict)

@@ -7,6 +7,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from data_engine.jobs.state import DEFAULT_MAX_ATTEMPTS
+
 
 class SyntheticEpisode(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -32,8 +34,15 @@ class IngestPayload(BaseModel):
 
 
 class SubmitJobRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     type: Literal["ingest"]
     payload: IngestPayload
+    max_attempts: int = Field(default=DEFAULT_MAX_ATTEMPTS, ge=1, le=10)
+    """Retry budget (F6): how many times the worker may try before parking the job."""
+
+    deadline_seconds: float | None = Field(default=None, gt=0)
+    """Wall-clock budget from submission (F6); the reaper times the job out after it."""
 
 
 class JobResponse(BaseModel):
@@ -44,6 +53,9 @@ class JobResponse(BaseModel):
     result: dict[str, Any] | None = None
     error: dict[str, Any] | None = None
     correlation_id: str
+    attempts: int = 0
+    max_attempts: int = DEFAULT_MAX_ATTEMPTS
+    deadline_at: Any = None
     created_at: Any
     started_at: Any = None
     finished_at: Any = None
@@ -75,6 +87,8 @@ class JobSummary(BaseModel):
     state: str
     correlation_id: str
     error: dict[str, Any] | None = None
+    attempts: int = 0
+    max_attempts: int = DEFAULT_MAX_ATTEMPTS
     created_at: Any
     started_at: Any = None
     finished_at: Any = None

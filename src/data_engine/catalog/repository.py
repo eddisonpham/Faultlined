@@ -5,14 +5,19 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
 from psycopg.types.json import Jsonb
 
 from data_engine.catalog.database import connect
 from data_engine.config import Settings
-from data_engine.jobs.state import ALLOWED_TRANSITIONS, JobState
+from data_engine.jobs.state import (
+    ACTIVE_STATES,
+    ALLOWED_TRANSITIONS,
+    DEFAULT_MAX_ATTEMPTS,
+    JobState,
+)
 
 
 class IdempotencyConflict(ValueError):
@@ -42,10 +47,29 @@ class PostgresCatalog:
         payload: dict[str, Any],
         idempotency_key: str | None,
         correlation_id: str,
+        *,
+        max_attempts: int = DEFAULT_MAX_ATTEMPTS,
+        deadline_seconds: float | None = None,
     ) -> tuple[dict[str, Any], bool]:
-        request = {"type": job_type, "payload": payload}
+        """Queue a job.
+
+        ``max_attempts`` bounds retries (F6); ``deadline_seconds`` sets a wall-clock
+        budget measured from submission (F6). Both are part of the idempotency
+        request, so replaying with different retry policy is a conflict.
+        """
+        request = {
+            "type": job_type,
+            "payload": payload,
+            "max_attempts": max_attempts,
+            "deadline_seconds": deadline_seconds,
+        }
         request_hash = hashlib.sha256(canonical_json(request)).hexdigest()
         job_id = str(uuid.uuid4())
+        deadline_at = (
+            datetime.now(UTC) + timedelta(seconds=deadline_seconds)
+            if deadline_seconds is not None
+            else None
+        )
         with connect(self.settings) as connection:
             if idempotency_key:
                 existing = connection.execute(
@@ -57,8 +81,9 @@ class PostgresCatalog:
                     return dict(existing), False
             row = connection.execute(
                 """INSERT INTO jobs (
-                       id, type, state, payload, idempotency_key, request_hash, correlation_id
-                   ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+                       id, type, state, payload, idempotency_key, request_hash, correlation_id,
+                       max_attempts, deadline_at
+                   ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                    ON CONFLICT (idempotency_key) DO NOTHING RETURNING *""",
                 (
                     job_id,
@@ -68,6 +93,8 @@ class PostgresCatalog:
                     idempotency_key,
                     request_hash,
                     correlation_id,
+                    max_attempts,
+                    deadline_at,
                 ),
             ).fetchone()
             if row is None:
@@ -82,14 +109,15 @@ class PostgresCatalog:
     def claim_job(self) -> dict[str, Any] | None:
         with connect(self.settings) as connection:
             row = connection.execute(
-                """SELECT * FROM jobs WHERE state = %s
+                """SELECT * FROM jobs
+                   WHERE state = %s AND attempts < max_attempts
                    ORDER BY created_at, id LIMIT 1 FOR UPDATE SKIP LOCKED""",
                 (JobState.QUEUED.value,),
             ).fetchone()
             if row is None:
                 return None
             updated = connection.execute(
-                """UPDATE jobs SET state = %s, started_at = now()
+                """UPDATE jobs SET state = %s, started_at = now(), attempts = attempts + 1
                    WHERE id = %s RETURNING *""",
                 (JobState.RUNNING.value, row["id"]),
             ).fetchone()
@@ -128,6 +156,103 @@ class PostgresCatalog:
             if updated is None:
                 raise RuntimeError("job disappeared during transition")
         return dict(updated)
+
+    def request_cancel(self, job_id: str) -> dict[str, Any]:
+        """Ask a running or queued job to stop (F7: cooperative cancellation).
+
+        Queued jobs cancel outright; running jobs move to `cancel_requested` so the
+        worker can finish its current unit of work and observe the request.
+        """
+        with connect(self.settings) as connection:
+            row = connection.execute(
+                "SELECT * FROM jobs WHERE id = %s FOR UPDATE", (job_id,)
+            ).fetchone()
+            if row is None:
+                raise KeyError(job_id)
+            current = JobState(cast(str, row["state"]))
+            target = JobState.CANCELED if current is JobState.QUEUED else JobState.CANCEL_REQUESTED
+            if target not in ALLOWED_TRANSITIONS[current]:
+                raise InvalidTransition(f"{current.value} -> {target.value}")
+            updated = connection.execute(
+                """UPDATE jobs SET state = %s, finished_at = now() WHERE id = %s RETURNING *""",
+                (target.value, job_id),
+            ).fetchone()
+        if updated is None:
+            raise RuntimeError("job disappeared during cancel")
+        return dict(updated)
+
+    def is_cancel_requested(self, job_id: str) -> bool:
+        """Whether a cancel was requested while this job was running."""
+        with connect(self.settings) as connection:
+            row = connection.execute("SELECT state FROM jobs WHERE id = %s", (job_id,)).fetchone()
+        if row is None:
+            return False
+        return cast(str, row["state"]) == JobState.CANCEL_REQUESTED.value
+
+    def requeue_for_retry(self, job_id: str) -> dict[str, Any]:
+        """Return a failed attempt to the queue (retrying -> queued).
+
+        Only valid while attempts remain; otherwise the job must be marked failed.
+        """
+        with connect(self.settings) as connection:
+            row = connection.execute(
+                "SELECT * FROM jobs WHERE id = %s FOR UPDATE", (job_id,)
+            ).fetchone()
+            if row is None:
+                raise KeyError(job_id)
+            current = JobState(cast(str, row["state"]))
+            if current is not JobState.RETRYING:
+                raise InvalidTransition(f"{current.value} -> retrying")
+            if cast(int, row["attempts"]) >= cast(int, row["max_attempts"]):
+                raise ValueError("attempts exhausted; job must be marked failed")
+            updated = connection.execute(
+                """UPDATE jobs SET state = %s, error = NULL, result = NULL
+                   WHERE id = %s RETURNING *""",
+                (JobState.QUEUED.value, job_id),
+            ).fetchone()
+        if updated is None:
+            raise RuntimeError("job disappeared during retry")
+        return dict(updated)
+
+    def mark_deadline_expired(self, job_id: str) -> dict[str, Any]:
+        """Move a job whose deadline passed to `timed_out` (F6)."""
+        with connect(self.settings) as connection:
+            row = connection.execute(
+                "SELECT * FROM jobs WHERE id = %s FOR UPDATE", (job_id,)
+            ).fetchone()
+            if row is None:
+                raise KeyError(job_id)
+            current = JobState(cast(str, row["state"]))
+            if JobState.TIMED_OUT not in ALLOWED_TRANSITIONS[current]:
+                raise InvalidTransition(f"{current.value} -> timed_out")
+            updated = connection.execute(
+                """UPDATE jobs SET state = %s, finished_at = now(),
+                          error = jsonb_build_object('type', 'DeadlineExceeded',
+                                                     'message', 'job exceeded its deadline')
+                   WHERE id = %s RETURNING *""",
+                (JobState.TIMED_OUT.value, job_id),
+            ).fetchone()
+        if updated is None:
+            raise RuntimeError("job disappeared during timeout")
+        return dict(updated)
+
+    def reap_expired_deadlines(self) -> int:
+        """Time out every non-terminal job whose deadline has passed.
+
+        Run periodically; returns how many jobs were reaped.
+        """
+        with connect(self.settings) as connection:
+            rows = connection.execute(
+                """UPDATE jobs SET state = %s, finished_at = now(),
+                          error = jsonb_build_object('type', 'DeadlineExceeded',
+                                                     'message', 'job exceeded its deadline')
+                   WHERE deadline_at IS NOT NULL
+                     AND deadline_at < now()
+                     AND state = ANY(%s)
+                   RETURNING id""",
+                (JobState.TIMED_OUT.value, [s.value for s in ACTIVE_STATES]),
+            ).fetchall()
+        return len(rows)
 
     def register_episode(
         self,
@@ -199,7 +324,7 @@ class PostgresCatalog:
         params.append(limit)
         with connect(self.settings) as connection:
             rows = connection.execute(
-                f"""SELECT id, type, state, correlation_id, error,
+                f"""SELECT id, type, state, correlation_id, error, attempts, max_attempts,
                           created_at, started_at, finished_at
                     FROM jobs {where}
                     ORDER BY created_at DESC, id DESC

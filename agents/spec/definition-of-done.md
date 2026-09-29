@@ -60,8 +60,8 @@ Source: [01-scaffolding-instructions.md](01-scaffolding-instructions.md) §3.
 Seed criteria refined 2026-09-28 (phase 03) to reference real components per scaffolding instructions §5; original seed
 wording preserved in git history. Rationale recorded with the refinement commit.
 
-- [ ] Full workflow of the chosen problem runs end-to-end on real (small) robotics data — `ingest → validation → indexing → builds` via `jobs`/`worker`, on a public LeRobot/MCAP subset ([../architecture/data-flow.md](../architecture/data-flow.md) §1–2)
-- [ ] Job lifecycle: submit, queue, run, retry, timeout, cancel — `jobs` state machine with failure-path tests (failure-modes F4, F6, F7)
+- [ ] Full workflow of the chosen problem runs end-to-end on real (small) robotics data — `ingest → validation → indexing → builds` via `jobs`/`worker`, on a public LeRobot/MCAP subset ([../architecture/data-flow.md](../architecture/data-flow.md) §1–2). Ingest over real formats, validation, indexing, and builds are each still open.
+- [x] Job lifecycle: submit, queue, run, retry, timeout, cancel — `jobs` state machine with failure-path tests (failure-modes F4, F6, F7) — [ADR 0015](../decisions/0015-cooperative-job-lifecycle.md); `attempts`/`max_attempts`/`deadline_at` columns with an idempotent migration, claim-side attempt guard, worker-side retry/cancel/timeout settlement, `POST /api/v1/jobs/{id}/cancel`; covered by [unit](../../tests/unit/test_worker.py), [integration](../../tests/integration/test_job_lifecycle.py) (real Postgres), and [contract](../../tests/contract/test_ingest_api.py) tests. Deferred and recorded: retry backoff, worker leases, mid-call cancellation
 - [ ] Dataset/model versioning and lineage recorded — `builds` manifests + `catalog` lineage edges (FR-006–FR-008)
 - [ ] Experiments reproducible from recorded provenance — `workloads` run records + rebuild determinism test (NFR-004)
 - [x] API contract tests; coverage gate enforced — `api` + committed `docs/api/openapi.json` drift check (ADR 0009); `just api-contract` runs in `just ci` and in CI, and a unit test fails the suite on drift — `api` + committed `docs/api/openapi.json` drift check (ADR 0009)

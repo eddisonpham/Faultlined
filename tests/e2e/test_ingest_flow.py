@@ -23,7 +23,14 @@ class InMemoryCatalog:
         self.keys: dict[str, str] = {}
 
     def submit_job(
-        self, job_type: str, payload: dict[str, Any], key: str | None, correlation_id: str
+        self,
+        job_type: str,
+        payload: dict[str, Any],
+        key: str | None,
+        correlation_id: str,
+        *,
+        max_attempts: int = 3,
+        deadline_seconds: float | None = None,
     ) -> tuple[dict[str, Any], bool]:
         if key and key in self.keys:
             return self.jobs[self.keys[key]], False
@@ -36,6 +43,9 @@ class InMemoryCatalog:
             "result": None,
             "error": None,
             "correlation_id": correlation_id,
+            "attempts": 0,
+            "max_attempts": max_attempts,
+            "deadline_at": "2026-09-28T01:00:00Z" if deadline_seconds else None,
             "created_at": "2026-09-28T00:00:00Z",
             "started_at": None,
             "finished_at": None,
@@ -54,6 +64,27 @@ class InMemoryCatalog:
             return None
         job["state"] = "running"
         job["started_at"] = "2026-09-28T00:00:01Z"
+        job["attempts"] = int(job.get("attempts", 0)) + 1
+        return job
+
+    def is_cancel_requested(self, job_id: str) -> bool:
+        return self.jobs.get(job_id, {}).get("state") == "cancel_requested"
+
+    def request_cancel(self, job_id: str) -> dict[str, Any]:
+        job = self.jobs[job_id]
+        job["state"] = "canceled" if job["state"] == "queued" else "cancel_requested"
+        return job
+
+    def requeue_for_retry(self, job_id: str) -> dict[str, Any]:
+        job = self.jobs[job_id]
+        job["state"] = "queued"
+        job["error"] = None
+        return job
+
+    def mark_deadline_expired(self, job_id: str) -> dict[str, Any]:
+        job = self.jobs[job_id]
+        job["state"] = "timed_out"
+        job["error"] = {"type": "DeadlineExceeded", "message": "job exceeded its deadline"}
         return job
 
     def register_episode(self, **kwargs: Any) -> dict[str, Any]:

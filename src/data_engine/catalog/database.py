@@ -54,6 +54,17 @@ CREATE TABLE IF NOT EXISTS lineage_edges (
 );
 """
 
+# Columns the job lifecycle (retry / timeout / cancel) needs, added to pre-existing
+# databases. CREATE TABLE IF NOT EXISTS does not add columns to a table that already
+# exists, so these are separate idempotent statements.
+_MIGRATIONS = """
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS attempts integer NOT NULL DEFAULT 0;
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS max_attempts integer NOT NULL DEFAULT 3;
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS deadline_at timestamptz;
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS worker_id text;
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS lease_expires_at timestamptz;
+"""
+
 
 @contextmanager
 def connect(settings: Settings | None = None) -> Iterator[Connection[dict[str, object]]]:
@@ -75,6 +86,7 @@ CONNECT_TIMEOUT_SECONDS = 5
 def initialize_schema(settings: Settings | None = None) -> None:
     """Create vertical-slice tables if absent; safe to call on every startup."""
     with connect(settings) as connection:
-        for statement in _SCHEMA.split(";"):
-            if statement.strip():
-                connection.execute(statement)
+        for script in (_SCHEMA, _MIGRATIONS):
+            for statement in script.split(";"):
+                if statement.strip():
+                    connection.execute(statement)

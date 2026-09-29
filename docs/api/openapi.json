@@ -152,12 +152,20 @@
       },
       "JobResponse": {
         "properties": {
+          "attempts": {
+            "default": 0,
+            "title": "Attempts",
+            "type": "integer"
+          },
           "correlation_id": {
             "title": "Correlation Id",
             "type": "string"
           },
           "created_at": {
             "title": "Created At"
+          },
+          "deadline_at": {
+            "title": "Deadline At"
           },
           "error": {
             "anyOf": [
@@ -177,6 +185,11 @@
           "id": {
             "title": "Id",
             "type": "string"
+          },
+          "max_attempts": {
+            "default": 3,
+            "title": "Max Attempts",
+            "type": "integer"
           },
           "payload": {
             "additionalProperties": true,
@@ -221,6 +234,11 @@
       "JobSummary": {
         "description": "Row in the jobs list; the full payload is available on the detail endpoint.",
         "properties": {
+          "attempts": {
+            "default": 0,
+            "title": "Attempts",
+            "type": "integer"
+          },
           "correlation_id": {
             "title": "Correlation Id",
             "type": "string"
@@ -246,6 +264,11 @@
           "id": {
             "title": "Id",
             "type": "string"
+          },
+          "max_attempts": {
+            "default": 3,
+            "title": "Max Attempts",
+            "type": "integer"
           },
           "started_at": {
             "title": "Started At"
@@ -405,7 +428,27 @@
         "type": "object"
       },
       "SubmitJobRequest": {
+        "additionalProperties": false,
         "properties": {
+          "deadline_seconds": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deadline Seconds"
+          },
+          "max_attempts": {
+            "default": 3,
+            "maximum": 10.0,
+            "minimum": 1.0,
+            "title": "Max Attempts",
+            "type": "integer"
+          },
           "payload": {
             "$ref": "#/components/schemas/IngestPayload"
           },
@@ -844,6 +887,46 @@
           }
         },
         "summary": "Get Job"
+      }
+    },
+    "/api/v1/jobs/{job_id}/cancel": {
+      "post": {
+        "description": "Request cancellation (F7).\n\nA queued job is canceled immediately; a running job moves to\n`cancel_requested` and the worker stops it at its next checkpoint. A job that\nalready reached a terminal state cannot be cancelled (409), and an unknown id\nis a 404.",
+        "operationId": "cancel_job_api_v1_jobs__job_id__cancel_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cancel Job"
       }
     },
     "/api/v1/status": {

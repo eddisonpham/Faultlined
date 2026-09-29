@@ -2,6 +2,8 @@
 
 **Status: Scaffolding; review verdict is accept-with-follow-ups (2026-09-28).** The project is **Faultlined**. All engineering findings are resolved and gated; the only blocker is publishing a measured benchmark baseline, which requires the owner's explicit green flag. See [engineering review](reviews/2026-09-28-scaffolding.md) and [definition of done](spec/definition-of-done.md). All work is committed on `main` and pushed. Do not tag `scaffold-complete` until the baseline and the residual verifications below are closed.
 
+**Update 2026-09-29 (stage 2 / MVP).** Three slices are now on `main` since the scaffolding tag: the minimal server-rendered UI ([ADR 0014](decisions/0014-minimal-ui-server-rendered.md)), the committed OpenAPI contract with a drift gate, and the job lifecycle — bounded retries, job deadlines, and cooperative cancellation ([ADR 0015](decisions/0015-cooperative-job-lifecycle.md)). The suite is at 147 passing with 91% coverage. The next MVP criterion is the full `ingest → validation → indexing → builds` workflow on a real public dataset.
+
 ## 1. Current problem definition
 
 Build a local-first robot episode data engine to ingest, validate, index/version, curate and build reproducible robot datasets (MCAP / LeRobot) with lineage for ML workloads. The platform is the product; models are workloads. The current vertical slice accepts only a small synthetic JSON episode, not real robotics data. See [problem](spec/problem.md) and [requirements](spec/requirements.md).
@@ -28,15 +30,16 @@ Python 3.14, uv/uv.lock, just, Ruff, mypy, pytest/pytest-cov, FastAPI/Pydantic, 
 
 **Implemented foundations (current checkout):**
 - FastAPI POST job submission and GET job/episode/health subset; correlation middleware and typed request/response schema.
-- Postgres schema/repository for jobs, artifacts, episodes, and lineage; idempotent submission and atomic queue claim; queue-depth query.
+- Postgres schema/repository for jobs, artifacts, episodes, and lineage; idempotent submission and atomic queue claim; queue-depth query; **job lifecycle** — attempt counting in the claim, `max_attempts` / `deadline_seconds` on submission, cooperative cancel, deadline sweep (ADR 0015).
+- Minimal server-rendered UI at `/ui` (Status / Jobs / Artifacts) with a committed OpenAPI contract and a drift check in `just ci` (ADR 0014).
 - One ingest worker process; atomic SHA-256 filesystem artifact writes; synthetic JSON canonicalization and lineage readback.
 - Unit/contract/E2E tests and Postgres-marked integration tests.
 - JSON log formatter, request/job correlation context, psutil/NVML host telemetry with nullable fallbacks.
-- **Runtime metrics emitted at call sites**: queue depth, queue/run time, stage duration, failures by reason code, episode and artifact counters (`RuntimeMetrics`, JSONL sink configured by `DE_METRICS_PATH`).
+- **Runtime metrics emitted at call sites**: queue depth, queue/run time, stage duration, failures by reason code, retries, cancellations, timeouts, episode and artifact counters (`RuntimeMetrics`, JSONL sink configured by `DE_METRICS_PATH`).
 - Benchmark schema v2, deterministic statistics, provenance capture, and a CLI that validates results and baselines, refuses to publish from a failed run, and fails closed with an actionable message.
 
 **Not implemented or incomplete:**
-- MCAP/LeRobot readers, real-data ingest, validation rules/quarantine, Parquet indexing, LeRobot v3 builds, workload execution, frontend, job retries/leases/timeouts/cancellation/heartbeats, GC, formal DB migrations, and a committed benchmark baseline.
+- MCAP/LeRobot readers, real-data ingest, validation rules/quarantine, Parquet indexing, LeRobot v3 builds, workload execution, the stage-3 UI pages, retry backoff, worker leases/heartbeats, mid-call cancellation, GC, formal DB migrations (schema changes are still inline idempotent DDL plus an `ALTER TABLE` block), and a committed benchmark baseline.
 - `just bench` runs and produces a valid result, then exits 1 because no baseline is committed. That is the intended, awaited state.
 
 See [implementation status](implementation/status.md), [failure modes](testing/failure-modes.md), and [review findings](reviews/2026-09-28-scaffolding.md).

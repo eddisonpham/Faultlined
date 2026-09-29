@@ -9,7 +9,7 @@ from typing import Any
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from data_engine.catalog.repository import IdempotencyConflict
+from data_engine.catalog.repository import IdempotencyConflict, InvalidTransition
 from data_engine.observability.logging import correlation_id_var
 
 logger = logging.getLogger(__name__)
@@ -40,6 +40,20 @@ def install_error_handling(app: FastAPI) -> None:
                 "status": 409,
                 "code": "IDEMPOTENCY_KEY_CONFLICT",
                 "detail": "The idempotency key was already used for a different request.",
+                "correlation_id": correlation_id_var.get(),
+            },
+        )
+
+    @app.exception_handler(InvalidTransition)
+    async def invalid_transition_handler(_request: Request, exc: InvalidTransition) -> JSONResponse:
+        return JSONResponse(
+            status_code=409,
+            content={
+                "type": "about:blank",
+                "title": "Invalid state transition",
+                "status": 409,
+                "code": "INVALID_TRANSITION",
+                "detail": f"The requested transition is not allowed: {exc}",
                 "correlation_id": correlation_id_var.get(),
             },
         )

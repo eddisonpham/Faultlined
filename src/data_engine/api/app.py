@@ -24,7 +24,7 @@ from data_engine.api.schemas import (
 from data_engine.catalog.database import initialize_schema
 from data_engine.catalog.repository import PostgresCatalog
 from data_engine.config import Settings, load_settings
-from data_engine.jobs.state import JobState
+from data_engine.jobs.state import DEFAULT_MAX_ATTEMPTS, JobState
 from data_engine.observability.telemetry import sample_resources
 from data_engine.web import (
     DEFAULT_THEME,
@@ -92,6 +92,8 @@ def _job_summary(row: dict[str, Any]) -> dict[str, Any]:
         "state": row["state"],
         "correlation_id": row["correlation_id"],
         "error": row.get("error"),
+        "attempts": row.get("attempts", 0),
+        "max_attempts": row.get("max_attempts", DEFAULT_MAX_ATTEMPTS),
         "created_at": row["created_at"],
         "started_at": row.get("started_at"),
         "finished_at": row.get("finished_at"),
@@ -161,6 +163,8 @@ def create_app(
             {"episode": body.payload.episode.model_dump(mode="json")},
             idempotency_key,
             correlation_id,
+            max_attempts=body.max_attempts,
+            deadline_seconds=body.deadline_seconds,
         )
         response.headers["X-Correlation-Id"] = correlation_id
         response.headers["X-Idempotent-Replay"] = "false" if created else "true"
@@ -173,6 +177,18 @@ def create_app(
         if row is None:
             raise KeyError(job_id)
         return row
+
+    @app.post("/api/v1/jobs/{job_id}/cancel", response_model=JobResponse)
+    def cancel_job(job_id: str, request: Request) -> dict[str, Any]:
+        """Request cancellation (F7).
+
+        A queued job is canceled immediately; a running job moves to
+        `cancel_requested` and the worker stops it at its next checkpoint. A job that
+        already reached a terminal state cannot be cancelled (409), and an unknown id
+        is a 404.
+        """
+        catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
+        return catalog_for_request.request_cancel(job_id)
 
     @app.get("/api/v1/jobs", response_model=JobListResponse)
     def list_jobs(

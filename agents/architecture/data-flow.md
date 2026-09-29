@@ -118,6 +118,16 @@ State names in the schema: `queued`, `running`, `retrying`, `cancel_requested`, 
 `timed_out` (job-state contract in [../spec/requirements.md](../spec/requirements.md) §4 keeps `queued→canceled` etc.
 compatible).
 
+**Implementation status (ADR 0015).** Implemented: the claim-side `attempts < max_attempts` guard and
+increment, `running → retrying → queued` (immediate, no backoff), `running → failed` when the budget is
+spent, `queued → canceled`, `running → cancel_requested`, `cancel_requested → canceled`, and
+`deadline exceeded → timed_out` both on claim and via a repository sweep. Deferred, with the columns or
+entry points already in place: exponential backoff with jitter on `retrying → queued`, worker leases
+(`worker_id`, `lease_expires_at` exist but nothing writes or reads them yet), and the force-kill grace
+period — a cancel is observed when a running attempt settles, so a single long handler call runs to
+completion. Mid-call cancellation needs checkpoints inside stage handlers, which arrives with the
+validation/index stages.
+
 ## 5. Control flow summary
 
 - **Synchronous path:** HTTP request → API → catalog read/write (CRUD, queries). No pipeline work inline.

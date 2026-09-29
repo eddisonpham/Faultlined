@@ -115,6 +115,17 @@ class RuntimeMetrics:
             "jobs_failures_total", 1, "count", {"job_type": job_type, "reason_code": reason_code}
         )
 
+    def job_retry(self, *, job_type: str, attempt: int) -> None:
+        self._emit(
+            "jobs_retries_total", 1, "count", {"job_type": job_type, "attempt": str(attempt)}
+        )
+
+    def job_cancel(self, *, job_type: str) -> None:
+        self._emit("jobs_cancellations_total", 1, "count", {"job_type": job_type})
+
+    def job_timeout(self, *, job_type: str) -> None:
+        self._emit("jobs_timeouts_total", 1, "count", {"job_type": job_type})
+
     def stage_duration(self, seconds: float, *, stage: str, status: str) -> None:
         self._emit(
             "pipeline_stage_duration_seconds",

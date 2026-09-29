@@ -8,6 +8,7 @@ import pytest
 from data_engine.catalog import database
 from data_engine.catalog.database import initialize_schema
 from data_engine.config import Settings
+from data_engine.jobs.state import DEFAULT_MAX_ATTEMPTS
 
 
 class FakeConnection:
@@ -29,9 +30,38 @@ def test_initialize_schema_executes_each_nonempty_statement() -> None:
     with patch("data_engine.catalog.database.connect", fake_connect):
         initialize_schema()
 
-    assert len(connection.statements) == 5
+    expected = sum(
+        len([s for s in script.split(";") if s.strip()])
+        for script in (database._SCHEMA, database._MIGRATIONS)
+    )
+    assert len(connection.statements) == expected
     assert all(statement.strip() for statement in connection.statements)
     assert "CREATE TABLE IF NOT EXISTS jobs" in connection.statements[0]
+
+
+@pytest.mark.unit
+def test_initialize_schema_adds_lifecycle_columns_to_pre_existing_tables() -> None:
+    """CREATE TABLE IF NOT EXISTS never adds columns, so migrations must be separate."""
+    connection = FakeConnection()
+
+    @contextmanager
+    def fake_connect(_settings: Any = None) -> Iterator[FakeConnection]:
+        yield connection
+
+    with patch("data_engine.catalog.database.connect", fake_connect):
+        initialize_schema()
+
+    migrations = [s for s in connection.statements if s.lstrip().startswith("ALTER TABLE jobs")]
+    columns = " ".join(migrations)
+    for column in ("attempts", "max_attempts", "deadline_at", "worker_id", "lease_expires_at"):
+        assert f"ADD COLUMN IF NOT EXISTS {column}" in columns
+    assert all("IF NOT EXISTS" in statement for statement in migrations)
+
+
+@pytest.mark.unit
+def test_migration_default_matches_the_retry_budget_constant() -> None:
+    """Two sources of truth for the retry budget would silently disagree."""
+    assert f"DEFAULT {DEFAULT_MAX_ATTEMPTS};" in database._MIGRATIONS
 
 
 @pytest.mark.unit
