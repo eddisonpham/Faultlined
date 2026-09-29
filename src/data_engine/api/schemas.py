@@ -113,6 +113,8 @@ class EpisodeSummary(BaseModel):
 
     id: str
     episode_key: str = ""
+    source_hash: str | None = None
+    artifact_hash: str | None = None
     format: str
     state: str
     created_at: Any
@@ -124,6 +126,15 @@ class EpisodeSummary(BaseModel):
 
 
 class EpisodeListResponse(BaseModel):
+    items: list[EpisodeSummary]
+
+
+class EpisodeExportResponse(BaseModel):
+    """Curated episode manifest: content identity, state, and quality per row."""
+
+    generated_at: str
+    filters: dict[str, Any]
+    count: int
     items: list[EpisodeSummary]
 
 

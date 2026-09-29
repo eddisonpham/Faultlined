@@ -135,6 +135,8 @@ class ListingCatalogStub(CatalogStub):
             {
                 "id": "episode-1",
                 "episode_key": "episode_index=0",
+                "source_hash": "a" * 64,
+                "artifact_hash": "b" * 64,
                 "format": "lerobot-v3",
                 "state": "valid",
                 "created_at": "2026-09-28T00:00:00Z",
@@ -168,6 +170,8 @@ class ListingCatalogStub(CatalogStub):
             {
                 "id": "episode-1",
                 "episode_key": "episode_index=0",
+                "source_hash": "a" * 64,
+                "artifact_hash": "b" * 64,
                 "format": "lerobot-v3",
                 "state": "valid",
                 "created_at": "2026-09-28T00:00:00Z",
@@ -421,6 +425,29 @@ def test_job_report_summarizes_a_run() -> None:
 @pytest.mark.contract
 def test_job_report_unknown_job_is_404() -> None:
     assert _ui_client().get("/api/v1/jobs/missing/report").status_code == 404
+
+
+@pytest.mark.contract
+def test_episode_export_returns_a_curated_manifest() -> None:
+    body = _ui_client().get("/api/v1/episodes/export").json()
+    assert body["count"] == 1
+    assert body["filters"] == {"state": None, "flag": None, "limit": 100}
+    item = body["items"][0]
+    assert item["id"] == "episode-1"
+    assert item["source_hash"] == "a" * 64
+    assert item["artifact_hash"] == "b" * 64
+    assert item["verdict"] == "smooth"
+
+
+@pytest.mark.contract
+def test_episode_export_filters_and_rejects_bad_input() -> None:
+    client = _ui_client()
+    empty = client.get("/api/v1/episodes/export?flag=jerky").json()
+    assert empty["count"] == 0
+    assert empty["items"] == []
+    assert client.get("/api/v1/episodes/export?state=nonsense").status_code == 422
+    assert client.get("/api/v1/episodes/export?limit=0").status_code == 422
+    assert client.get("/api/v1/episodes/export?limit=501").status_code == 422
 
 
 @pytest.mark.contract

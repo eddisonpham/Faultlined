@@ -633,6 +633,16 @@ def _api_episodes_benchmark(*, trials: int = 10, warmups: int = 3) -> BenchmarkR
     )
 
 
+def _api_episodes_export_benchmark(*, trials: int = 10, warmups: int = 3) -> BenchmarkResult:
+    return _client_benchmark(
+        name="api-episodes-export",
+        path="/api/v1/episodes/export?limit=50",
+        dataset="synthetic-catalog-50e-v1",
+        trials=trials,
+        warmups=warmups,
+    )
+
+
 def _api_job_report_benchmark(*, trials: int = 10, warmups: int = 3) -> BenchmarkResult:
     return _client_benchmark(
         name="api-job-report",
@@ -709,6 +719,7 @@ WORKLOADS: dict[str, Callable[[], BenchmarkResult | None]] = {
     "api-episodes-catalog": lambda: _api_episodes_benchmark(),
     "api-episode-validation": lambda: _api_validation_benchmark(),
     "api-job-report": lambda: _api_job_report_benchmark(),
+    "api-episodes-export": lambda: _api_episodes_export_benchmark(),
     "ui-insights-page": lambda: _ui_insights_benchmark(),
     "lerobot-ingest-v3": lambda: _lerobot_benchmark(),
 }

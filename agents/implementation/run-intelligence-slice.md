@@ -116,6 +116,9 @@ UI neatness. These extend the API and UI with run-inspection queries over data t
   summary, mean movement/jerk/stall), how validation judged it (passed/failed, reason-code frequencies),
   shown on the job page as a Run report section. Latency-tested as `api-job-report`
   (p50 6.7 ms / p95 9.5 ms).
+- `GET /api/v1/episodes/export` — curated manifest for curation and dataset builds: the catalog views plus
+  content identity (source/artifact hashes) and provenance envelope. Latency-tested as `api-episodes-export`
+  (p50 6.9 ms / p95 7.7 ms).
 - UI: the episode inspector gains a validation section (per-profile verdict badges, reason codes, violation
   list); the job detail page gains a produced-episodes section.
 - Latency-tested alongside the rest: `api-episodes-catalog` (p50 6.9 ms / p95 8.5 ms) and

@@ -72,6 +72,7 @@ def test_workload_registry_covers_the_backlog() -> None:
         "api-episodes-catalog",
         "api-episode-validation",
         "api-job-report",
+        "api-episodes-export",
         "ui-insights-page",
         "lerobot-ingest-v3",
     }

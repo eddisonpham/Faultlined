@@ -352,6 +352,7 @@ def test_lineage_and_validation_are_queryable_after_the_run(
     produced = catalog.episodes_produced_by(job["id"])
     assert [row["id"] for row in produced] == [episode_id]
     assert produced[0]["episode_key"] == "episode_index=7"
+    assert produced[0]["source_hash"] and produced[0]["artifact_hash"]
     assert catalog.episodes_produced_by("no-such-job") == []
 
     profile_name = f"lineage-strict-{uuid.uuid4()}"
@@ -380,3 +381,6 @@ def test_lineage_and_validation_are_queryable_after_the_run(
     assert report["validation"]["failed"] >= 1
     assert "TOO_FEW_FRAMES" in report["validation"]["reason_codes"]
     assert catalog.job_report("no-such-job") is None
+
+    rows = catalog.list_episodes(limit=500, state="quarantined")
+    assert any(row["id"] == episode_id and row["artifact_hash"] for row in rows)

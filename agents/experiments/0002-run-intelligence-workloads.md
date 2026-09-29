@@ -99,7 +99,8 @@ with violations) P50 5.718 ms / P95 7.027 ms. Both 0/10 failures. Raw results un
 
 Same procedure (isolated process, 3 warmups, 10 trials, in-process TestClient + stub
 catalog): `api-job-report` (run triage card over 50 produced episodes) P50 6.692 ms /
-P95 9.492 ms, 0/10 failures.
+P95 9.492 ms, 0/10 failures. Later the same day, `api-episodes-export` (50-row curated
+manifest with content identity) P50 6.922 ms / P95 7.722 ms, 0/10 failures.
 
 ## Follow-ups
 

@@ -55,6 +55,39 @@
         "title": "ArtifactSummary",
         "type": "object"
       },
+      "EpisodeExportResponse": {
+        "description": "Curated episode manifest: content identity, state, and quality per row.",
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "filters": {
+            "additionalProperties": true,
+            "title": "Filters",
+            "type": "object"
+          },
+          "generated_at": {
+            "title": "Generated At",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/EpisodeSummary"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "generated_at",
+          "filters",
+          "count",
+          "items"
+        ],
+        "title": "EpisodeExportResponse",
+        "type": "object"
+      },
       "EpisodeListResponse": {
         "properties": {
           "items": {
@@ -189,6 +222,17 @@
       "EpisodeSummary": {
         "description": "Row in the episodes catalog; quality columns are null pre-analysis.",
         "properties": {
+          "artifact_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Artifact Hash"
+          },
           "created_at": {
             "title": "Created At"
           },
@@ -237,6 +281,17 @@
               }
             ],
             "title": "Movement Score"
+          },
+          "source_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Hash"
           },
           "stall_ratio": {
             "anyOf": [
@@ -1385,6 +1440,79 @@
           }
         },
         "summary": "List Episodes Api"
+      }
+    },
+    "/api/v1/episodes/export": {
+      "get": {
+        "description": "Curated manifest for curation and dataset builds.\n\nThe same curation views as the catalog listing plus content identity\n(source/artifact hashes). Registered before `/api/v1/episodes/{episode_id}`\nso `export` is never read as an episode id.",
+        "operationId": "export_episodes_api_api_v1_episodes_export_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "state",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "State"
+            }
+          },
+          {
+            "in": "query",
+            "name": "flag",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Flag"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EpisodeExportResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Export Episodes Api"
       }
     },
     "/api/v1/episodes/{episode_id}": {

@@ -579,7 +579,8 @@ class PostgresCatalog:
         """Episodes registered by one job, following the reverse lineage edge."""
         with connect(self.settings) as connection:
             rows = connection.execute(
-                """SELECT e.id, e.episode_key, e.format, e.state, e.created_at
+                """SELECT e.id, e.episode_key, e.source_hash, e.artifact_hash,
+                          e.format, e.state, e.created_at
                    FROM lineage_edges l
                    JOIN episodes e ON e.id = l.from_ref
                    WHERE l.from_type = 'episode' AND l.to_type = 'job'
@@ -717,7 +718,8 @@ class PostgresCatalog:
         clause = " WHERE " + " AND ".join(where) if where else ""
         with connect(self.settings) as connection:
             rows = connection.execute(
-                f"""SELECT e.id, e.episode_key, e.format, e.state, e.created_at,
+                f"""SELECT e.id, e.episode_key, e.source_hash, e.artifact_hash,
+                           e.format, e.state, e.created_at,
                            q.frame_count, q.movement_score, q.jerk_score,
                            q.stall_ratio, q.verdict
                     FROM episodes e LEFT JOIN episode_quality q ON q.episode_id = e.id

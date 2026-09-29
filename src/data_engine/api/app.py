@@ -17,6 +17,7 @@ from data_engine.api.errors import install_error_handling
 from data_engine.api.schemas import (
     AnyJobRequest,
     ArtifactListResponse,
+    EpisodeExportResponse,
     EpisodeListResponse,
     EpisodeQualityResponse,
     EpisodeResponse,
@@ -533,6 +534,36 @@ def create_app(
             "items": catalog_for_request.list_episodes(
                 limit=limit, state=state or None, flag=flag or None
             )
+        }
+
+    @app.get("/api/v1/episodes/export", response_model=EpisodeExportResponse)
+    def export_episodes_api(
+        request: Request,
+        state: str | None = None,
+        flag: str | None = None,
+        limit: int = 100,
+    ) -> dict[str, Any]:
+        """Curated manifest for curation and dataset builds.
+
+        The same curation views as the catalog listing plus content identity
+        (source/artifact hashes). Registered before `/api/v1/episodes/{episode_id}`
+        so `export` is never read as an episode id.
+        """
+        if state is not None and state not in EPISODE_STATES:
+            raise HTTPException(status_code=422, detail=f"unknown episode state: {state}")
+        if flag is not None and flag not in EPISODE_FLAGS:
+            raise HTTPException(status_code=422, detail=f"unknown flag: {flag}")
+        if limit < 1 or limit > 500:
+            raise HTTPException(status_code=422, detail="limit must be between 1 and 500")
+        catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
+        items = catalog_for_request.list_episodes(
+            limit=limit, state=state or None, flag=flag or None
+        )
+        return {
+            "generated_at": datetime.now(UTC).isoformat(),
+            "filters": {"state": state, "flag": flag, "limit": limit},
+            "count": len(items),
+            "items": items,
         }
 
     @app.get("/api/v1/episodes/{episode_id}", response_model=EpisodeResponse)
