@@ -15,6 +15,10 @@ Planned metrics and workloads. One baseline is committed (B-001, [EXP-0001](../e
 | B-009 | Startup time | What is cold/warm API and worker startup cost on the local host? | Startup latency, CPU/RAM | Not implemented |
 | B-010 | Resource efficiency / optional GPU workload | What resources are consumed per episode or workload, and is optional GPU telemetry useful? | Episodes/core-second, episodes/GPU-hour when relevant, RAM/VRAM, utilization | Host telemetry snapshot exists; no GPU workload or efficiency benchmark |
 | B-011 | Network I/O / transfer cost | What is the cost of remote dataset fetch/storage when that path is introduced? | Bytes/s, transfer latency, failures, cost per episode | Deferred; local-only path has no remote transfer |
+| B-012 | Validation evaluation latency | What does a 7-rule profile evaluation cost per stored episode? | Latency P50/P95/P99 vs frames/channels, CPU/RAM | Planned in run-intelligence slice |
+| B-013 | Episode quality analysis latency | What does computing movement/jerk/stall/length signals cost vs frame count? | Latency percentiles vs frames (100–3000), throughput episodes/s | Planned in run-intelligence slice |
+| B-014 | API/UI endpoint latency | What is p50/p95/p99 per endpoint (incl. `/api/v1/metrics`, `/api/v1/quality/summary`, UI TTFB)? | Latency percentiles per route, payload sizes | Planned in run-intelligence slice |
+| B-015 | Metrics aggregation throughput | Can the JSONL summarizer keep up with a busy worker's emissions? | Records/s, latency vs record count, memory | Planned in run-intelligence slice |
 
 ## Current harness boundaries
 
