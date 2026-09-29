@@ -164,6 +164,37 @@ class JobListResponse(BaseModel):
     next_before: Any | None = None
 
 
+class JobReportEpisodes(BaseModel):
+    """State and motion-quality rollup of the episodes one run produced."""
+
+    total: int
+    by_state: dict[str, int]
+    verdicts: dict[str, int]
+    flags: dict[str, int]
+    length: dict[str, Any]
+    mean_movement_score: float
+    mean_jerk_score: float
+    mean_stall_ratio: float
+
+
+class JobReportValidation(BaseModel):
+    """Validation verdicts over the episodes one run produced."""
+
+    episodes_evaluated: int
+    results: int
+    passed: int
+    failed: int
+    reason_codes: dict[str, int]
+
+
+class JobReportResponse(BaseModel):
+    """Run triage card: what a job produced, how it validates, how it moves."""
+
+    job: JobSummary
+    episodes: JobReportEpisodes
+    validation: JobReportValidation
+
+
 class ArtifactSummary(BaseModel):
     hash: str
     size_bytes: int

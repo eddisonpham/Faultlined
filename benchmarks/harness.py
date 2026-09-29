@@ -506,6 +506,47 @@ class _BenchApiCatalog:
     def get_episode(self, episode_id: str) -> dict[str, Any] | None:
         return {"id": episode_id, "metadata": {}, "state": "valid"}
 
+    def job_report(self, _job_id: str) -> dict[str, Any]:
+        return {
+            "job": {
+                "id": "job-1",
+                "type": "ingest",
+                "state": "succeeded",
+                "payload": {},
+                "result": None,
+                "error": None,
+                "correlation_id": "corr-1",
+                "attempts": 1,
+                "created_at": "2026-09-29T00:00:00Z",
+                "started_at": None,
+                "finished_at": None,
+            },
+            "episodes": {
+                "total": 50,
+                "by_state": {"valid": 45, "quarantined": 5},
+                "verdicts": {"smooth": 30, "moderate": 15, "jerky": 5},
+                "flags": {"jerky": 5, "stalled": 3},
+                "length": {
+                    "count": 50,
+                    "mean": 300.0,
+                    "std": 80.0,
+                    "min": 200,
+                    "max": 420,
+                    "histogram": [],
+                },
+                "mean_movement_score": 0.04,
+                "mean_jerk_score": 0.01,
+                "mean_stall_ratio": 0.1,
+            },
+            "validation": {
+                "episodes_evaluated": 50,
+                "results": 50,
+                "passed": 45,
+                "failed": 5,
+                "reason_codes": {"TOO_FEW_FRAMES": 5},
+            },
+        }
+
     def get_validation_results(self, _episode_id: str) -> list[dict[str, Any]]:
         return [
             {
@@ -592,6 +633,16 @@ def _api_episodes_benchmark(*, trials: int = 10, warmups: int = 3) -> BenchmarkR
     )
 
 
+def _api_job_report_benchmark(*, trials: int = 10, warmups: int = 3) -> BenchmarkResult:
+    return _client_benchmark(
+        name="api-job-report",
+        path="/api/v1/jobs/job-1/report",
+        dataset="synthetic-run-report-50e-v1",
+        trials=trials,
+        warmups=warmups,
+    )
+
+
 def _api_validation_benchmark(*, trials: int = 10, warmups: int = 3) -> BenchmarkResult:
     return _client_benchmark(
         name="api-episode-validation",
@@ -657,6 +708,7 @@ WORKLOADS: dict[str, Callable[[], BenchmarkResult | None]] = {
     "api-metrics-endpoint": lambda: _api_metrics_benchmark(),
     "api-episodes-catalog": lambda: _api_episodes_benchmark(),
     "api-episode-validation": lambda: _api_validation_benchmark(),
+    "api-job-report": lambda: _api_job_report_benchmark(),
     "ui-insights-page": lambda: _ui_insights_benchmark(),
     "lerobot-ingest-v3": lambda: _lerobot_benchmark(),
 }

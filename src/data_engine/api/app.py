@@ -22,6 +22,7 @@ from data_engine.api.schemas import (
     EpisodeResponse,
     EpisodeValidationResponse,
     JobListResponse,
+    JobReportResponse,
     JobResponse,
     MetricsResponse,
     QualitySummaryResponse,
@@ -278,6 +279,16 @@ def create_app(
             raise KeyError(job_id)
         return {"items": catalog_for_request.episodes_produced_by(job_id)}
 
+    @app.get("/api/v1/jobs/{job_id}/report", response_model=JobReportResponse)
+    def get_job_report(job_id: str, request: Request) -> dict[str, Any]:
+        """Run triage card: what the run produced, how validation judged it, motion quality."""
+        catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
+        report = catalog_for_request.job_report(job_id)
+        if report is None:
+            raise KeyError(job_id)
+        report["job"] = _job_summary(report["job"])
+        return report
+
     @app.post("/api/v1/jobs/{job_id}/cancel", response_model=JobResponse)
     def cancel_job(job_id: str, request: Request) -> dict[str, Any]:
         """Request cancellation (F7).
@@ -400,7 +411,8 @@ def create_app(
                 status_code=404,
             )
         produced = catalog_for_request.episodes_produced_by(job_id)
-        return HTMLResponse(job_detail_page(job, _theme(theme), produced))
+        report = catalog_for_request.job_report(job_id)
+        return HTMLResponse(job_detail_page(job, _theme(theme), produced, report))
 
     @app.post("/ui/jobs/{job_id}/cancel")
     def ui_cancel_job(job_id: str, request: Request, theme: str | None = None) -> RedirectResponse:

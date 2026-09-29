@@ -492,8 +492,68 @@ def _produced_section(episodes: list[dict[str, Any]] | None) -> str:
     )
 
 
+def _report_section(report: dict[str, Any] | None) -> str:
+    """Triage readout for one run: what it produced, how it validates, how it moves."""
+    if not report:
+        return ""
+    episodes = report.get("episodes") or {}
+    validation = report.get("validation") or {}
+    by_state = episodes.get("by_state") or {}
+    verdicts = episodes.get("verdicts") or {}
+    flags = episodes.get("flags") or {}
+    codes = validation.get("reason_codes") or {}
+    facts = [
+        ("episodes", str(int(episodes.get("total", 0)))),
+        (
+            "states",
+            " ".join(
+                f"{_state_badge(str(k))} &times; {int(v)}" for k, v in sorted(by_state.items())
+            )
+            or "-",
+        ),
+        (
+            "verdicts",
+            " ".join(
+                f"{_verdict_badge(str(k))} &times; {int(v)}" for k, v in sorted(verdicts.items())
+            )
+            or "not analyzed",
+        ),
+        (
+            "flags",
+            f"jerky {int(flags.get('jerky', 0))} // stalled {int(flags.get('stalled', 0))}",
+        ),
+        (
+            "motion",
+            f"movement {_score(episodes.get('mean_movement_score'))}"
+            f" // jerk {_score(episodes.get('mean_jerk_score'))}"
+            f" // stall {_score(episodes.get('mean_stall_ratio'))}",
+        ),
+        (
+            "validation",
+            f"{int(validation.get('passed', 0))} passed"
+            f" // {int(validation.get('failed', 0))} failed"
+            f" over {int(validation.get('results', 0))} results",
+        ),
+        (
+            "reason codes",
+            " ".join(
+                f"<code>{escape(str(k))} &times; {int(v)}</code>" for k, v in sorted(codes.items())
+            )
+            or "-",
+        ),
+    ]
+    return (
+        '<section class="de-section"><h2>Run report</h2><dl class="de-kv">'
+        + "".join(f"<dt>{k}</dt><dd>{v}</dd>" for k, v in facts)
+        + "</dl></section>"
+    )
+
+
 def job_detail_page(
-    job: dict[str, Any], theme: str, produced: list[dict[str, Any]] | None = None
+    job: dict[str, Any],
+    theme: str,
+    produced: list[dict[str, Any]] | None = None,
+    report: dict[str, Any] | None = None,
 ) -> str:
     state = str(job.get("state"))
     facts = [
@@ -527,6 +587,7 @@ def job_detail_page(
             '<section class="de-section"><h2>Error</h2>'
             f'<pre class="de-json">{escape(_pretty(job["error"]))}</pre></section>'
         )
+    blocks.append(_report_section(report))
     blocks.append(_produced_section(produced))
     episode = (job.get("result") or {}).get("episode_id")
     if episode:

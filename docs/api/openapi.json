@@ -345,6 +345,123 @@
         "title": "JobListResponse",
         "type": "object"
       },
+      "JobReportEpisodes": {
+        "description": "State and motion-quality rollup of the episodes one run produced.",
+        "properties": {
+          "by_state": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "By State",
+            "type": "object"
+          },
+          "flags": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Flags",
+            "type": "object"
+          },
+          "length": {
+            "additionalProperties": true,
+            "title": "Length",
+            "type": "object"
+          },
+          "mean_jerk_score": {
+            "title": "Mean Jerk Score",
+            "type": "number"
+          },
+          "mean_movement_score": {
+            "title": "Mean Movement Score",
+            "type": "number"
+          },
+          "mean_stall_ratio": {
+            "title": "Mean Stall Ratio",
+            "type": "number"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          },
+          "verdicts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Verdicts",
+            "type": "object"
+          }
+        },
+        "required": [
+          "total",
+          "by_state",
+          "verdicts",
+          "flags",
+          "length",
+          "mean_movement_score",
+          "mean_jerk_score",
+          "mean_stall_ratio"
+        ],
+        "title": "JobReportEpisodes",
+        "type": "object"
+      },
+      "JobReportResponse": {
+        "description": "Run triage card: what a job produced, how it validates, how it moves.",
+        "properties": {
+          "episodes": {
+            "$ref": "#/components/schemas/JobReportEpisodes"
+          },
+          "job": {
+            "$ref": "#/components/schemas/JobSummary"
+          },
+          "validation": {
+            "$ref": "#/components/schemas/JobReportValidation"
+          }
+        },
+        "required": [
+          "job",
+          "episodes",
+          "validation"
+        ],
+        "title": "JobReportResponse",
+        "type": "object"
+      },
+      "JobReportValidation": {
+        "description": "Validation verdicts over the episodes one run produced.",
+        "properties": {
+          "episodes_evaluated": {
+            "title": "Episodes Evaluated",
+            "type": "integer"
+          },
+          "failed": {
+            "title": "Failed",
+            "type": "integer"
+          },
+          "passed": {
+            "title": "Passed",
+            "type": "integer"
+          },
+          "reason_codes": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Reason Codes",
+            "type": "object"
+          },
+          "results": {
+            "title": "Results",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "episodes_evaluated",
+          "results",
+          "passed",
+          "failed",
+          "reason_codes"
+        ],
+        "title": "JobReportValidation",
+        "type": "object"
+      },
       "JobResponse": {
         "properties": {
           "attempts": {
@@ -1680,6 +1797,46 @@
           }
         },
         "summary": "List Job Episodes"
+      }
+    },
+    "/api/v1/jobs/{job_id}/report": {
+      "get": {
+        "description": "Run triage card: what the run produced, how validation judged it, motion quality.",
+        "operationId": "get_job_report_api_v1_jobs__job_id__report_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobReportResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Job Report"
       }
     },
     "/api/v1/metrics": {

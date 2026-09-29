@@ -521,3 +521,35 @@ def test_job_detail_renders_produced_episodes_with_links() -> None:
 
     empty = job_detail_page(job, DEFAULT_THEME, [])
     assert "has not registered episodes" in empty
+
+
+@pytest.mark.unit
+def test_job_detail_renders_the_run_report() -> None:
+    job = {"id": "j-1", "type": "ingest", "state": "succeeded"}
+    report = {
+        "job": job,
+        "episodes": {
+            "total": 2,
+            "by_state": {"valid": 1, "quarantined": 1},
+            "verdicts": {"smooth": 1, "jerky": 1},
+            "flags": {"jerky": 1, "stalled": 0},
+            "length": {"count": 2},
+            "mean_movement_score": 0.04,
+            "mean_jerk_score": 0.01,
+            "mean_stall_ratio": 0.1,
+        },
+        "validation": {
+            "episodes_evaluated": 1,
+            "results": 2,
+            "passed": 1,
+            "failed": 1,
+            "reason_codes": {"TOO_FEW_FRAMES": 1},
+        },
+    }
+    html = job_detail_page(job, DEFAULT_THEME, [], report)
+    assert "Run report" in html
+    assert "TOO_FEW_FRAMES &times; 1" in html
+    assert "1 passed // 1 failed over 2 results" in html
+
+    without = job_detail_page(job, DEFAULT_THEME, [])
+    assert "Run report" not in without

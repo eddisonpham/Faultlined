@@ -371,3 +371,12 @@ def test_lineage_and_validation_are_queryable_after_the_run(
     assert results[0]["passed"] is False
     assert "TOO_FEW_FRAMES" in results[0]["reason_codes"]
     assert catalog.get_episode(episode_id)["state"] == "quarantined"
+
+    report = catalog.job_report(job["id"])
+    assert report is not None
+    assert report["episodes"]["total"] == 1
+    assert report["episodes"]["by_state"].get("quarantined") == 1
+    assert report["episodes"]["verdicts"]
+    assert report["validation"]["failed"] >= 1
+    assert "TOO_FEW_FRAMES" in report["validation"]["reason_codes"]
+    assert catalog.job_report("no-such-job") is None

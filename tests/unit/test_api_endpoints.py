@@ -179,6 +179,48 @@ class ListingCatalogStub(CatalogStub):
             }
         ]
 
+    def job_report(self, job_id: str) -> dict[str, Any] | None:
+        if job_id != "job-1":
+            return None
+        return {
+            "job": {
+                "id": "job-1",
+                "type": "ingest",
+                "state": "succeeded",
+                "payload": {},
+                "result": None,
+                "error": None,
+                "correlation_id": "corr-1",
+                "created_at": "2026-09-28T00:00:00Z",
+                "started_at": None,
+                "finished_at": None,
+            },
+            "episodes": {
+                "total": 1,
+                "by_state": {"valid": 1},
+                "verdicts": {"smooth": 1},
+                "flags": {"jerky": 0, "stalled": 0},
+                "length": {
+                    "count": 1,
+                    "mean": 303.0,
+                    "std": 0.0,
+                    "min": 303,
+                    "max": 303,
+                    "histogram": [],
+                },
+                "mean_movement_score": 0.04,
+                "mean_jerk_score": 0.01,
+                "mean_stall_ratio": 0.1,
+            },
+            "validation": {
+                "episodes_evaluated": 1,
+                "results": 1,
+                "passed": 0,
+                "failed": 1,
+                "reason_codes": {"frame_count": 1},
+            },
+        }
+
     def get_episode_quality(self, episode_id: str) -> dict[str, Any] | None:
         return {
             "episode_id": episode_id,
@@ -366,6 +408,22 @@ def test_job_episodes_unknown_job_is_404() -> None:
 
 
 @pytest.mark.contract
+def test_job_report_summarizes_a_run() -> None:
+    body = _ui_client().get("/api/v1/jobs/job-1/report").json()
+    assert body["job"]["id"] == "job-1"
+    assert body["episodes"]["total"] == 1
+    assert body["episodes"]["verdicts"] == {"smooth": 1}
+    assert body["episodes"]["mean_jerk_score"] == 0.01
+    assert body["validation"]["failed"] == 1
+    assert body["validation"]["reason_codes"] == {"frame_count": 1}
+
+
+@pytest.mark.contract
+def test_job_report_unknown_job_is_404() -> None:
+    assert _ui_client().get("/api/v1/jobs/missing/report").status_code == 404
+
+
+@pytest.mark.contract
 def test_status_endpoint_reports_queue_depth_and_resources() -> None:
     body = _ui_client().get("/api/v1/status").json()
     assert body["status"] == "ok"
@@ -408,6 +466,14 @@ def test_ui_job_detail_lists_produced_episodes() -> None:
     text = _ui_client().get("/ui/jobs/job-1").text
     assert "Produced episodes" in text
     assert "/ui/episodes/episode-1" in text
+
+
+@pytest.mark.contract
+def test_ui_job_detail_shows_the_run_report() -> None:
+    text = _ui_client().get("/ui/jobs/job-1").text
+    assert "Run report" in text
+    assert "0 passed // 1 failed" in text
+    assert "frame_count &times; 1" in text
 
 
 @pytest.mark.contract

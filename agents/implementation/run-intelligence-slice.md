@@ -112,6 +112,10 @@ UI neatness. These extend the API and UI with run-inspection queries over data t
   (`ViolationCode` values, not rule names), the "why was this quarantined" answer.
 - `GET /api/v1/jobs/{id}/episodes` — reverse lineage: episodes produced by a job (`episodes_produced_by`),
   closing the run → output inspection loop.
+- `GET /api/v1/jobs/{id}/report` — run triage card: what the run produced (state/verdict/flag counts, length
+  summary, mean movement/jerk/stall), how validation judged it (passed/failed, reason-code frequencies),
+  shown on the job page as a Run report section. Latency-tested as `api-job-report`
+  (p50 6.7 ms / p95 9.5 ms).
 - UI: the episode inspector gains a validation section (per-profile verdict badges, reason codes, violation
   list); the job detail page gains a produced-episodes section.
 - Latency-tested alongside the rest: `api-episodes-catalog` (p50 6.9 ms / p95 8.5 ms) and

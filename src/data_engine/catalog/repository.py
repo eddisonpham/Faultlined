@@ -6,7 +6,7 @@ import functools
 import hashlib
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
@@ -138,6 +138,58 @@ def _assemble_quality_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _assemble_job_report(
+    job: dict[str, Any], episodes: list[dict[str, Any]], validations: list[dict[str, Any]]
+) -> dict[str, Any]:
+    """Fold one run's produced episodes and verdicts into a triage report."""
+    states: dict[str, int] = {}
+    verdicts: dict[str, int] = {}
+    flags = {"jerky": 0, "stalled": 0}
+    for row in episodes:
+        states[row["state"]] = states.get(row["state"], 0) + 1
+        verdict = row.get("verdict")
+        if verdict:
+            verdicts[str(verdict)] = verdicts.get(str(verdict), 0) + 1
+            if verdict == "jerky":
+                flags["jerky"] += 1
+        if row.get("stall_ratio") is not None and float(row["stall_ratio"]) >= 0.5:
+            flags["stalled"] += 1
+
+    reason_codes: dict[str, int] = {}
+    evaluated: set[str] = set()
+    passed = 0
+    for result in validations:
+        evaluated.add(str(result["episode_id"]))
+        if result["passed"]:
+            passed += 1
+        for code in result.get("reason_codes") or []:
+            reason_codes[str(code)] = reason_codes.get(str(code), 0) + 1
+
+    scored = [row for row in episodes if row.get("movement_score") is not None]
+    return {
+        "job": job,
+        "episodes": {
+            "total": len(episodes),
+            "by_state": states,
+            "verdicts": verdicts,
+            "flags": flags,
+            "length": _length_summary(
+                [int(row["frame_count"]) for row in scored if row.get("frame_count") is not None]
+            ),
+            "mean_movement_score": _mean([float(row["movement_score"]) for row in scored]),
+            "mean_jerk_score": _mean([float(row["jerk_score"]) for row in scored]),
+            "mean_stall_ratio": _mean([float(row["stall_ratio"]) for row in scored]),
+        },
+        "validation": {
+            "episodes_evaluated": len(evaluated),
+            "results": len(validations),
+            "passed": passed,
+            "failed": len(validations) - passed,
+            "reason_codes": reason_codes,
+        },
+    }
+
+
 def _length_summary(lengths: list[int]) -> dict[str, Any]:
     if not lengths:
         return {"count": 0, "mean": 0.0, "std": 0.0, "min": 0, "max": 0, "histogram": []}
@@ -161,11 +213,11 @@ def _length_summary(lengths: list[int]) -> dict[str, Any]:
     }
 
 
-def _mean(values: list[int]) -> float:
+def _mean(values: Sequence[float]) -> float:
     return sum(values) / len(values) if values else 0.0
 
 
-def _std(values: list[int]) -> float:
+def _std(values: Sequence[float]) -> float:
     if len(values) < 2:
         return 0.0
     mean = _mean(values)
@@ -536,6 +588,37 @@ class PostgresCatalog:
                 (job_id,),
             ).fetchall()
         return [dict(row) for row in rows]
+
+    def job_report(self, job_id: str) -> dict[str, Any] | None:
+        """Triage report for one run: outputs, quality rollup, verdict counts."""
+        with connect(self.settings) as connection:
+            job = connection.execute("SELECT * FROM jobs WHERE id = %s", (job_id,)).fetchone()
+            if job is None:
+                return None
+            episodes = connection.execute(
+                """SELECT e.id, e.state, q.frame_count, q.movement_score,
+                          q.jerk_score, q.stall_ratio, q.verdict
+                   FROM lineage_edges l
+                   JOIN episodes e ON e.id = l.from_ref
+                   LEFT JOIN episode_quality q ON q.episode_id = e.id
+                   WHERE l.from_type = 'episode' AND l.to_type = 'job'
+                     AND l.to_ref = %s AND l.relation = 'produced_by'
+                   ORDER BY e.created_at""",
+                (job_id,),
+            ).fetchall()
+            validations = connection.execute(
+                """SELECT v.episode_id, v.passed, v.reason_codes
+                   FROM validation_results v
+                   WHERE v.episode_id IN (
+                       SELECT l.from_ref FROM lineage_edges l
+                       WHERE l.from_type = 'episode' AND l.to_type = 'job'
+                         AND l.to_ref = %s AND l.relation = 'produced_by')
+                   ORDER BY v.id""",
+                (job_id,),
+            ).fetchall()
+        return _assemble_job_report(
+            dict(job), [dict(row) for row in episodes], [dict(row) for row in validations]
+        )
 
     def record_episode_quality(self, episode_id: str, quality: dict[str, Any]) -> dict[str, Any]:
         """Persist the motion-quality summary computed at ingest (ADR 0018).

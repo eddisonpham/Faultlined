@@ -117,6 +117,7 @@ Added for the Status / Jobs / Artifacts pages; all are read-only, cursor-paginat
 | GET | `/api/v1/episodes` | Episode catalog with the same curation views as the UI: filters `state` (ingested/valid/quarantined), `flag` (jerky/stalled/short/long), `limit` (1–500). Rows carry the quality columns for ranking. |
 | GET | `/api/v1/episodes/{episode_id}/validation` | Validation verdicts per profile (ADR 0016): passed flag, reason codes, and full violations — why an episode passed or was quarantined. 404 for unknown episodes. |
 | GET | `/api/v1/jobs/{job_id}/episodes` | Episodes a job produced, following the `produced_by` lineage edge (run inspection). 404 for unknown jobs. |
+| GET | `/api/v1/jobs/{job_id}/report` | Run triage card: job summary + rollup of the episodes it produced (state/verdict/flag counts, length summary, mean movement/jerk/stall) + validation verdict counts with reason-code frequencies over those episodes. 404 for unknown jobs. |
 | GET | `/api/v1/episodes/{episode_id}/quality` | Motion-quality signals computed at ingest (ADR 0018): movement score, normalized jerk, stall ratio, per-dim activity, verdict, and a read-time length z-score. 404 for episodes ingested before quality existed. |
 | GET | `/api/v1/quality/summary` | Dataset-level curation view: episode-length histogram, speed distribution, cross-episode per-dim σ matrix, and top jerk / stall / length outliers with episode links. |
 
