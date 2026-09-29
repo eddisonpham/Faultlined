@@ -468,7 +468,33 @@ def _cancel_action(job: dict[str, Any], theme: str) -> str:
     )
 
 
-def job_detail_page(job: dict[str, Any], theme: str) -> str:
+def _produced_section(episodes: list[dict[str, Any]] | None) -> str:
+    if not episodes:
+        return (
+            '<section class="de-section"><h2>Produced episodes</h2>'
+            '<p class="de-sub text-comment">// this job has not registered episodes</p></section>'
+        )
+    rows = "".join(
+        "<tr>"
+        f'<td><a href="/ui/episodes/{escape(str(e.get("id")))}">'
+        f"<code>{escape(str(e.get('id'))[:12])}</code></a></td>"
+        f"<td>{escape(str(e.get('episode_key') or '-'))}</td>"
+        f"<td>{escape(str(e.get('format') or '-'))}</td>"
+        f"<td>{_state_badge(str(e.get('state') or 'ingested'))}</td>"
+        f"<td>{_when(e.get('created_at'))}</td>"
+        "</tr>"
+        for e in episodes
+    )
+    return (
+        '<section class="de-section"><h2>Produced episodes</h2>'
+        '<table class="de-table"><thead><tr><th>Episode</th><th>Key</th>'
+        f"<th>Format</th><th>State</th><th>Registered</th></tr></thead><tbody>{rows}</tbody></table></section>"
+    )
+
+
+def job_detail_page(
+    job: dict[str, Any], theme: str, produced: list[dict[str, Any]] | None = None
+) -> str:
     state = str(job.get("state"))
     facts = [
         ("job id", escape(str(job.get("id")))),
@@ -501,6 +527,7 @@ def job_detail_page(job: dict[str, Any], theme: str) -> str:
             '<section class="de-section"><h2>Error</h2>'
             f'<pre class="de-json">{escape(_pretty(job["error"]))}</pre></section>'
         )
+    blocks.append(_produced_section(produced))
     episode = (job.get("result") or {}).get("episode_id")
     if episode:
         link = f"/api/v1/episodes/{escape(str(episode))}"
@@ -795,7 +822,59 @@ def _bounded(value: Any, ceiling: float = 1.0) -> float:
 # ---------------------------------------------------------------- episode detail
 
 
-def episode_detail_page(episode: dict[str, Any], quality: dict[str, Any] | None, theme: str) -> str:
+def _validation_section(validations: list[dict[str, Any]] | None) -> str:
+    if not validations:
+        return (
+            '<section class="de-section"><h2>Validation</h2>'
+            '<p class="de-sub text-comment">// no validation runs for this episode</p></section>'
+        )
+
+    def _verdict(v: dict[str, Any]) -> str:
+        if v.get("passed"):
+            return '<span class="text-success">PASS</span>'
+        return '<span class="text-error">QUARANTINED</span>'
+
+    rows = "".join(
+        "<tr>"
+        f"<td><code>{escape(str(v.get('profile_name') or '-'))}</code>"
+        f'<span class="text-comment">@{escape(str(v.get("profile_version") or "-"))}</span></td>'
+        f"<td><code>{escape(str(v.get('profile_hash', ''))[:12])}</code></td>"
+        f"<td>{_verdict(v)}</td>"
+        f"<td>{escape(', '.join(str(c) for c in (v.get('reason_codes') or [])) or '-')}</td>"
+        "</tr>"
+        for v in validations
+    )
+    violation_blocks = []
+    for v in validations:
+        for violation in v.get("violations") or []:
+            violation_blocks.append(
+                "<li>"
+                f"<code>{escape(str(violation.get('code') or '-'))}</code> "
+                f"{escape(str(violation.get('message') or ''))}"
+                f'<span class="text-comment"> [{escape(str(v.get("profile_name") or "-"))}]</span>'
+                "</li>"
+            )
+    violations_html = (
+        '<h3 class="de-sub">Violations</h3><ul class="de-violations">'
+        + "".join(violation_blocks)
+        + "</ul>"
+        if violation_blocks
+        else '<p class="de-sub text-comment">// no violations</p>'
+    )
+    return (
+        '<section class="de-section"><h2>Validation</h2>'
+        '<table class="de-table"><thead><tr><th>Profile</th><th>Hash</th>'
+        f"<th>Verdict</th><th>Reasons</th></tr></thead><tbody>{rows}</tbody></table>"
+        f"{violations_html}</section>"
+    )
+
+
+def episode_detail_page(
+    episode: dict[str, Any],
+    quality: dict[str, Any] | None,
+    theme: str,
+    validations: list[dict[str, Any]] | None = None,
+) -> str:
     meta = episode.get("metadata") or {}
     facts = [
         ("episode id", escape(str(episode.get("id")))),
@@ -814,6 +893,7 @@ def episode_detail_page(episode: dict[str, Any], quality: dict[str, Any] | None,
         + "</dl></section>"
     ]
     blocks.append(_quality_section(quality))
+    blocks.append(_validation_section(validations))
     channels = meta.get("channel_stats") or {}
     if channels:
         rows = "".join(

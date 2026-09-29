@@ -523,6 +523,20 @@ class PostgresCatalog:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def episodes_produced_by(self, job_id: str) -> list[dict[str, Any]]:
+        """Episodes registered by one job, following the reverse lineage edge."""
+        with connect(self.settings) as connection:
+            rows = connection.execute(
+                """SELECT e.id, e.episode_key, e.format, e.state, e.created_at
+                   FROM lineage_edges l
+                   JOIN episodes e ON e.id = l.from_ref
+                   WHERE l.from_type = 'episode' AND l.to_type = 'job'
+                     AND l.to_ref = %s AND l.relation = 'produced_by'
+                   ORDER BY e.created_at""",
+                (job_id,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
     def record_episode_quality(self, episode_id: str, quality: dict[str, Any]) -> dict[str, Any]:
         """Persist the motion-quality summary computed at ingest (ADR 0018).
 

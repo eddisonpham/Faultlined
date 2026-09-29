@@ -471,3 +471,53 @@ def test_metrics_and_insights_pages_carry_the_shell() -> None:
     ):
         assert html.startswith("<!doctype html>")
         assert "de-nav" in html
+
+
+@pytest.mark.unit
+def test_episode_detail_renders_validation_results_and_violations() -> None:
+    episode = {"id": "e-1", "metadata": {}, "state": "quarantined"}
+    validations = [
+        {
+            "profile_name": "staged-strict",
+            "profile_version": "1",
+            "profile_hash": "a" * 64,
+            "passed": False,
+            "reason_codes": ["frame_count"],
+            "violations": [{"code": "frame_count", "message": "too short"}],
+            "created_at": "2026-09-29T00:00:00Z",
+        }
+    ]
+    html = episode_detail_page(episode, None, DEFAULT_THEME, validations)
+    assert "QUARANTINED" in html
+    assert "staged-strict" in html
+    assert "frame_count" in html
+    assert "too short" in html
+
+    passing = [{**validations[0], "passed": True, "reason_codes": [], "violations": []}]
+    html = episode_detail_page(episode, None, DEFAULT_THEME, passing)
+    assert "PASS" in html
+    assert "no violations" in html
+
+    empty = episode_detail_page(episode, None, DEFAULT_THEME, [])
+    assert "no validation runs" in empty
+
+
+@pytest.mark.unit
+def test_job_detail_renders_produced_episodes_with_links() -> None:
+    job = {"id": "j-1", "type": "ingest", "state": "succeeded"}
+    produced = [
+        {
+            "id": "e-1",
+            "episode_key": "episode_index=0",
+            "format": "lerobot-v3",
+            "state": "valid",
+            "created_at": "2026-09-29T00:00:00Z",
+        }
+    ]
+    html = job_detail_page(job, DEFAULT_THEME, produced)
+    assert "Produced episodes" in html
+    assert "/ui/episodes/e-1" in html
+    assert "episode_index=0" in html
+
+    empty = job_detail_page(job, DEFAULT_THEME, [])
+    assert "has not registered episodes" in empty

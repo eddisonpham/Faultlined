@@ -87,6 +87,14 @@ Decision: **adopt these as first recorded measurements** (not baselines). Baseli
 owner authorization, per the backlog rule. `synthetic-episode-ingest` stays on its existing baseline with no
 regression.
 
+## Addendum (2026-09-29, package E run-inspection endpoints)
+
+Two more B-014 workloads measured with the same procedure (isolated processes, 3 warmups,
+10 trials, in-process TestClient + stub catalog): `api-episodes-catalog` (50-row page with
+quality columns) P50 6.894 ms / P95 8.472 ms; `api-episode-validation` (one profile verdict
+with violations) P50 5.718 ms / P95 7.027 ms. Both 0/10 failures. Raw results under
+`benchmarks/results/` with the same provenance shape as the table above.
+
 ## Follow-ups
 
 - Owner authorization to promote any of these numbers to committed baselines (`--write-baseline` per workload).

@@ -55,6 +55,22 @@
         "title": "ArtifactSummary",
         "type": "object"
       },
+      "EpisodeListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/EpisodeSummary"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "EpisodeListResponse",
+        "type": "object"
+      },
       "EpisodeQualityResponse": {
         "description": "Motion-quality signals for one episode (ADR 0018).",
         "properties": {
@@ -168,6 +184,115 @@
           "created_at"
         ],
         "title": "EpisodeResponse",
+        "type": "object"
+      },
+      "EpisodeSummary": {
+        "description": "Row in the episodes catalog; quality columns are null pre-analysis.",
+        "properties": {
+          "created_at": {
+            "title": "Created At"
+          },
+          "episode_key": {
+            "default": "",
+            "title": "Episode Key",
+            "type": "string"
+          },
+          "format": {
+            "title": "Format",
+            "type": "string"
+          },
+          "frame_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Frame Count"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "jerk_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Jerk Score"
+          },
+          "movement_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Movement Score"
+          },
+          "stall_ratio": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stall Ratio"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          },
+          "verdict": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verdict"
+          }
+        },
+        "required": [
+          "id",
+          "format",
+          "state",
+          "created_at"
+        ],
+        "title": "EpisodeSummary",
+        "type": "object"
+      },
+      "EpisodeValidationResponse": {
+        "properties": {
+          "episode_id": {
+            "title": "Episode Id",
+            "type": "string"
+          },
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationResultResponse"
+            },
+            "title": "Results",
+            "type": "array"
+          }
+        },
+        "required": [
+          "episode_id",
+          "results"
+        ],
+        "title": "EpisodeValidationResponse",
         "type": "object"
       },
       "HTTPValidationError": {
@@ -937,6 +1062,54 @@
         ],
         "title": "ValidationError",
         "type": "object"
+      },
+      "ValidationResultResponse": {
+        "description": "One profile's verdict against one episode (ADR 0016).",
+        "properties": {
+          "created_at": {
+            "title": "Created At"
+          },
+          "passed": {
+            "title": "Passed",
+            "type": "boolean"
+          },
+          "profile_hash": {
+            "title": "Profile Hash",
+            "type": "string"
+          },
+          "profile_name": {
+            "title": "Profile Name",
+            "type": "string"
+          },
+          "profile_version": {
+            "title": "Profile Version",
+            "type": "string"
+          },
+          "reason_codes": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Reason Codes",
+            "type": "array"
+          },
+          "violations": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Violations",
+            "type": "array"
+          }
+        },
+        "required": [
+          "profile_hash",
+          "profile_name",
+          "profile_version",
+          "passed",
+          "created_at"
+        ],
+        "title": "ValidationResultResponse",
+        "type": "object"
       }
     }
   },
@@ -1024,6 +1197,79 @@
         "summary": "List Artifacts"
       }
     },
+    "/api/v1/episodes": {
+      "get": {
+        "description": "Scriptable episode catalog with the same curation views as the UI.",
+        "operationId": "list_episodes_api_api_v1_episodes_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "state",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "State"
+            }
+          },
+          {
+            "in": "query",
+            "name": "flag",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Flag"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EpisodeListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Episodes Api"
+      }
+    },
     "/api/v1/episodes/{episode_id}": {
       "get": {
         "operationId": "get_episode_api_v1_episodes__episode_id__get",
@@ -1101,6 +1347,46 @@
           }
         },
         "summary": "Get Episode Quality"
+      }
+    },
+    "/api/v1/episodes/{episode_id}/validation": {
+      "get": {
+        "description": "Validation verdicts per profile: why an episode passed or was quarantined.",
+        "operationId": "get_episode_validation_api_v1_episodes__episode_id__validation_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "episode_id",
+            "required": true,
+            "schema": {
+              "title": "Episode Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EpisodeValidationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Episode Validation"
       }
     },
     "/api/v1/health": {
@@ -1354,6 +1640,46 @@
           }
         },
         "summary": "Cancel Job"
+      }
+    },
+    "/api/v1/jobs/{job_id}/episodes": {
+      "get": {
+        "description": "Episodes this job produced, following lineage (run inspection).",
+        "operationId": "list_job_episodes_api_v1_jobs__job_id__episodes_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EpisodeListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Job Episodes"
       }
     },
     "/api/v1/metrics": {

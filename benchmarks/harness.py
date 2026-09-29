@@ -479,6 +479,46 @@ class _BenchApiCatalog:
     def quality_summary(self) -> dict[str, Any]:
         return _summary_model()
 
+    def list_episodes(
+        self, *, limit: int = 50, state: str | None = None, flag: str | None = None
+    ) -> list[dict[str, Any]]:
+        rows = [
+            {
+                "id": f"episode-{i:03d}",
+                "episode_key": f"episode_index={i}",
+                "format": "lerobot-v3",
+                "state": "valid",
+                "created_at": "2026-09-29T00:00:00Z",
+                "frame_count": 200 + i,
+                "movement_score": 0.04,
+                "jerk_score": 0.01,
+                "stall_ratio": 0.1,
+                "verdict": "smooth",
+            }
+            for i in range(50)
+        ]
+        if state is not None:
+            rows = [row for row in rows if row["state"] == state]
+        if flag == "jerky":
+            rows = []
+        return rows[:limit]
+
+    def get_episode(self, episode_id: str) -> dict[str, Any] | None:
+        return {"id": episode_id, "metadata": {}, "state": "valid"}
+
+    def get_validation_results(self, _episode_id: str) -> list[dict[str, Any]]:
+        return [
+            {
+                "profile_hash": "a" * 64,
+                "profile_name": "staged-strict",
+                "profile_version": "1",
+                "passed": False,
+                "reason_codes": ["TOO_FEW_FRAMES"],
+                "violations": [{"code": "TOO_FEW_FRAMES", "message": "too short"}],
+                "created_at": "2026-09-29T00:00:00Z",
+            }
+        ]
+
 
 def _seed_metrics(path: Path, records: int) -> None:
     start = datetime(2026, 9, 29, tzinfo=UTC)
@@ -542,6 +582,26 @@ def _api_metrics_benchmark(*, trials: int = 10, warmups: int = 3) -> BenchmarkRe
     )
 
 
+def _api_episodes_benchmark(*, trials: int = 10, warmups: int = 3) -> BenchmarkResult:
+    return _client_benchmark(
+        name="api-episodes-catalog",
+        path="/api/v1/episodes?limit=50",
+        dataset="synthetic-catalog-50e-v1",
+        trials=trials,
+        warmups=warmups,
+    )
+
+
+def _api_validation_benchmark(*, trials: int = 10, warmups: int = 3) -> BenchmarkResult:
+    return _client_benchmark(
+        name="api-episode-validation",
+        path="/api/v1/episodes/episode-000/validation",
+        dataset="synthetic-validation-results-v1",
+        trials=trials,
+        warmups=warmups,
+    )
+
+
 def _ui_insights_benchmark(*, trials: int = 10, warmups: int = 3) -> BenchmarkResult:
     return _client_benchmark(
         name="ui-insights-page",
@@ -595,6 +655,8 @@ WORKLOADS: dict[str, Callable[[], BenchmarkResult | None]] = {
     "validation-eval": lambda: _validation_benchmark(),
     "metrics-aggregation": lambda: _aggregation_benchmark(),
     "api-metrics-endpoint": lambda: _api_metrics_benchmark(),
+    "api-episodes-catalog": lambda: _api_episodes_benchmark(),
+    "api-episode-validation": lambda: _api_validation_benchmark(),
     "ui-insights-page": lambda: _ui_insights_benchmark(),
     "lerobot-ingest-v3": lambda: _lerobot_benchmark(),
 }

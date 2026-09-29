@@ -17,8 +17,10 @@ from data_engine.api.errors import install_error_handling
 from data_engine.api.schemas import (
     AnyJobRequest,
     ArtifactListResponse,
+    EpisodeListResponse,
     EpisodeQualityResponse,
     EpisodeResponse,
+    EpisodeValidationResponse,
     JobListResponse,
     JobResponse,
     MetricsResponse,
@@ -268,6 +270,14 @@ def create_app(
             raise KeyError(job_id)
         return row
 
+    @app.get("/api/v1/jobs/{job_id}/episodes", response_model=EpisodeListResponse)
+    def list_job_episodes(job_id: str, request: Request) -> dict[str, Any]:
+        """Episodes this job produced, following lineage (run inspection)."""
+        catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
+        if catalog_for_request.get_job(job_id) is None:
+            raise KeyError(job_id)
+        return {"items": catalog_for_request.episodes_produced_by(job_id)}
+
     @app.post("/api/v1/jobs/{job_id}/cancel", response_model=JobResponse)
     def cancel_job(job_id: str, request: Request) -> dict[str, Any]:
         """Request cancellation (F7).
@@ -389,7 +399,8 @@ def create_app(
                 '<a href="/ui/jobs">back to jobs</a></p>',
                 status_code=404,
             )
-        return HTMLResponse(job_detail_page(job, _theme(theme)))
+        produced = catalog_for_request.episodes_produced_by(job_id)
+        return HTMLResponse(job_detail_page(job, _theme(theme), produced))
 
     @app.post("/ui/jobs/{job_id}/cancel")
     def ui_cancel_job(job_id: str, request: Request, theme: str | None = None) -> RedirectResponse:
@@ -475,7 +486,8 @@ def create_app(
                 status_code=404,
             )
         quality = catalog_for_request.get_episode_quality(episode_id)
-        return HTMLResponse(episode_detail_page(episode, quality, _theme(theme)))
+        validations = catalog_for_request.get_validation_results(episode_id)
+        return HTMLResponse(episode_detail_page(episode, quality, _theme(theme), validations))
 
     @app.get("/ui/insights", response_class=HTMLResponse)
     def ui_insights(
@@ -489,6 +501,27 @@ def create_app(
         if x_fragment:
             return HTMLResponse(insights_fragment(model))
         return HTMLResponse(insights_page(model, _theme(theme)))
+
+    @app.get("/api/v1/episodes", response_model=EpisodeListResponse)
+    def list_episodes_api(
+        request: Request,
+        state: str | None = None,
+        flag: str | None = None,
+        limit: int = 50,
+    ) -> dict[str, Any]:
+        """Scriptable episode catalog with the same curation views as the UI."""
+        if state is not None and state not in EPISODE_STATES:
+            raise HTTPException(status_code=422, detail=f"unknown episode state: {state}")
+        if flag is not None and flag not in EPISODE_FLAGS:
+            raise HTTPException(status_code=422, detail=f"unknown flag: {flag}")
+        if limit < 1 or limit > 500:
+            raise HTTPException(status_code=422, detail="limit must be between 1 and 500")
+        catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
+        return {
+            "items": catalog_for_request.list_episodes(
+                limit=limit, state=state or None, flag=flag or None
+            )
+        }
 
     @app.get("/api/v1/episodes/{episode_id}", response_model=EpisodeResponse)
     def get_episode(episode_id: str, request: Request) -> dict[str, Any]:
@@ -506,6 +539,17 @@ def create_app(
         if row is None:
             raise KeyError(episode_id)
         return row
+
+    @app.get("/api/v1/episodes/{episode_id}/validation", response_model=EpisodeValidationResponse)
+    def get_episode_validation(episode_id: str, request: Request) -> dict[str, Any]:
+        """Validation verdicts per profile: why an episode passed or was quarantined."""
+        catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
+        if catalog_for_request.get_episode(episode_id) is None:
+            raise KeyError(episode_id)
+        return {
+            "episode_id": episode_id,
+            "results": catalog_for_request.get_validation_results(episode_id),
+        }
 
     @app.get("/api/v1/quality/summary", response_model=QualitySummaryResponse)
     def get_quality_summary(request: Request) -> dict[str, Any]:

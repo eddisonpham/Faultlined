@@ -32,7 +32,7 @@ endpoints in the table are architecture targets, not implemented yet.
 | `GET /api/v1/jobs/{id}` | Job detail | Includes attempts + transitions |
 | `POST /api/v1/jobs/{id}/cancel` | Cancel | Cooperative semantics (data-flow.md §4). Queued → `canceled`; running → `cancel_requested`. 404 unknown, 409 on a terminal job |
 | `POST /api/v1/episodes/ingest` | Convenience: submit ingest for source | Creates an `ingest_source` job; the direct `POST /api/v1/jobs` with `type: ingest_source` is the same thing and is what exists |
-| `GET /api/v1/episodes` | Search episodes | Metadata predicate query (FR-005); cursor pagination |
+| `GET /api/v1/episodes` | Search episodes | Metadata predicate query (FR-005); cursor pagination. Phase-06 subset implemented: `state`/`flag`/`limit` filters |
 | `GET /api/v1/episodes/{id}` | Episode detail | Includes metadata + lineage edges (phase 05 slice); validation results join in later MVP work |
 | `POST /api/v1/episodes/{id}/revalidate` | Re-validate with profile | FR-003 (no re-ingest) |
 | `GET /api/v1/episodes/{id}/lineage` | Forward lineage | Builds/runs containing this episode |
@@ -114,6 +114,9 @@ Added for the Status / Jobs / Artifacts pages; all are read-only, cursor-paginat
 | GET | `/api/v1/artifacts` | Newest-first artifact page with `episode_ids` per row. Cursor: `before`. |
 | GET | `/api/v1/status` | Health, `queue_depth` by job state, artifact/episode counts, and host telemetry. |
 | GET | `/api/v1/metrics` | Aggregated runtime telemetry from the JSONL sink (ADR 0017): per-metric+label summaries with p50/p95/p99, bucketed mean series for sparklines, live job-state counts, and derived worker heartbeat age. Optional `window_seconds`, `bucket_seconds`. |
+| GET | `/api/v1/episodes` | Episode catalog with the same curation views as the UI: filters `state` (ingested/valid/quarantined), `flag` (jerky/stalled/short/long), `limit` (1–500). Rows carry the quality columns for ranking. |
+| GET | `/api/v1/episodes/{episode_id}/validation` | Validation verdicts per profile (ADR 0016): passed flag, reason codes, and full violations — why an episode passed or was quarantined. 404 for unknown episodes. |
+| GET | `/api/v1/jobs/{job_id}/episodes` | Episodes a job produced, following the `produced_by` lineage edge (run inspection). 404 for unknown jobs. |
 | GET | `/api/v1/episodes/{episode_id}/quality` | Motion-quality signals computed at ingest (ADR 0018): movement score, normalized jerk, stall ratio, per-dim activity, verdict, and a read-time length z-score. 404 for episodes ingested before quality existed. |
 | GET | `/api/v1/quality/summary` | Dataset-level curation view: episode-length histogram, speed distribution, cross-episode per-dim σ matrix, and top jerk / stall / length outliers with episode links. |
 

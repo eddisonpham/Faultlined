@@ -149,6 +149,36 @@ class ListingCatalogStub(CatalogStub):
             return []
         return rows[:limit]
 
+    def get_validation_results(self, episode_id: str) -> list[dict[str, Any]]:
+        return [
+            {
+                "id": 1,
+                "profile_hash": "a" * 64,
+                "profile_name": "staged-strict",
+                "profile_version": "1",
+                "passed": False,
+                "reason_codes": ["frame_count"],
+                "violations": [{"code": "frame_count", "message": "expected at least 100 frames"}],
+                "created_at": "2026-09-29T00:00:00Z",
+            }
+        ]
+
+    def episodes_produced_by(self, job_id: str) -> list[dict[str, Any]]:
+        return [
+            {
+                "id": "episode-1",
+                "episode_key": "episode_index=0",
+                "format": "lerobot-v3",
+                "state": "valid",
+                "created_at": "2026-09-28T00:00:00Z",
+                "frame_count": 303,
+                "movement_score": 0.04,
+                "jerk_score": 0.01,
+                "stall_ratio": 0.1,
+                "verdict": "smooth",
+            }
+        ]
+
     def get_episode_quality(self, episode_id: str) -> dict[str, Any] | None:
         return {
             "episode_id": episode_id,
@@ -292,6 +322,50 @@ def test_artifacts_list_endpoint_reports_referencing_episodes() -> None:
 
 
 @pytest.mark.contract
+def test_episodes_catalog_endpoint_exposes_quality_columns() -> None:
+    body = _ui_client().get("/api/v1/episodes").json()
+    item = body["items"][0]
+    assert item["id"] == "episode-1"
+    assert item["verdict"] == "smooth"
+    assert item["frame_count"] == 303
+
+
+@pytest.mark.contract
+def test_episodes_catalog_rejects_bad_filters_and_limits() -> None:
+    client = _ui_client()
+    assert client.get("/api/v1/episodes?state=nonsense").status_code == 422
+    assert client.get("/api/v1/episodes?flag=nonsense").status_code == 422
+    assert client.get("/api/v1/episodes?limit=0").status_code == 422
+    assert client.get("/api/v1/episodes?limit=501").status_code == 422
+
+
+@pytest.mark.contract
+def test_episode_validation_endpoint_exposes_quarantine_reasons() -> None:
+    body = _ui_client().get("/api/v1/episodes/episode-1/validation").json()
+    assert body["episode_id"] == "episode-1"
+    result = body["results"][0]
+    assert result["passed"] is False
+    assert result["reason_codes"] == ["frame_count"]
+    assert result["violations"][0]["code"] == "frame_count"
+
+
+@pytest.mark.contract
+def test_episode_validation_unknown_episode_is_404() -> None:
+    assert _ui_client().get("/api/v1/episodes/missing/validation").status_code == 404
+
+
+@pytest.mark.contract
+def test_job_episodes_endpoint_follows_lineage() -> None:
+    body = _ui_client().get("/api/v1/jobs/job-1/episodes").json()
+    assert body["items"][0]["id"] == "episode-1"
+
+
+@pytest.mark.contract
+def test_job_episodes_unknown_job_is_404() -> None:
+    assert _ui_client().get("/api/v1/jobs/missing/episodes").status_code == 404
+
+
+@pytest.mark.contract
 def test_status_endpoint_reports_queue_depth_and_resources() -> None:
     body = _ui_client().get("/api/v1/status").json()
     assert body["status"] == "ok"
@@ -327,6 +401,33 @@ def test_ui_job_detail_and_missing_job() -> None:
     client = _ui_client()
     assert "corr-1" in client.get("/ui/jobs/job-1").text
     assert client.get("/ui/jobs/nope").status_code == 404
+
+
+@pytest.mark.contract
+def test_ui_job_detail_lists_produced_episodes() -> None:
+    text = _ui_client().get("/ui/jobs/job-1").text
+    assert "Produced episodes" in text
+    assert "/ui/episodes/episode-1" in text
+
+
+@pytest.mark.contract
+def test_ui_episode_detail_shows_validation_section() -> None:
+    text = _ui_client().get("/ui/episodes/episode-1").text
+    assert "Validation" in text
+    assert "QUARANTINED" in text
+    assert "frame_count" in text
+
+
+@pytest.mark.contract
+def test_ui_episode_detail_without_validation_says_so() -> None:
+    class NoValidation(ListingCatalogStub):
+        def get_validation_results(self, episode_id: str) -> list[dict[str, Any]]:
+            return []
+
+    app = create_app(Settings(_env_file=None), initialize_database=False)
+    app.state.catalog = NoValidation()
+    text = TestClient(app).get("/ui/episodes/episode-1").text
+    assert "no validation runs" in text
 
 
 @pytest.mark.contract

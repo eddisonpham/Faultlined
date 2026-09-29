@@ -1,6 +1,7 @@
 # Slice: Run Intelligence — monitor, analyze, inspect robot data runs
 
-**Status: planned 2026-09-29, execution starts immediately.** The validation stage is closed (commit `6f16adb`).
+**Status: packages A–D landed 2026-09-29 (`b4d70a1`, `499249b`, `419a4ca`, `b0052a3`); run-inspection
+extension (package F below) lands on top.** The validation stage is closed (commit `6f16adb`).
 This slice turns Faultlined from a pipeline that *moves* episodes into one that *understands* them: expanded
 runtime monitoring, robotics-native quality analytics, and an interactive instrument UI to inspect how runs
 perform. Every feature is latency-tested and recorded under [../experiments/](../experiments/).
@@ -99,6 +100,23 @@ Same-commit doc updates: `architecture/{api,components,frontend,data-flow}.md`, 
 source-log #46–#47. Conventional commits, one work package each, `just ci` green before every commit and
 push.
 
+### F. Run inspection surfaces (owner steer: breadth of useful features over polish)
+
+Added after packages A–D, per the owner's direction: since Faultlined is used by developers and ML robotics
+engineers, prioritize a **wide range of useful features to monitor, analyze, and inspect robotics runs** over
+UI neatness. These extend the API and UI with run-inspection queries over data the catalog already holds:
+
+- `GET /api/v1/episodes` — episode catalog with `?state=` and `?flag=jerky|stalled|short|long` quality
+  filters (`EpisodeSummary` carries quality columns so a list is one round trip).
+- `GET /api/v1/episodes/{id}/validation` — per-profile verdicts, reason codes, and violations for an episode
+  (`ViolationCode` values, not rule names), the "why was this quarantined" answer.
+- `GET /api/v1/jobs/{id}/episodes` — reverse lineage: episodes produced by a job (`episodes_produced_by`),
+  closing the run → output inspection loop.
+- UI: the episode inspector gains a validation section (per-profile verdict badges, reason codes, violation
+  list); the job detail page gains a produced-episodes section.
+- Latency-tested alongside the rest: `api-episodes-catalog` (p50 6.9 ms / p95 8.5 ms) and
+  `api-episode-validation` (p50 5.7 ms / p95 7.0 ms), isolated runs per [ADR 0019](../decisions/0019-benchmark-workload-isolation.md).
+
 ## Sequencing
 
 1. Plan + research docs (this file, backlog, source log) → commit.
@@ -106,6 +124,7 @@ push.
 3. B: quality analysis + persistence + API + tests → commit.
 4. C: UI pages + design revamp + font vendoring + tests → commit.
 5. D: benchmark workloads + runs + experiment records → commit.
+6. F: run inspection endpoints + UI sections + tests + latency measurements → commit.
 
 ## Explicitly out of scope
 

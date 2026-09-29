@@ -329,3 +329,45 @@ def test_real_episodes_carry_quality_signals(
     assert summary["episode_count"] >= 1
     assert summary["length"]["count"] >= 1
     assert any(item["episode_id"] == result["episode_id"] for item in summary["speed_distribution"])
+
+
+@pytest.mark.integration
+def test_lineage_and_validation_are_queryable_after_the_run(
+    tmp_path: Path, real_lerobot_dataset: Callable[[str], Path]
+) -> None:
+    """Run inspection surfaces: what a job produced, and why an episode is quarantined."""
+    settings = _settings(tmp_path)
+    catalog = PostgresCatalog(settings)
+    worker = IngestWorker(settings)
+    job, _ = catalog.submit_job(
+        "ingest_source",
+        {"source": str(real_lerobot_dataset("v3")), "episode_key": "episode_index=7"},
+        f"lineage-{uuid.uuid4()}",
+        "test-correlation",
+    )
+    finished = _run(catalog, worker, job["id"])
+    assert finished["state"] == JobState.SUCCEEDED.value, finished.get("error")
+    episode_id = finished["result"]["episode_id"]
+
+    produced = catalog.episodes_produced_by(job["id"])
+    assert [row["id"] for row in produced] == [episode_id]
+    assert produced[0]["episode_key"] == "episode_index=7"
+    assert catalog.episodes_produced_by("no-such-job") == []
+
+    profile_name = f"lineage-strict-{uuid.uuid4()}"
+    _validate(
+        catalog,
+        worker,
+        episode_id,
+        {
+            "name": profile_name,
+            "version": "1",
+            "min_frames": 1_000_000,
+            "enabled_rules": ["frame_count"],
+        },
+    )
+    results = _results_for(catalog, episode_id, profile_name)
+    assert len(results) == 1
+    assert results[0]["passed"] is False
+    assert "TOO_FEW_FRAMES" in results[0]["reason_codes"]
+    assert catalog.get_episode(episode_id)["state"] == "quarantined"

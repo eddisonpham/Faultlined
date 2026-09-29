@@ -108,6 +108,42 @@ class EpisodeResponse(BaseModel):
     created_at: Any
 
 
+class EpisodeSummary(BaseModel):
+    """Row in the episodes catalog; quality columns are null pre-analysis."""
+
+    id: str
+    episode_key: str = ""
+    format: str
+    state: str
+    created_at: Any
+    frame_count: int | None = None
+    movement_score: float | None = None
+    jerk_score: float | None = None
+    stall_ratio: float | None = None
+    verdict: str | None = None
+
+
+class EpisodeListResponse(BaseModel):
+    items: list[EpisodeSummary]
+
+
+class ValidationResultResponse(BaseModel):
+    """One profile's verdict against one episode (ADR 0016)."""
+
+    profile_hash: str
+    profile_name: str
+    profile_version: str
+    passed: bool
+    reason_codes: list[str] = Field(default_factory=list)
+    violations: list[dict[str, Any]] = Field(default_factory=list)
+    created_at: Any
+
+
+class EpisodeValidationResponse(BaseModel):
+    episode_id: str
+    results: list[ValidationResultResponse]
+
+
 class JobSummary(BaseModel):
     """Row in the jobs list; the full payload is available on the detail endpoint."""
 
