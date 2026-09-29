@@ -31,6 +31,7 @@ from typing import Any
 import pyarrow as pa
 import pyarrow.parquet as pq
 
+from data_engine.analysis.quality import analyze
 from data_engine.ingest.readers.base import ChannelStats, EpisodeExtraction, ReaderError
 
 INFO_RELATIVE_PATH = Path("meta") / "info.json"
@@ -230,6 +231,7 @@ class LeRobotReader:
             duration_seconds=max(t_end - t_start, 0.0),
             fps=_as_float(info.get("fps")),
             channels=_channels(table, record),
+            quality=analyze(_series(table)),
             dataset={
                 "root": str(path),
                 "codebase_version": version,
@@ -307,6 +309,27 @@ def _as_float(value: Any) -> float | None:
         return float(value)
     except TypeError, ValueError:
         return None
+
+
+def _series(table: pa.Table) -> dict[str, list[float]]:
+    """Per-dimension frame series for quality analysis (ADR 0018).
+
+    List-typed feature columns expand into `name[i]` dims. Structural columns,
+    byte-string image columns, and columns whose rows disagree on width yield
+    nothing — a quality signal must never fail an ingest.
+    """
+    out: dict[str, list[float]] = {}
+    for name in table.schema.names:
+        if name in _STRUCTURAL_COLUMNS:
+            continue
+        flat_rows = [_flatten(row) for row in table.column(name).to_pylist()]
+        width = len(flat_rows[0]) if flat_rows else 0
+        if width == 0 or any(len(row) != width for row in flat_rows):
+            continue
+        for i in range(width):
+            key = name if width == 1 else f"{name}[{i}]"
+            out[key] = [row[i] for row in flat_rows]
+    return out
 
 
 def _column(table: pa.Table, name: str) -> list[float]:

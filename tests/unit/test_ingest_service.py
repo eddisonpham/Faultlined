@@ -19,6 +19,39 @@ class CatalogStub:
         self.calls.append(kwargs)
         return {"id": f"episode-{len(self.calls)}"}
 
+    def record_episode_quality(self, episode_id: str, quality: dict[str, Any]) -> dict[str, Any]:
+        self.quality = quality
+        return {"episode_id": episode_id, "verdict": quality["verdict"]}
+
+
+@pytest.mark.unit
+def test_synthetic_ingest_records_motion_quality(tmp_path: Path) -> None:
+    catalog = CatalogStub()
+    service = EpisodeIngestService(catalog, FileArtifactStore(tmp_path))  # type: ignore[arg-type]
+    frames = 10
+    episode = {
+        "task": "pick",
+        "robot": "arm",
+        "timestamps": [i * 0.1 for i in range(frames)],
+        "observations": [[float(i), float(i) * 2] for i in range(frames)],
+        "actions": [[float(i), float(i) * 2] for i in range(frames)],
+    }
+
+    service.ingest(episode, job_id="job-1")
+
+    quality = catalog.quality
+    assert quality["frame_count"] == frames
+    assert quality["verdict"] == "smooth"
+    # obs[0], action[0] step 1.0 and obs[1], action[1] step 2.0 -> L2 sqrt(10).
+    assert quality["movement_score"] == pytest.approx(10**0.5)
+    assert quality["stall_ratio"] == 0.0
+    assert {dim["name"] for dim in quality["dims"]} == {
+        "observation[0]",
+        "observation[1]",
+        "action[0]",
+        "action[1]",
+    }
+
 
 @pytest.mark.unit
 def test_synthetic_episode_ingest_stores_artifact_and_metadata(tmp_path: Path) -> None:

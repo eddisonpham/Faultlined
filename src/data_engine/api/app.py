@@ -17,10 +17,12 @@ from data_engine.api.errors import install_error_handling
 from data_engine.api.schemas import (
     AnyJobRequest,
     ArtifactListResponse,
+    EpisodeQualityResponse,
     EpisodeResponse,
     JobListResponse,
     JobResponse,
     MetricsResponse,
+    QualitySummaryResponse,
     StatusResponse,
     SubmitSourceJobRequest,
 )
@@ -408,5 +410,20 @@ def create_app(
         if row is None:
             raise KeyError(episode_id)
         return row
+
+    @app.get("/api/v1/episodes/{episode_id}/quality", response_model=EpisodeQualityResponse)
+    def get_episode_quality(episode_id: str, request: Request) -> dict[str, Any]:
+        """Motion-quality signals computed at ingest (ADR 0018)."""
+        catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
+        row = catalog_for_request.get_episode_quality(episode_id)
+        if row is None:
+            raise KeyError(episode_id)
+        return row
+
+    @app.get("/api/v1/quality/summary", response_model=QualitySummaryResponse)
+    def get_quality_summary(request: Request) -> dict[str, Any]:
+        """Length/speed distributions, cross-episode variance matrix, outlier lists."""
+        catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
+        return catalog_for_request.quality_summary()
 
     return app

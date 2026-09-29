@@ -213,6 +213,22 @@ def test_v3_structural_columns_are_not_reported_as_features(tmp_path: Path) -> N
     assert names == {"action"}
 
 
+def test_quality_signals_are_computed_from_the_sliced_rows(tmp_path: Path) -> None:
+    """Quality is summarized while the rows are in memory (ADR 0018)."""
+    root = _v3_dataset(tmp_path / "ds")
+    quality = LeRobotReader().read(root, episode_key="episode_index=1").quality
+
+    assert quality is not None
+    assert quality.frame_count == 3
+    assert {dim.name for dim in quality.dims} == {"action[0]", "action[1]"}
+    # Rows 3..6: action[0] steps 1.0 and action[1] steps 2.0 per transition.
+    assert quality.movement_score == pytest.approx(5**0.5)
+    assert quality.stall_ratio == 0.0
+    # Three unique values per dim read as discrete, and discrete dims are not
+    # judged; the verdict buckets are unit-tested on longer series in test_quality.
+    assert quality.verdict == "unknown"
+
+
 # ------------------------------------------------------------------ v2 behaviour
 
 

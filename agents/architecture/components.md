@@ -50,7 +50,7 @@ One entry per component in [overview.md](overview.md)'s component map. Every com
 
 - **Responsibility:** `EpisodeIngestService` registers one episode in the catalog, whatever format it arrived in. Two paths, one contract: the synthetic JSON episode carried in the job payload, and a dataset path read through `ingest/readers/`. The LeRobot reader (v2.1 and v3.0) is implemented; MCAP, ROS 2 bag, and the duplicate-source policy remain planned (FR-001).
 - **Inputs:** file paths/URLs + source metadata; ingest job payload (`ingest` carries the episode, `ingest_source` names a path).
-- **Outputs:** `episode` records (`synthetic-json`, `lerobot-v2`, `lerobot-v3`), artifact entries, and queryable metadata: task, robot, frame count, duration, fps, and per-channel min/max/mean/std/count. A reader returns a *description* of an episode, never its frames — the bytes stay in the artifact store, addressed by the hash of the file that produced them.
+- **Outputs:** `episode` records (`synthetic-json`, `lerobot-v2`, `lerobot-v3`), artifact entries, and queryable metadata: task, robot, frame count, duration, fps, and per-channel min/max/mean/std/count. A reader returns a *description* of an episode, never its frames — the bytes stay in the artifact store, addressed by the hash of the file that produced them. Motion-quality signals (ADR 0018) are computed while the rows are in memory and persisted as `episode_quality` via [analysis](#15-analysis-analysis).
 - **Dependencies:** artifact store, catalog; format-specific readers behind `EpisodeReader` + a sniff-based registry; observability.
 - **Failure behavior:** the API validates the synthetic episode shape; a reader raises `ReaderError` on anything it cannot parse. Both are **terminal**: `_settle_failure` skips the retry branch for them, because the same bytes will fail identically on every attempt (F1). Content-addressed artifacts are checksum-verified. MCAP parsing and duplicate-source policy remain deferred. FR-001 target.
 - **Owner:** implementer.
@@ -154,3 +154,20 @@ One entry per component in [overview.md](overview.md)'s component map. Every com
 - **Failure behavior:** flaky-prone setup is guarded (warmup + retries); regressions fail the bench command, not the
   engine.
 - **Owner:** benchmark-engineer.
+
+## 15. Analysis (`analysis/`)
+
+Sits between Ingest and the catalog write: signals are computed from the rows the reader already has.
+
+- **Responsibility:** Robotics-native motion-quality signals for curation (ADR 0018): movement score,
+  normalized jerk, stall ratio, per-dim activity/discreteness, and an explainable `smooth|moderate|jerky|
+  unknown` verdict. Pure functions over frame series; formulas sourced from the
+  lerobot-dataset-visualizer (source-log #46).
+- **Inputs:** named per-dimension frame series (synthetic payload columns or sliced reader rows).
+- **Outputs:** `EpisodeQuality` summary, persisted as `episode_quality` rows; dataset-level views
+  (length histogram, speed distribution, cross-episode per-dim σ matrix, outlier lists) assembled at read
+  time by the catalog.
+- **Dependencies:** none beyond the standard library; consumed by `ingest/` and the read API.
+- **Failure behavior:** quality must never fail an ingest — degenerate inputs score 0 with verdict
+  `unknown`; mismatched series raise `ValueError` before any bytes are written.
+- **Owner:** implementer.

@@ -53,6 +53,126 @@ def canonical_json(value: Any) -> bytes:
     return _canonical_json(value)
 
 
+def _zscore(value: float, stats: dict[str, Any] | None) -> float:
+    mean = (stats or {}).get("mean")
+    std = (stats or {}).get("std")
+    if mean is None or not std:
+        return 0.0
+    return (float(value) - float(mean)) / float(std)
+
+
+def _assemble_quality_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """Fold per-episode quality rows into distributions and outlier lists."""
+    lengths = [int(row["frame_count"]) for row in rows]
+    zscores = {
+        str(row["episode_id"]): _zscore(
+            row["frame_count"], {"mean": _mean(lengths), "std": _std(lengths)}
+        )
+        for row in rows
+    }
+
+    dim_names = sorted({dim["name"] for row in rows for dim in row.get("dims") or []})
+    heat_episodes = []
+    for row in rows:
+        by_name = {dim["name"]: dim for dim in row.get("dims") or []}
+        heat_episodes.append(
+            {
+                "episode_id": row["episode_id"],
+                "values": [
+                    by_name[name]["norm_delta_std"] if name in by_name else None
+                    for name in dim_names
+                ],
+            }
+        )
+
+    def top(key: str, *, absolute: bool = False) -> list[dict[str, Any]]:
+        ranked = sorted(
+            rows,
+            key=lambda row: abs(float(row[key])) if absolute else float(row[key]),
+            reverse=True,
+        )
+        return [
+            {
+                "episode_id": row["episode_id"],
+                "episode_key": row.get("episode_key"),
+                "value": float(row[key]),
+                "verdict": row["verdict"],
+            }
+            for row in ranked[:5]
+        ]
+
+    verdicts: dict[str, int] = {}
+    for row in rows:
+        verdicts[row["verdict"]] = verdicts.get(row["verdict"], 0) + 1
+
+    return {
+        "episode_count": len(rows),
+        "verdicts": verdicts,
+        "length": _length_summary(lengths),
+        "speed_distribution": [
+            {
+                "episode_id": row["episode_id"],
+                "movement_score": float(row["movement_score"]),
+                "verdict": row["verdict"],
+            }
+            for row in rows
+        ],
+        "heat_matrix": {"dims": dim_names, "episodes": heat_episodes},
+        "outliers": {
+            "jerk": top("jerk_score"),
+            "stall": top("stall_ratio"),
+            "length": sorted(
+                [
+                    {
+                        "episode_id": row["episode_id"],
+                        "episode_key": row.get("episode_key"),
+                        "value": zscores[str(row["episode_id"])],
+                        "verdict": row["verdict"],
+                    }
+                    for row in rows
+                ],
+                key=lambda item: abs(item["value"]),
+                reverse=True,
+            )[:5],
+        },
+    }
+
+
+def _length_summary(lengths: list[int]) -> dict[str, Any]:
+    if not lengths:
+        return {"count": 0, "mean": 0.0, "std": 0.0, "min": 0, "max": 0, "histogram": []}
+    lo, hi = min(lengths), max(lengths)
+    bins = 10
+    width = (hi - lo) / bins or 1
+    histogram = [
+        {"lo": lo + int(i * width), "hi": lo + int((i + 1) * width), "count": 0}
+        for i in range(bins)
+    ]
+    for length in lengths:
+        index = min(int((length - lo) / width), bins - 1)
+        histogram[index]["count"] += 1
+    return {
+        "count": len(lengths),
+        "mean": _mean(lengths),
+        "std": _std(lengths),
+        "min": lo,
+        "max": hi,
+        "histogram": histogram,
+    }
+
+
+def _mean(values: list[int]) -> float:
+    return sum(values) / len(values) if values else 0.0
+
+
+def _std(values: list[int]) -> float:
+    if len(values) < 2:
+        return 0.0
+    mean = _mean(values)
+    variance = sum((value - mean) ** 2 for value in values) / (len(values) - 1)
+    return float(variance**0.5)
+
+
 class PostgresCatalog:
     """Persistence operations used by the phase-05 ingest-job slice."""
 
@@ -402,6 +522,75 @@ class PostgresCatalog:
                 (episode_id,),
             ).fetchall()
         return [dict(row) for row in rows]
+
+    def record_episode_quality(self, episode_id: str, quality: dict[str, Any]) -> dict[str, Any]:
+        """Persist the motion-quality summary computed at ingest (ADR 0018).
+
+        A content-addressed episode recomputes identical signals on re-ingest, so
+        the row is replaced rather than accumulated.
+        """
+        with connect(self.settings) as connection:
+            row = connection.execute(
+                """INSERT INTO episode_quality
+                       (episode_id, frame_count, movement_score, jerk_score,
+                        stall_ratio, verdict, dims)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s)
+                   ON CONFLICT (episode_id) DO UPDATE
+                       SET frame_count = EXCLUDED.frame_count,
+                           movement_score = EXCLUDED.movement_score,
+                           jerk_score = EXCLUDED.jerk_score,
+                           stall_ratio = EXCLUDED.stall_ratio,
+                           verdict = EXCLUDED.verdict,
+                           dims = EXCLUDED.dims,
+                           computed_at = now()
+                   RETURNING episode_id""",
+                (
+                    episode_id,
+                    int(quality["frame_count"]),
+                    float(quality["movement_score"]),
+                    float(quality["jerk_score"]),
+                    float(quality["stall_ratio"]),
+                    str(quality["verdict"]),
+                    Jsonb(quality.get("dims") or []),
+                ),
+            ).fetchone()
+        if row is None:
+            raise RuntimeError("episode quality insert returned no row")
+        return {"episode_id": row["episode_id"], "verdict": str(quality["verdict"])}
+
+    def get_episode_quality(self, episode_id: str) -> dict[str, Any] | None:
+        """Quality signals for one episode; length z-score is computed at read time.
+
+        Episode lengths do not change, but the population they are compared against
+        grows, so a stored z-score would quietly go stale.
+        """
+        with connect(self.settings) as connection:
+            row = connection.execute(
+                """SELECT episode_id, frame_count, movement_score, jerk_score,
+                          stall_ratio, verdict, dims, computed_at
+                   FROM episode_quality WHERE episode_id = %s""",
+                (episode_id,),
+            ).fetchone()
+            stats = connection.execute(
+                """SELECT avg(frame_count) AS mean, stddev_samp(frame_count) AS std
+                   FROM episode_quality"""
+            ).fetchone()
+        if row is None:
+            return None
+        result = dict(row)
+        result["length_zscore"] = _zscore(cast(float, row["frame_count"]), stats)
+        return result
+
+    def quality_summary(self) -> dict[str, Any]:
+        """Dataset-level quality view for the insights page and curation triage."""
+        with connect(self.settings) as connection:
+            rows = connection.execute(
+                """SELECT q.episode_id, e.episode_key, q.frame_count, q.movement_score,
+                          q.jerk_score, q.stall_ratio, q.verdict, q.dims
+                   FROM episode_quality q JOIN episodes e ON e.id = q.episode_id
+                   ORDER BY q.movement_score DESC"""
+            ).fetchall()
+        return _assemble_quality_summary([dict(row) for row in rows])
 
     def count_jobs(self, state: JobState) -> int:
         """Number of jobs currently in ``state``; feeds the queue-depth gauge."""

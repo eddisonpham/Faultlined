@@ -17,6 +17,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
 
+from data_engine.analysis.quality import EpisodeQuality
+
 
 class ReaderError(ValueError):
     """Source data does not parse as the format it was claimed to be.
@@ -77,6 +79,9 @@ class EpisodeExtraction:
     duration_seconds: float
     fps: float | None = None
     channels: tuple[ChannelStats, ...] = ()
+    quality: EpisodeQuality | None = None
+    """Motion-quality summary computed while the rows were in memory (ADR 0018)."""
+
     dataset: dict[str, Any] = field(default_factory=dict)
     """Dataset-level facts (total episodes, feature names, robot type) for context."""
 

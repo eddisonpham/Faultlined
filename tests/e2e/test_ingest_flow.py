@@ -87,6 +87,9 @@ class InMemoryCatalog:
         job["error"] = {"type": "DeadlineExceeded", "message": "job exceeded its deadline"}
         return job
 
+    def record_episode_quality(self, episode_id: str, quality: dict[str, Any]) -> dict[str, Any]:
+        return {"episode_id": episode_id, "verdict": quality["verdict"]}
+
     def register_episode(self, **kwargs: Any) -> dict[str, Any]:
         episode_id = str(uuid.uuid4())
         episode = {

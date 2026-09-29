@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from data_engine.analysis.quality import analyze
 from data_engine.catalog.repository import PostgresCatalog, canonical_json
 from data_engine.ingest.readers.base import EpisodeExtraction, ReaderError
 from data_engine.ingest.readers.registry import read_episode
@@ -73,6 +74,7 @@ class EpisodeIngestService:
             metadata=metadata,
             job_id=job_id,
             episode_format="synthetic-json",
+            quality=analyze(_synthetic_series(episode)).to_dict(),
         )
 
     def ingest_path(
@@ -100,6 +102,7 @@ class EpisodeIngestService:
             job_id=job_id,
             episode_format=extraction.format,
             episode_key=extraction.episode_key,
+            quality=extraction.quality.to_dict() if extraction.quality else None,
         )
 
     def _register(
@@ -112,6 +115,7 @@ class EpisodeIngestService:
         job_id: str,
         episode_format: str,
         episode_key: str | None = None,
+        quality: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         episode_row = self.catalog.register_episode(
             source_hash=source_hash,
@@ -122,6 +126,8 @@ class EpisodeIngestService:
             episode_key=episode_key,
             episode_format=episode_format,
         )
+        if quality is not None:
+            self.catalog.record_episode_quality(str(episode_row["id"]), quality)
         self.metrics.artifact_written(size_bytes)
         self.metrics.episode_ingested(episode_format=episode_format, status="succeeded")
         return {
@@ -132,6 +138,17 @@ class EpisodeIngestService:
             "episode_key": episode_key,
             "frame_count": metadata.get("frame_count"),
         }
+
+
+def _synthetic_series(episode: dict[str, Any]) -> dict[str, list[float]]:
+    """Name the synthetic payload's columns the way robot datasets name theirs."""
+    series: dict[str, list[float]] = {}
+    for source, prefix in (("observations", "observation"), ("actions", "action")):
+        rows = episode[source]
+        width = len(rows[0]) if rows else 0
+        for i in range(width):
+            series[f"{prefix}[{i}]"] = [float(row[i]) for row in rows]
+    return series
 
 
 # The name the worker and its tests already use. Kept as an alias because renaming it

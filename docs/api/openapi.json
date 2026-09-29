@@ -55,6 +55,71 @@
         "title": "ArtifactSummary",
         "type": "object"
       },
+      "EpisodeQualityResponse": {
+        "description": "Motion-quality signals for one episode (ADR 0018).",
+        "properties": {
+          "computed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Computed At"
+          },
+          "dims": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Dims",
+            "type": "array"
+          },
+          "episode_id": {
+            "title": "Episode Id",
+            "type": "string"
+          },
+          "frame_count": {
+            "title": "Frame Count",
+            "type": "integer"
+          },
+          "jerk_score": {
+            "title": "Jerk Score",
+            "type": "number"
+          },
+          "length_zscore": {
+            "default": 0.0,
+            "title": "Length Zscore",
+            "type": "number"
+          },
+          "movement_score": {
+            "title": "Movement Score",
+            "type": "number"
+          },
+          "stall_ratio": {
+            "title": "Stall Ratio",
+            "type": "number"
+          },
+          "verdict": {
+            "title": "Verdict",
+            "type": "string"
+          }
+        },
+        "required": [
+          "episode_id",
+          "frame_count",
+          "movement_score",
+          "jerk_score",
+          "stall_ratio",
+          "verdict",
+          "dims"
+        ],
+        "title": "EpisodeQualityResponse",
+        "type": "object"
+      },
       "EpisodeResponse": {
         "properties": {
           "artifact_hash": {
@@ -516,6 +581,61 @@
         "title": "MetricsResponse",
         "type": "object"
       },
+      "QualitySummaryResponse": {
+        "description": "Dataset-level distributions and outlier lists for curation triage.",
+        "properties": {
+          "episode_count": {
+            "title": "Episode Count",
+            "type": "integer"
+          },
+          "heat_matrix": {
+            "additionalProperties": true,
+            "title": "Heat Matrix",
+            "type": "object"
+          },
+          "length": {
+            "additionalProperties": true,
+            "title": "Length",
+            "type": "object"
+          },
+          "outliers": {
+            "additionalProperties": {
+              "items": {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "title": "Outliers",
+            "type": "object"
+          },
+          "speed_distribution": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Speed Distribution",
+            "type": "array"
+          },
+          "verdicts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Verdicts",
+            "type": "object"
+          }
+        },
+        "required": [
+          "episode_count",
+          "verdicts",
+          "length",
+          "speed_distribution",
+          "heat_matrix",
+          "outliers"
+        ],
+        "title": "QualitySummaryResponse",
+        "type": "object"
+      },
       "ResourceSample": {
         "properties": {
           "cpu_percent": {
@@ -943,6 +1063,46 @@
         "summary": "Get Episode"
       }
     },
+    "/api/v1/episodes/{episode_id}/quality": {
+      "get": {
+        "description": "Motion-quality signals computed at ingest (ADR 0018).",
+        "operationId": "get_episode_quality_api_v1_episodes__episode_id__quality_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "episode_id",
+            "required": true,
+            "schema": {
+              "title": "Episode Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EpisodeQualityResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Episode Quality"
+      }
+    },
     "/api/v1/health": {
       "get": {
         "operationId": "health_api_v1_health_get",
@@ -1251,6 +1411,25 @@
           }
         },
         "summary": "Runtime Metrics"
+      }
+    },
+    "/api/v1/quality/summary": {
+      "get": {
+        "description": "Length/speed distributions, cross-episode variance matrix, outlier lists.",
+        "operationId": "get_quality_summary_api_v1_quality_summary_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QualitySummaryResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Quality Summary"
       }
     },
     "/api/v1/status": {

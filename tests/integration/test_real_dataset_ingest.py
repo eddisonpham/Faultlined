@@ -303,3 +303,29 @@ def test_remediation_revalidates_without_reingesting(
         for row in _results_for(catalog, result["episode_id"], name)
     }
     assert len(hashes) == 2, "two profiles are two different policies"
+
+
+@pytest.mark.integration
+def test_real_episodes_carry_quality_signals(
+    tmp_path: Path, real_lerobot_dataset: Callable[[str], Path]
+) -> None:
+    """Motion quality lands with the episode: no second pass over the bytes."""
+    settings = _settings(tmp_path)
+    catalog = PostgresCatalog(settings)
+    worker = IngestWorker(settings)
+    result = _ingest_one(catalog, worker, real_lerobot_dataset("v3"), "episode_index=7")
+
+    quality = catalog.get_episode_quality(result["episode_id"])
+    assert quality is not None
+    assert quality["frame_count"] == result["frame_count"]
+    assert quality["movement_score"] > 0
+    assert 0.0 <= quality["stall_ratio"] <= 1.0
+    assert quality["verdict"] in {"smooth", "moderate", "jerky", "unknown"}
+    # A 6-dim arm expands into named per-joint dims.
+    assert "action[0]" in {dim["name"] for dim in quality["dims"]}
+    assert quality["length_zscore"] == quality["length_zscore"]  # finite, not NaN
+
+    summary = catalog.quality_summary()
+    assert summary["episode_count"] >= 1
+    assert summary["length"]["count"] >= 1
+    assert any(item["episode_id"] == result["episode_id"] for item in summary["speed_distribution"])

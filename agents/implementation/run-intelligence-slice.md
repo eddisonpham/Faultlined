@@ -53,7 +53,7 @@ already in memory (no byte re-read, matching the validation philosophy) and pers
 | `stall_ratio` | fraction of frames where every dim's abs delta < 0.1% of its motor range |
 | `length_zscore` | episode length vs dataset mean/σ at ingest time |
 | per-dim | activity flag (p95(|Δa|) ≥ 0.1% range), discrete flag (≤ 4 unique values), normalized σ of deltas |
-| `verdict` | `smooth` / `moderate` / `jerky` from normalized σ buckets (0.4 / 0.7 of max), excluding discrete + inactive dims and treating gripper-like dims separately |
+| `verdict` | `smooth` / `moderate` / `jerky` from absolute bands on normalized σ (<0.02 / <0.1 / ≥0.1) over judged dims; discrete dims not judged, gripper dims excluded. Deviation from source-log #46: the visualizer's bands are relative to the roughest dim, which is degenerate (the max dim always lands in its "jerky" bucket); recorded in ADR 0018 |
 
 - Persistence: `episode_quality` table (episode FK, scalars + per-dim JSON) via idempotent migration;
   `record_episode_quality`, `get_episode_quality`, `quality_summary` in the catalog repository.

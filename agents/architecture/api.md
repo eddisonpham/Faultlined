@@ -114,6 +114,8 @@ Added for the Status / Jobs / Artifacts pages; all are read-only, cursor-paginat
 | GET | `/api/v1/artifacts` | Newest-first artifact page with `episode_ids` per row. Cursor: `before`. |
 | GET | `/api/v1/status` | Health, `queue_depth` by job state, artifact/episode counts, and host telemetry. |
 | GET | `/api/v1/metrics` | Aggregated runtime telemetry from the JSONL sink (ADR 0017): per-metric+label summaries with p50/p95/p99, bucketed mean series for sparklines, live job-state counts, and derived worker heartbeat age. Optional `window_seconds`, `bucket_seconds`. |
+| GET | `/api/v1/episodes/{episode_id}/quality` | Motion-quality signals computed at ingest (ADR 0018): movement score, normalized jerk, stall ratio, per-dim activity, verdict, and a read-time length z-score. 404 for episodes ingested before quality existed. |
+| GET | `/api/v1/quality/summary` | Dataset-level curation view: episode-length histogram, speed distribution, cross-episode per-dim σ matrix, and top jerk / stall / length outliers with episode links. |
 
 The UI pages themselves live under `/ui` and are not part of the versioned API surface. They poll the
 same read model by re-requesting their own page with `X-Fragment: 1`, which returns only the polling body

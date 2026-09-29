@@ -260,6 +260,9 @@ class _BenchmarkCatalog:
         self.count += 1
         return {"id": f"episode-{self.count}"}
 
+    def record_episode_quality(self, episode_id: str, quality: dict[str, Any]) -> dict[str, str]:
+        return {"episode_id": episode_id, "verdict": str(quality["verdict"])}
+
 
 def _ingest_microbenchmark() -> BenchmarkResult:
     store_root = Path("var/benchmark-artifacts")

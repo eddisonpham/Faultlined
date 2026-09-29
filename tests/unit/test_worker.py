@@ -52,6 +52,10 @@ class FakeCatalog:
         }
         return self.episode
 
+    def record_episode_quality(self, episode_id: str, quality: dict[str, Any]) -> dict[str, Any]:
+        self.quality = quality
+        return {"episode_id": episode_id, "verdict": quality["verdict"]}
+
     def finish_job(self, job_id: str, state: JobState, **kwargs: Any) -> dict[str, Any]:
         self.state = state.value
         if kwargs.get("error") is not None:

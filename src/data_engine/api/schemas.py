@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from itertools import pairwise
 from typing import Any, Literal
 
@@ -156,6 +157,31 @@ class StatusResponse(BaseModel):
     artifact_count: int
     episode_count: int
     resources: ResourceSample
+
+
+class EpisodeQualityResponse(BaseModel):
+    """Motion-quality signals for one episode (ADR 0018)."""
+
+    episode_id: str
+    frame_count: int
+    movement_score: float
+    jerk_score: float
+    stall_ratio: float
+    verdict: str
+    dims: list[dict[str, Any]]
+    length_zscore: float = 0.0
+    computed_at: datetime | None = None
+
+
+class QualitySummaryResponse(BaseModel):
+    """Dataset-level distributions and outlier lists for curation triage."""
+
+    episode_count: int
+    verdicts: dict[str, int]
+    length: dict[str, Any]
+    speed_distribution: list[dict[str, Any]]
+    heat_matrix: dict[str, Any]
+    outliers: dict[str, list[dict[str, Any]]]
 
 
 class MetricSummaryModel(BaseModel):

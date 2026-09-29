@@ -68,6 +68,17 @@ CREATE TABLE IF NOT EXISTS validation_results (
     UNIQUE (episode_id, profile_hash)
 );
 
+CREATE TABLE IF NOT EXISTS episode_quality (
+    episode_id text PRIMARY KEY REFERENCES episodes(id),
+    frame_count integer NOT NULL,
+    movement_score double precision NOT NULL,
+    jerk_score double precision NOT NULL,
+    stall_ratio double precision NOT NULL,
+    verdict text NOT NULL,
+    dims jsonb NOT NULL,
+    computed_at timestamptz NOT NULL DEFAULT now()
+);
+
 CREATE TABLE IF NOT EXISTS lineage_edges (
     from_type text NOT NULL,
     from_ref text NOT NULL,
