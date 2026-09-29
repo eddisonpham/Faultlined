@@ -261,6 +261,52 @@ pre.de-json {
 
 .de-empty { color: var(--fine-use-comment, #080); padding: 0.6rem 0; letter-spacing: 0.08em; }
 
+/* ---- lifecycle actions ---------------------------------------------------- */
+
+.de-attempts { white-space: nowrap; }
+.de-attempts .de-meter { font-size: 0.75rem; opacity: 0.8; }
+
+.de-action {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  flex-wrap: wrap;
+  margin-top: 0.7rem;
+  padding-top: 0.6rem;
+  border-top: 1px dashed var(--fine-use-border, #0a0);
+}
+
+.de-cancel {
+  font: inherit;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--fine-use-error, #a00);
+  background: transparent;
+  border: 1px solid var(--fine-use-error, #a00);
+  padding: 0.25rem 0.7rem;
+  cursor: pointer;
+  transition: background 120ms linear, color 120ms linear;
+}
+
+/* Hover/focus invert rather than glow: this is an instrument, not a web page, and
+   an inverted block reads unambiguously in every vendored theme. */
+.de-cancel:hover,
+.de-cancel:focus-visible {
+  background: var(--fine-use-error, #a00);
+  color: var(--fine-use-surface, #010);
+  outline: none;
+}
+
+.de-cancel:active { transform: translateY(1px); }
+
+@media (prefers-reduced-motion: no-preference) {
+  .de-cancel:hover,
+  .de-cancel:focus-visible { transition-duration: 80ms; }
+}
+
+.de-action-note { font-size: 0.7rem; letter-spacing: 0.08em; opacity: 0.75; }
+
 @media (prefers-reduced-motion: no-preference) {
   .de-pulse { animation: de-blink 1.6s steps(2, start) infinite; }
 }

@@ -1222,6 +1222,60 @@
         "summary": "Ui Job Detail"
       }
     },
+    "/ui/jobs/{job_id}/cancel": {
+      "post": {
+        "description": "Cancel from the UI and bounce back to the job.\n\nA plain form post, so the control works without JavaScript. It calls the same\nrepository method as the API route rather than issuing an HTTP request to\nourselves; the redirect is 303 so a refresh does not re-submit the cancel.",
+        "operationId": "ui_cancel_job_ui_jobs__job_id__cancel_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "theme",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Theme"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ui Cancel Job"
+      }
+    },
     "/ui/vendor/terminal-ui/{name}.css": {
       "get": {
         "description": "Serve the vendored terminal stylesheet. See web/vendor/terminal-ui/NOTICE.md.",

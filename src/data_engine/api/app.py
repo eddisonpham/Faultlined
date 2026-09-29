@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import re
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from datetime import datetime
 from typing import Any, cast
 from uuid import uuid4
 
 from fastapi import FastAPI, Header, HTTPException, Request, Response
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 
 from data_engine.api.errors import install_error_handling
 from data_engine.api.schemas import (
@@ -22,7 +22,7 @@ from data_engine.api.schemas import (
     SubmitJobRequest,
 )
 from data_engine.catalog.database import initialize_schema
-from data_engine.catalog.repository import PostgresCatalog
+from data_engine.catalog.repository import InvalidTransition, PostgresCatalog
 from data_engine.config import Settings, load_settings
 from data_engine.jobs.state import DEFAULT_MAX_ATTEMPTS, JobState
 from data_engine.observability.telemetry import sample_resources
@@ -284,6 +284,23 @@ def create_app(
                 status_code=404,
             )
         return HTMLResponse(job_detail_page(job, _theme(theme)))
+
+    @app.post("/ui/jobs/{job_id}/cancel")
+    def ui_cancel_job(job_id: str, request: Request, theme: str | None = None) -> RedirectResponse:
+        """Cancel from the UI and bounce back to the job.
+
+        A plain form post, so the control works without JavaScript. It calls the same
+        repository method as the API route rather than issuing an HTTP request to
+        ourselves; the redirect is 303 so a refresh does not re-submit the cancel.
+        """
+        catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
+        # The detail page renders the current state, including why a cancel is no
+        # longer possible; a 409 here would only replace that with browser chrome for
+        # a race the user did not cause.
+        with suppress(KeyError, InvalidTransition):
+            catalog_for_request.request_cancel(job_id)
+        suffix = f"?theme={theme}" if theme in THEMES else ""
+        return RedirectResponse(f"/ui/jobs/{job_id}{suffix}", status_code=303)
 
     @app.get("/ui/artifacts", response_class=HTMLResponse)
     def ui_artifacts(

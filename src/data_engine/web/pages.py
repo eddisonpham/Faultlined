@@ -13,6 +13,7 @@ row twice and two renderers eventually disagreeing.
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 from html import escape
 from pathlib import Path
 from typing import Any
@@ -34,8 +35,19 @@ NAV_LINKS = (
     ("/docs", "API"),
 )
 
-JOB_STATES = ("queued", "running", "retrying", "succeeded", "failed", "canceled", "timed_out")
+JOB_STATES = (
+    "queued",
+    "running",
+    "retrying",
+    "cancel_requested",
+    "succeeded",
+    "failed",
+    "canceled",
+    "timed_out",
+)
 ACTIVE_STATES = ("queued", "running", "retrying", "cancel_requested")
+# States a cancel request can still act on (ADR 0015: terminal jobs are immutable).
+CANCELLABLE_STATES = ("queued", "running", "retrying")
 
 # Progress a job is expected to pass through, for the detail strip.
 STRIP_STEPS = ("queued", "running", "succeeded")
@@ -182,6 +194,28 @@ def _script(url: str | None, ms: int) -> str:
     return _CLOCK_JS + ("" if url is None else _POLL_JS % (json.dumps(url), ms))
 
 
+# Counts the remaining job budget down in the browser so a deadline does not need a
+# poll to look alive. Purely presentational: the server still owns the timeout.
+_DEADLINE_JS = """
+(function () {
+  var el = document.querySelector('[data-deadline]');
+  if (!el) return;
+  var deadline = Number(el.getAttribute('data-deadline')) * 1000;
+  var tick = function () {
+    var left = Math.round((deadline - Date.now()) / 1000);
+    if (left <= 0) {
+      el.textContent = Math.abs(Math.round(left / 60)) + 'm over';
+      el.className = 'text-error';
+      return;
+    }
+    el.textContent = Math.round(left / 60) + 'm left';
+  };
+  tick();
+  setInterval(tick, 15000);
+})();
+"""
+
+
 # ---------------------------------------------------------------- status
 
 
@@ -264,6 +298,15 @@ def _options(state_filter: str | None) -> str:
     )
 
 
+def _attempts(job: dict[str, Any]) -> str:
+    """`2/3` plus a meter, so retry pressure is visible in a list of 50 rows."""
+    used = int(job.get("attempts") or 0)
+    budget = max(int(job.get("max_attempts") or 1), 1)
+    if used == 0:
+        return '<span class="text-comment">-</span>'
+    return f'<span class="de-attempts">{used}/{budget} {_meter(used / budget, 10)}</span>'
+
+
 def _jobs_body(model: dict[str, Any]) -> str:
     items = model.get("items", [])
     if not items:
@@ -273,6 +316,7 @@ def _jobs_body(model: dict[str, Any]) -> str:
         f'<td><a href="/ui/jobs/{escape(str(i["id"]))}">{escape(str(i["id"])[:8])}</a></td>'
         f"<td>{escape(str(i['type']))}</td>"
         f"<td>{_state_badge(str(i['state']))}</td>"
+        f"<td>{_attempts(i)}</td>"
         f"<td>{_when(i.get('created_at'))}</td>"
         f"<td>{_when(i.get('finished_at'))}</td>"
         f'<td class="dim">{escape(str(i["correlation_id"])[:8])}</td>'
@@ -281,7 +325,7 @@ def _jobs_body(model: dict[str, Any]) -> str:
     )
     return (
         '<table class="de-table"><thead><tr><th>Job</th><th>Type</th><th>State</th>'
-        "<th>Queued</th><th>Finished</th><th>Trace</th></tr></thead>"
+        "<th>Attempts</th><th>Queued</th><th>Finished</th><th>Trace</th></tr></thead>"
         f"<tbody>{rows}</tbody></table>"
     )
 
@@ -301,20 +345,67 @@ def _strip(state: str) -> str:
     return '<div class="de-strip">' + '<span class="sep">&rarr;</span>'.join(parts) + "</div>"
 
 
+def _deadline(job: dict[str, Any], now: datetime | None = None) -> str:
+    """Absolute deadline plus the budget left, ticking live in the browser."""
+    raw = job.get("deadline_at")
+    if not raw:
+        return '<span class="text-comment">-</span>'
+    try:
+        moment = raw if isinstance(raw, datetime) else datetime.fromisoformat(str(raw))
+    except ValueError:
+        return escape(str(raw))
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=UTC)
+    remaining = (moment - (now or datetime.now(UTC))).total_seconds()
+    spent = remaining <= 0
+    remaining_text = f"{abs(remaining) / 60:.0f}m {'over' if spent else 'left'}"
+    css = "text-error" if spent else ("text-warning" if remaining < 60 else "text-success")
+    return (
+        f"{_when(moment)} "
+        f'<span class="{css}" data-deadline="{int(moment.timestamp())}">'
+        f"{escape(remaining_text)}</span>"
+    )
+
+
+def _cancel_action(job: dict[str, Any], theme: str) -> str:
+    """A cancel control for live jobs only.
+
+    The button is a form post to the UI route, not JavaScript: the action must work
+    with scripting off, and the API route stays the single source of truth.
+    """
+    state = str(job.get("state"))
+    if state not in CANCELLABLE_STATES:
+        note = "cancel unavailable" if state in ACTIVE_STATES else "terminal state"
+        return f'<span class="de-action-note text-comment">// {note}</span>'
+    job_id = escape(str(job.get("id")))
+    query = f"?theme={escape(theme)}" if theme else ""
+    return (
+        '<form class="de-action" method="post" '
+        f'action="/ui/jobs/{job_id}/cancel{query}">'
+        '<button type="submit" class="de-cancel">cancel job</button>'
+        '<span class="de-action-note">'
+        "queued &rarr; canceled // running &rarr; cancel_requested</span>"
+        "</form>"
+    )
+
+
 def job_detail_page(job: dict[str, Any], theme: str) -> str:
     state = str(job.get("state"))
     facts = [
         ("job id", escape(str(job.get("id")))),
         ("type", escape(str(job.get("type")))),
         ("trace", escape(str(job.get("correlation_id")))),
+        ("attempts", _attempts(job)),
         ("queued", _when(job.get("created_at"))),
         ("started", _when(job.get("started_at"))),
         ("finished", _when(job.get("finished_at"))),
+        ("deadline", _deadline(job)),
     ]
     if job.get("error"):
         facts.append(("error", escape(str((job["error"] or {}).get("code", "see below")))))
     blocks = [
-        f'<section class="de-section"><h2>State</h2>{_strip(state)}</section>',
+        '<section class="de-section"><h2>State</h2>'
+        f"{_strip(state)}{_cancel_action(job, theme)}</section>",
         '<section class="de-section"><h2>Record</h2><dl class="de-kv">'
         + "".join(f"<dt>{k}</dt><dd>{v}</dd>" for k, v in facts)
         + "</dl></section>",
@@ -335,7 +426,13 @@ def job_detail_page(job: dict[str, Any], theme: str) -> str:
     if episode:
         link = f"/api/v1/episodes/{escape(str(episode))}"
         blocks.append(f'<p><a href="{link}">// episode json</a></p>')
-    return _page("Job " + str(job.get("id"))[:8], "/ui/jobs", "".join(blocks), theme)
+    return _page(
+        "Job " + str(job.get("id"))[:8],
+        "/ui/jobs",
+        "".join(blocks),
+        theme,
+        _script(None, 0) + _DEADLINE_JS,
+    )
 
 
 # ---------------------------------------------------------------- artifacts

@@ -67,6 +67,28 @@ Provenance, licence, and the known caveats are in
 themes that do not exist in the repository. It is unproven. It is isolated behind two routes and one
 stylesheet link so it can be dropped without touching Python logic.
 
+## Addendum (2026-09-29): the first write action
+
+The pages were read-only, which made the lifecycle work invisible from the browser. The job
+detail page now carries a cancel control, and the rule it follows is the one this ADR already
+protects: **the control is a form post, not JavaScript.** The button posts to `/ui/jobs/{id}/cancel`,
+which calls the same repository method as `POST /api/v1/jobs/{id}/cancel` and redirects (303) back
+to the detail page. No bundler, no framework, no client-side state, and it works with scripting
+disabled - which is the property the whole no-build decision was chosen for.
+
+Two details worth recording:
+
+- A cancel race redirects rather than surfacing a 409. The job may legitimately finish between
+  render and click; the detail page already shows the authoritative state, so an error page would
+  replace truth with noise for something the user did not cause.
+- The button only renders for cancellable states (`queued`/`running`/`retrying`). Terminal jobs
+  show a `// terminal state` note instead, so the UI never implies an action the API will reject.
+
+The interactive-but-not-built additions are the attempt meter (`2/3` plus an ASCII bar) in the jobs
+list and the deadline countdown on the detail page. The countdown is presentational only: it ticks
+in the browser so a deadline does not need a poll to look alive, while the server still owns the
+timeout (ADR 0015).
+
 ## Style mandate
 
 The owner redefined the visual direction as a low-level instrument/telemetry console: monospace

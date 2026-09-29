@@ -137,6 +137,53 @@ class ListingCatalogStub(CatalogStub):
     def count_episodes(self) -> int:
         return 1
 
+    def request_cancel(self, job_id: str) -> dict[str, Any]:
+        self.canceled = job_id
+        return {"id": job_id, "state": "canceled"}
+
+
+@pytest.mark.contract
+def test_ui_cancel_posts_and_redirects_back_to_the_job() -> None:
+    """A 303 keeps a browser refresh from re-submitting the cancel."""
+    app = create_app(Settings(_env_file=None), initialize_database=False)
+    catalog = ListingCatalogStub()
+    app.state.catalog = catalog
+    client = TestClient(app)
+
+    response = client.post("/ui/jobs/job-1/cancel", follow_redirects=False)
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/ui/jobs/job-1"
+    assert catalog.canceled == "job-1"
+
+
+@pytest.mark.contract
+def test_ui_cancel_preserves_a_valid_theme_and_drops_a_hostile_one() -> None:
+    app = create_app(Settings(_env_file=None), initialize_database=False)
+    app.state.catalog = ListingCatalogStub()
+    client = TestClient(app)
+
+    kept = client.post("/ui/jobs/job-1/cancel?theme=amber", follow_redirects=False)
+    assert kept.headers["location"] == "/ui/jobs/job-1?theme=amber"
+
+    dropped = client.post("/ui/jobs/job-1/cancel?theme=../../etc/passwd", follow_redirects=False)
+    assert dropped.headers["location"] == "/ui/jobs/job-1"
+
+
+@pytest.mark.contract
+def test_ui_cancel_swallows_a_race_instead_of_showing_an_error_page() -> None:
+    """The job may finish between render and click; the detail page shows the truth."""
+    app = create_app(Settings(_env_file=None), initialize_database=False)
+
+    class AlreadyGone(ListingCatalogStub):
+        def request_cancel(self, job_id: str) -> dict[str, Any]:
+            raise KeyError(job_id)
+
+    app.state.catalog = AlreadyGone()
+    response = TestClient(app).post("/ui/jobs/gone/cancel", follow_redirects=False)
+    assert response.status_code == 303
+    assert response.headers["location"] == "/ui/jobs/gone"
+
 
 def _ui_client() -> TestClient:
     app = create_app(Settings(_env_file=None), initialize_database=False)
