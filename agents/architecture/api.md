@@ -130,6 +130,25 @@ Added for the Status / Jobs / Artifacts pages; all are read-only, cursor-paginat
 | GET | `/api/v1/episodes/{episode_id}/quality` | Motion-quality signals computed at ingest (ADR 0018): movement score, normalized jerk, stall ratio, per-dim activity, verdict, and a read-time length z-score. 404 for episodes ingested before quality existed. |
 | GET | `/api/v1/quality/summary` | Dataset-level curation view: episode-length histogram, speed distribution, cross-episode per-dim σ matrix, and top jerk / stall / length outliers with episode links. |
 
+## Monitoring notifier ([ADR 0020](../decisions/0020-deterministic-monitoring-notifier.md))
+
+Deterministic. No trained model, no LLM call, and no network dependency in the detection path;
+every incident is a rule or a control limit over a feature vector and cites its own evidence.
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/api/v1/incidents` | The incident queue, newest first, cursor on `last_seen`. Filters: `severity` and `label` (both validated against the registry, else 422), `status`, `limit` (1–500), `before`. Read-only. |
+| GET | `/api/v1/incidents/summary` | Queue shape for a header: counts by status, severity, and label, plus how many open incidents would interrupt the owner. |
+| GET | `/api/v1/incidents/{id}` | One incident with its full evidence bundle. 404 for unknown ids. |
+| POST | `/api/v1/incidents/{id}/ack` | Acknowledge. An append-only fact rather than a resolution, so a same-fault recurrence still dedups onto the same incident. 404 for unknown or already-resolved ids. |
+| POST | `/api/v1/incidents/{id}/resolve` | Resolve. Terminal: a same-fault recurrence afterwards opens a new incident, subject to the cooldown. |
+| GET | `/api/v1/monitoring/health` | The monitor's own state: last tick, schema version, baseline scope/warm/held counts, alert budget, the notify-label policy, and the registered detectors. A monitor that has silently stopped looks exactly like one with nothing to report, so this is a first-class endpoint rather than a log line. |
+| POST | `/api/v1/monitoring/tick` | Evaluate one window on demand. The loop is a scheduler's job, not a webhook's; this exists so the notifier can be driven deterministically from a test, a benchmark, or an operator who wants to see what it would say now. |
+| GET | `/api/v1/monitoring/notify-preview` | Plain text: exactly what a notifier would deliver right now. **Rendering only — nothing is sent.** Outbound email is deliberately not implemented and requires explicit owner authorization ([ADR 0020 §10.3](../decisions/0020-deterministic-monitoring-notifier.md)). |
+| PUT | `/api/v1/contracts/{job_id}` | Declare a completion contract for a run: `expected_episodes`, `expected_valid_fraction`, `max_duration_seconds`, `deadline_at`. Idempotent per job; re-declaring resets the outcome to `pending`, because a revised expectation has not been evaluated yet. 404 for unknown jobs, 422 for an impossible value, and `extra="forbid"` so a typo'd field fails loudly. |
+| GET | `/api/v1/contracts` | Declared contracts with their outcome and observed counts; filters `outcome`, `limit`, cursor `before`. |
+| GET | `/api/v1/contracts/{job_id}` | One contract. 404 for unknown jobs or contracts. |
+
 The UI pages themselves live under `/ui` and are not part of the versioned API surface. They poll the
 same read model by re-requesting their own page with `X-Fragment: 1`, which returns only the polling body
 so Python remains the single renderer.

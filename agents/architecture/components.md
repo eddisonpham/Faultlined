@@ -171,3 +171,26 @@ Sits between Ingest and the catalog write: signals are computed from the rows th
 - **Failure behavior:** quality must never fail an ingest — degenerate inputs score 0 with verdict
   `unknown`; mismatched series raise `ValueError` before any bytes are written.
 - **Owner:** implementer.
+
+## 16. Monitoring notifier (`monitoring/`)
+
+Sits beside the pipeline and reads it; it is never in the ingest or build path.
+
+- **Responsibility:** Decide whether something is actually wrong during unattended curation and put a short,
+  deduplicated, explainable queue of incidents in front of the operator (ADR 0020). **Deterministic: no
+  trained model, no LLM call, and no network dependency in the detection path.** Five stages, each
+  independently testable: a versioned pure feature vector, per-scope control limits, eleven detector rules,
+  triage, and deterministic rendering.
+- **Inputs:** the JSONL metric sink and catalog state (one bounded snapshot per tick), declared completion
+  contracts, and the host resource sample.
+- **Outputs:** `monitor_incidents` rows (fingerprint, label, severity, notify class, evidence bundle,
+  occurrence count, status), `monitor_baselines` rows (bounded sample window, EWMA centre, hold state),
+  `job_contracts` outcomes, and the monitor's own metrics.
+- **Dependencies:** none beyond the standard library, by design — the notifier cannot acquire a dependency,
+  a model artifact, or a credential it does not need.
+- **Failure behavior:** out of band. A failed monitor must never fail a build, so every tick step catches,
+  counts, and reports through `GET /api/v1/monitoring/health` rather than propagating. A database outage
+  yields exactly one `DATABASE_UNREACHABLE` signal and keeps the control limits in memory. An unreachable
+  catalog means no catalog-derived feature is recorded, because a zero would read as a healthy empty system.
+  A monitor with no telemetry reports itself *blind* rather than quiet.
+- **Owner:** implementer; policy questions (alert budget, whether `medium` may ever page) are the owner's.

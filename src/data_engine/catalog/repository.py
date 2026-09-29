@@ -8,6 +8,7 @@ import time
 import uuid
 from collections.abc import Callable, Sequence
 from datetime import UTC, datetime, timedelta
+from itertools import pairwise
 from typing import Any, cast
 
 from psycopg.types.json import Jsonb
@@ -221,6 +222,47 @@ def _length_summary(lengths: list[int]) -> dict[str, Any]:
         "max": hi,
         "histogram": histogram,
     }
+
+
+def _max_timestamp_gap(rows: Sequence[dict[str, Any]]) -> dict[str, Any] | None:
+    """Largest gap between consecutive per-step timestamps, over a bounded sample.
+
+    A camera that drops from 30 Hz to 1 Hz produces perfectly valid episodes that
+    are useless for training, and nothing else in the pipeline notices. The check
+    is deliberately forgiving about metadata shape: episodes whose metadata carries
+    no timestamp series simply do not participate, which is the same abstain-if-
+    absent rule the feature builder follows everywhere else.
+    """
+    best: dict[str, Any] | None = None
+    for row in rows:
+        metadata = row.get("metadata")
+        if not isinstance(metadata, dict):
+            continue
+        stamps = metadata.get("timestamps") or metadata.get("frame_timestamps")
+        if not isinstance(stamps, list) or len(stamps) < 2:
+            continue
+        values: list[float] = []
+        for stamp in stamps:
+            if isinstance(stamp, (int, float)):
+                values.append(float(stamp))
+            elif isinstance(stamp, str):
+                try:
+                    parsed = datetime.fromisoformat(stamp)
+                except ValueError:
+                    continue
+                values.append(
+                    parsed.timestamp() if parsed.tzinfo else parsed.replace(tzinfo=UTC).timestamp()
+                )
+        if len(values) < 2:
+            continue
+        gap = max(right - left for left, right in pairwise(values))
+        if best is None or gap > best["gap_seconds"]:
+            best = {
+                "gap_seconds": gap,
+                "source_hash": str(row.get("source_hash") or ""),
+                "episode_id": str(row.get("id") or ""),
+            }
+    return best
 
 
 def _mean(values: Sequence[float]) -> float:
@@ -1064,6 +1106,410 @@ class PostgresCatalog:
                 params,
             ).fetchall()
         return [dict(row) for row in rows]
+
+    # ---- monitoring notifier (ADR 0020) ----
+
+    def monitoring_snapshot(
+        self, *, now: datetime | None = None, clock_sample: int = 200
+    ) -> dict[str, Any]:
+        """One round trip of catalog state for one evaluation tick.
+
+        The feature builder is pure, so everything it needs is gathered here and
+        handed over as a plain mapping. Gathering it in a single query matters:
+        seven separate count queries per tick would make the monitor the most
+        expensive thing in the process.
+        """
+        reference = now or datetime.now(UTC)
+        with connect(self.settings) as connection:
+            depth_rows = connection.execute(
+                "SELECT state, count(*) AS total FROM jobs GROUP BY state"
+            ).fetchall()
+            oldest = connection.execute(
+                """SELECT extract(epoch FROM (%(now)s - min(created_at))) AS age
+                   FROM jobs WHERE state = 'queued'""",
+                {"now": reference},
+            ).fetchone()
+            running_rows = connection.execute(
+                """SELECT id, type,
+                          extract(epoch FROM (%(now)s - coalesce(started_at, created_at))) AS age,
+                          (deadline_at IS NOT NULL AND deadline_at < %(now)s) AS deadline_passed
+                   FROM jobs
+                   WHERE state IN ('running', 'cancel_requested', 'retrying')
+                   ORDER BY coalesce(started_at, created_at)
+                   LIMIT 50""",
+                {"now": reference},
+            ).fetchall()
+            episodes = connection.execute(
+                """SELECT count(*) AS total,
+                          count(*) FILTER (WHERE state = 'quarantined') AS quarantined
+                   FROM episodes"""
+            ).fetchone()
+            verdicts = connection.execute(
+                "SELECT verdict, count(*) AS total FROM episode_quality GROUP BY verdict"
+            ).fetchall()
+            quality = connection.execute(
+                """SELECT avg(movement_score) AS movement, avg(jerk_score) AS jerk,
+                          avg(stall_ratio) AS stall,
+                          percentile_cont(0.5) WITHIN GROUP (ORDER BY frame_count) AS frames
+                   FROM episode_quality"""
+            ).fetchone()
+            recent = connection.execute(
+                """SELECT id, source_hash, metadata FROM episodes
+                   ORDER BY created_at DESC LIMIT %s""",
+                (clock_sample,),
+            ).fetchall()
+
+        snapshot: dict[str, Any] = {
+            "queue_depth": {str(row["state"]): int(cast(int, row["total"])) for row in depth_rows},
+            "running": [
+                {
+                    "id": str(row["id"]),
+                    "job_type": str(row["type"]),
+                    "age_seconds": float(cast(float, row["age"] or 0.0)),
+                    "deadline_passed": bool(row["deadline_passed"]),
+                }
+                for row in running_rows
+            ],
+            "verdict_rates": {
+                str(row["verdict"]): int(cast(int, row["total"])) for row in verdicts
+            },
+        }
+        if oldest is not None and oldest["age"] is not None:
+            snapshot["oldest_queued_age_seconds"] = float(cast(float, oldest["age"]))
+        if episodes is not None and int(cast(int, episodes["total"]) or 0) > 0:
+            snapshot["quarantine_rate"] = int(cast(int, episodes["quarantined"]) or 0) / int(
+                cast(int, episodes["total"])
+            )
+        if quality is not None:
+            for key, column in (
+                ("movement_mean", "movement"),
+                ("jerk_mean", "jerk"),
+                ("stall_mean", "stall"),
+                ("frame_count_median", "frames"),
+            ):
+                if quality[column] is not None:
+                    snapshot[key] = float(cast(float, quality[column]))
+        gap = _max_timestamp_gap(recent)
+        if gap is not None:
+            snapshot["max_episode_timestamp_gap_seconds"] = gap["gap_seconds"]
+            snapshot["timestamp_gap_source"] = gap["source_hash"]
+            snapshot["timestamp_gap_scope"] = gap["episode_id"]
+        return snapshot
+
+    def upsert_incident(
+        self,
+        *,
+        incident_id: str,
+        fingerprint: str,
+        label: str,
+        severity: str,
+        notify_class: str,
+        scope: str,
+        summary: str,
+        evidence: dict[str, Any],
+        feature_schema_version: int,
+        seen_at: datetime,
+    ) -> dict[str, Any]:
+        """Create or bump one incident, atomically.
+
+        The partial unique index on ``(fingerprint) WHERE status <> 'resolved'`` is
+        the dedup guarantee, so the conflict target is that index rather than a
+        read-then-write in Python. A crash between the triage decision and the
+        insert cannot therefore open a second row for the same fault.
+        """
+        with connect(self.settings) as connection:
+            row = connection.execute(
+                """INSERT INTO monitor_incidents
+                       (id, fingerprint, label, severity, notify_class, scope, summary,
+                        evidence, status, occurrence_count, feature_schema_version,
+                        first_seen, last_seen)
+                   VALUES (%(id)s, %(fingerprint)s, %(label)s, %(severity)s, %(notify)s,
+                           %(scope)s, %(summary)s, %(evidence)s, 'open', 1, %(schema)s,
+                           %(seen)s, %(seen)s)
+                   ON CONFLICT (fingerprint) WHERE status <> 'resolved' DO UPDATE
+                       SET occurrence_count = monitor_incidents.occurrence_count + 1,
+                           last_seen = EXCLUDED.last_seen,
+                           evidence = EXCLUDED.evidence,
+                           summary = EXCLUDED.summary,
+                           severity = CASE
+                               WHEN monitor_incidents.severity = 'critical'
+                                    AND EXCLUDED.severity <> 'critical'
+                               THEN monitor_incidents.severity
+                               ELSE EXCLUDED.severity
+                           END
+                   RETURNING *""",
+                {
+                    "id": incident_id,
+                    "fingerprint": fingerprint,
+                    "label": label,
+                    "severity": severity,
+                    "notify": notify_class,
+                    "scope": scope,
+                    "summary": summary,
+                    "evidence": Jsonb(evidence),
+                    "schema": feature_schema_version,
+                    "seen": seen_at,
+                },
+            ).fetchone()
+        if row is None:
+            raise RuntimeError("incident upsert returned no row")
+        return dict(row)
+
+    def list_incidents(
+        self,
+        *,
+        severity: str | None = None,
+        status: str | None = None,
+        label: str | None = None,
+        limit: int = 50,
+        before: datetime | None = None,
+    ) -> list[dict[str, Any]]:
+        """Newest-first incident page, cursor-based on ``last_seen``."""
+        clauses: list[str] = []
+        params: list[Any] = []
+        if severity is not None:
+            clauses.append("severity = %s")
+            params.append(severity)
+        if status is not None:
+            clauses.append("status = %s")
+            params.append(status)
+        if label is not None:
+            clauses.append("label = %s")
+            params.append(label)
+        if before is not None:
+            clauses.append("last_seen < %s")
+            params.append(before)
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        params.append(limit)
+        with connect(self.settings) as connection:
+            rows = connection.execute(
+                f"""SELECT id, fingerprint, label, severity, notify_class, scope, summary,
+                           evidence, status, occurrence_count, feature_schema_version,
+                           first_seen, last_seen, acknowledged_at, resolved_at
+                    FROM monitor_incidents {where}
+                    ORDER BY last_seen DESC, id DESC LIMIT %s""",
+                params,
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def get_incident(self, incident_id: str) -> dict[str, Any] | None:
+        with connect(self.settings) as connection:
+            row = connection.execute(
+                "SELECT * FROM monitor_incidents WHERE id = %s", (incident_id,)
+            ).fetchone()
+        return dict(row) if row else None
+
+    def unresolved_incidents(self) -> list[dict[str, Any]]:
+        """Fingerprints triage needs to reason about dedup, cooldown, and the budget."""
+        with connect(self.settings) as connection:
+            rows = connection.execute(
+                """SELECT id, fingerprint, status, last_seen, occurrence_count
+                   FROM monitor_incidents WHERE status <> 'resolved'"""
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def incidents_opened_since(self, since: datetime) -> int:
+        """Distinct incidents opened in the budget window.
+
+        Counts rows by ``first_seen`` and deliberately *not* by ``occurrence_count``:
+        a fault that recurs twenty times is one thing that went wrong, and counting
+        its bumps would mean a long-running incident silently refunds its own budget
+        the more it persists — which is precisely the fault a budget exists to cap.
+        """
+        with connect(self.settings) as connection:
+            row = connection.execute(
+                "SELECT count(*) AS total FROM monitor_incidents WHERE first_seen >= %s",
+                (since,),
+            ).fetchone()
+        return int(cast(int, row["total"])) if row else 0
+
+    def set_incident_status(self, incident_id: str, status: str) -> dict[str, Any] | None:
+        """Acknowledge or resolve; both are append-only facts, never deletions."""
+        column = "acknowledged_at" if status == "acknowledged" else "resolved_at"
+        with connect(self.settings) as connection:
+            row = connection.execute(
+                f"""UPDATE monitor_incidents
+                    SET status = %s, {column} = COALESCE({column}, now())
+                    WHERE id = %s AND status <> 'resolved'
+                    RETURNING *""",
+                (status, incident_id),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def incident_summary(self) -> dict[str, Any]:
+        """Queue shape for the header and the monitor's own health readout."""
+        with connect(self.settings) as connection:
+            by_status = connection.execute(
+                "SELECT status, count(*) AS total FROM monitor_incidents GROUP BY status"
+            ).fetchall()
+            by_severity = connection.execute(
+                """SELECT severity, count(*) AS total FROM monitor_incidents
+                   WHERE status <> 'resolved' GROUP BY severity"""
+            ).fetchall()
+            by_label = connection.execute(
+                """SELECT label, count(*) AS total FROM monitor_incidents
+                   WHERE status <> 'resolved' GROUP BY label ORDER BY total DESC"""
+            ).fetchall()
+            notify_rows = connection.execute(
+                """SELECT count(*) AS total FROM monitor_incidents
+                   WHERE status <> 'resolved' AND notify_class = 'notify'"""
+            ).fetchone()
+        return {
+            "by_status": {str(row["status"]): int(cast(int, row["total"])) for row in by_status},
+            "by_severity": {
+                str(row["severity"]): int(cast(int, row["total"])) for row in by_severity
+            },
+            "by_label": {str(row["label"]): int(cast(int, row["total"])) for row in by_label},
+            "notify_open": int(cast(int, notify_rows["total"])) if notify_rows else 0,
+        }
+
+    def load_baselines(self) -> list[dict[str, Any]]:
+        with connect(self.settings) as connection:
+            rows = connection.execute(
+                """SELECT feature, scope, samples, center, breached, held_since
+                   FROM monitor_baselines"""
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def save_baselines(self, rows: Sequence[dict[str, Any]]) -> int:
+        """Upsert every control limit touched by a tick.
+
+        One statement for the whole set: at ~30 scopes per tick this is a single
+        round trip, and a partially-written baseline set is worse than a stale one.
+        """
+        if not rows:
+            return 0
+        payload = [
+            (
+                row["feature"],
+                row.get("scope", ""),
+                Jsonb(list(row.get("samples") or [])),
+                float(row.get("center") or 0.0),
+                bool(row.get("breached")),
+                row.get("held_since"),
+            )
+            for row in rows
+        ]
+        with connect(self.settings) as connection:
+            connection.execute(
+                """INSERT INTO monitor_baselines
+                       (feature, scope, samples, center, breached, held_since, updated_at)
+                   SELECT *, now() FROM unnest(
+                       %s::text[], %s::text[], %s::jsonb[],
+                       %s::double precision[], %s::boolean[], %s::double precision[])
+                   ON CONFLICT (feature, scope) DO UPDATE
+                       SET samples = EXCLUDED.samples,
+                           center = EXCLUDED.center,
+                           breached = EXCLUDED.breached,
+                           held_since = EXCLUDED.held_since,
+                           updated_at = now()""",
+                (
+                    [item[0] for item in payload],
+                    [item[1] for item in payload],
+                    [item[2] for item in payload],
+                    [item[3] for item in payload],
+                    [item[4] for item in payload],
+                    [item[5] for item in payload],
+                ),
+            )
+        return len(payload)
+
+    def register_contract(self, job_id: str, expectation: dict[str, Any]) -> dict[str, Any]:
+        """Declare a completion contract for a run, idempotently per job."""
+        with connect(self.settings) as connection:
+            row = connection.execute(
+                """INSERT INTO job_contracts
+                       (job_id, expected_episodes, expected_valid_fraction,
+                        max_duration_seconds, deadline_at)
+                   VALUES (%(job)s, %(episodes)s, %(fraction)s, %(duration)s, %(deadline)s)
+                   ON CONFLICT (job_id) DO UPDATE
+                       SET expected_episodes = EXCLUDED.expected_episodes,
+                           expected_valid_fraction = EXCLUDED.expected_valid_fraction,
+                           max_duration_seconds = EXCLUDED.max_duration_seconds,
+                           deadline_at = EXCLUDED.deadline_at,
+                           outcome = 'pending',
+                           observed = '{}'::jsonb,
+                           updated_at = now()
+                   RETURNING *""",
+                {
+                    "job": job_id,
+                    "episodes": expectation.get("expected_episodes"),
+                    "fraction": expectation.get("expected_valid_fraction"),
+                    "duration": expectation.get("max_duration_seconds"),
+                    "deadline": expectation.get("deadline_at"),
+                },
+            ).fetchone()
+        if row is None:
+            raise RuntimeError("contract upsert returned no row")
+        return dict(row)
+
+    def get_contract(self, job_id: str) -> dict[str, Any] | None:
+        with connect(self.settings) as connection:
+            row = connection.execute(
+                "SELECT * FROM job_contracts WHERE job_id = %s", (job_id,)
+            ).fetchone()
+        return dict(row) if row else None
+
+    def list_contracts(
+        self, *, outcome: str | None = None, limit: int = 50, before: datetime | None = None
+    ) -> list[dict[str, Any]]:
+        clauses: list[str] = []
+        params: list[Any] = []
+        if outcome is not None:
+            clauses.append("c.outcome = %s")
+            params.append(outcome)
+        if before is not None:
+            clauses.append("c.created_at < %s")
+            params.append(before)
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        params.append(limit)
+        with connect(self.settings) as connection:
+            rows = connection.execute(
+                f"""SELECT c.*, j.state AS job_state, j.type AS job_type
+                    FROM job_contracts c JOIN jobs j ON j.id = c.job_id
+                    {where}
+                    ORDER BY c.created_at DESC, c.job_id DESC LIMIT %s""",
+                params,
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def pending_contract_outcomes(self, *, limit: int = 100) -> list[dict[str, Any]]:
+        """Contracts still pending, with the observed counts needed to evaluate them.
+
+        Episode counts come from the lineage edge written at ingest, so a contract
+        measures the same episodes the build will contain.
+        """
+        produced = """(SELECT count(*) FROM lineage_edges l
+                            JOIN episodes e ON e.id = l.from_ref
+                           WHERE l.from_type = 'episode' AND l.to_type = 'job'
+                             AND l.to_ref = c.job_id)"""
+        valid = """(SELECT count(*) FROM lineage_edges l
+                            JOIN episodes e ON e.id = l.from_ref
+                           WHERE l.from_type = 'episode' AND l.to_type = 'job'
+                             AND l.to_ref = c.job_id AND e.state = 'valid')"""
+        with connect(self.settings) as connection:
+            rows = connection.execute(
+                f"""SELECT c.*, j.state AS job_state, j.type AS job_type,
+                           j.started_at, j.finished_at, j.created_at AS job_created_at,
+                           {produced} AS episodes_produced, {valid} AS episodes_valid
+                    FROM job_contracts c JOIN jobs j ON j.id = c.job_id
+                    WHERE c.outcome = 'pending'
+                    ORDER BY c.created_at LIMIT %s""",
+                (limit,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def set_contract_outcome(
+        self, job_id: str, outcome: str, observed: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        with connect(self.settings) as connection:
+            row = connection.execute(
+                """UPDATE job_contracts
+                      SET outcome = %s, observed = %s, updated_at = now()
+                    WHERE job_id = %s RETURNING *""",
+                (outcome, Jsonb(observed), job_id),
+            ).fetchone()
+        return dict(row) if row else None
 
 
 # Public operations are wrapped once here so every current and future repository

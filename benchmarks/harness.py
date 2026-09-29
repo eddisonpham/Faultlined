@@ -633,6 +633,90 @@ class _BenchApiCatalog:
             }
         ]
 
+    def list_incidents(self, **filters: Any) -> list[dict[str, Any]]:
+        rows = [_bench_incident(i) for i in range(20)]
+        for key in ("severity", "status", "label"):
+            if filters.get(key) is not None:
+                rows = [row for row in rows if row[key] == filters[key]]
+        return rows[: filters.get("limit", 50)]
+
+    def get_incident(self, incident_id: str) -> dict[str, Any] | None:
+        return next((r for r in self.list_incidents(limit=20) if r["id"] == incident_id), None)
+
+    def set_incident_status(self, incident_id: str, status: str) -> dict[str, Any] | None:
+        row = self.get_incident(incident_id)
+        if row is None:
+            return None
+        row["status"] = status
+        return row
+
+    def incident_summary(self) -> dict[str, Any]:
+        return {
+            "by_status": {"open": 14, "acknowledged": 6},
+            "by_severity": {"critical": 4, "high": 10, "medium": 6},
+            "by_label": {"METRIC_SHIFT": 6, "QUARANTINE_RATE_HIGH": 8, "WORKER_LOST": 6},
+            "notify_open": 4,
+        }
+
+    def monitoring_snapshot(self, **_kwargs: Any) -> dict[str, Any]:
+        return _BENCH_SNAPSHOT
+
+    def load_baselines(self) -> list[dict[str, Any]]:
+        return []
+
+    def save_baselines(self, rows: list[dict[str, Any]]) -> int:
+        return len(rows)
+
+    def pending_contract_outcomes(self, **_: Any) -> list[dict[str, Any]]:
+        return []
+
+
+#: A window with everything present, so the benchmark exercises the full vector
+#: rather than the cheap "every sensor absent" path.
+_BENCH_SNAPSHOT: dict[str, Any] = {
+    "queue_depth": {"queued": 2, "running": 1, "failed": 0, "succeeded": 140},
+    "oldest_queued_age_seconds": 4.0,
+    "running": [
+        {"id": "job-1", "job_type": "ingest", "age_seconds": 12.0, "deadline_passed": False}
+    ],
+    "verdict_rates": {"smooth": 120, "moderate": 15, "jerky": 5},
+    "movement_mean": 0.04,
+    "jerk_mean": 0.011,
+    "stall_mean": 0.08,
+    "frame_count_median": 203.0,
+    "quarantine_rate": 0.06,
+    "max_episode_timestamp_gap_seconds": 0.04,
+    "timestamp_gap_scope": "episode-007",
+    "timestamp_gap_source": "a" * 64,
+}
+
+
+def _bench_incident(index: int) -> dict[str, Any]:
+    labels = ("METRIC_SHIFT", "QUARANTINE_RATE_HIGH", "WORKER_LOST")
+    severities = ("medium", "high", "critical")
+    label = labels[index % len(labels)]
+    severity = severities[index % len(severities)]
+    return {
+        "id": f"inc-{index:03d}",
+        "fingerprint": f"{index:016x}",
+        "label": label,
+        "severity": severity,
+        "notify_class": "notify" if severity == "critical" else "queue",
+        "scope": f"scope-{index}",
+        "summary": (
+            f"{label.replace('_', ' ').lower()} on scope-{index}: value moved beyond its "
+            f"control limit over the last 30 windows"
+        ),
+        "evidence": {"label": label, "evidence": {"value": 1.0, "baseline_median": 0.5}},
+        "status": "open" if index % 4 else "acknowledged",
+        "occurrence_count": 1 + index % 5,
+        "feature_schema_version": 1,
+        "first_seen": "2026-09-29T12:00:00Z",
+        "last_seen": "2026-09-29T12:00:00Z",
+        "acknowledged_at": None,
+        "resolved_at": None,
+    }
+
 
 def _seed_metrics(path: Path, records: int) -> None:
     start = datetime(2026, 9, 29, tzinfo=UTC)
@@ -812,6 +896,93 @@ def _lerobot_benchmark(*, trials: int = 5, warmups: int = 1) -> BenchmarkResult 
 
 
 # Entries are late-bound lambdas so tests can monkeypatch the workload functions.
+def _api_incidents_benchmark(*, trials: int = 10, warmups: int = 3) -> BenchmarkResult:
+    return _client_benchmark(
+        name="api-incidents-catalog",
+        path="/api/v1/incidents?limit=50",
+        dataset="synthetic-incidents-20i-v1",
+        trials=trials,
+        warmups=warmups,
+    )
+
+
+def _monitor_evaluate_benchmark(*, trials: int = 50, warmups: int = 5) -> BenchmarkResult:
+    """Cost of one evaluation tick's pure half: features, rules, triage, render.
+
+    Deliberately excludes the database round trip so the number is the pipeline's
+    own cost and stays comparable as the catalog grows. The persistence half is
+    covered by the ``api-incidents-catalog`` workload and the integration tests.
+    """
+    from data_engine.monitoring.baselines import BaselineBook
+    from data_engine.monitoring.detectors import DetectorContext, detect, observations_for
+    from data_engine.monitoring.features import (
+        FEATURE_NAMES as FEATURE_NAMES_BENCH,
+    )
+    from data_engine.monitoring.features import FeatureInputs, ResourceSample, build_features
+    from data_engine.monitoring.queue import TriagePolicy, decide
+    from data_engine.monitoring.summary import render_summary
+
+    now = datetime(2026, 9, 29, 12, 0, tzinfo=UTC)
+    records = [
+        {
+            "name": "episodes_ingested_total",
+            "value": 12.0,
+            "unit": "episodes",
+            "labels": {"format": "lerobot-v3", "status": "ok"},
+            "timestamp": (now - timedelta(seconds=5)).isoformat(),
+            "source": "runtime",
+        },
+        {
+            "name": "workers_heartbeat_age_seconds",
+            "value": 0.0,
+            "unit": "seconds",
+            "labels": {"worker_state": "idle"},
+            "timestamp": now.isoformat(),
+            "source": "runtime",
+        },
+    ]
+    resources = ResourceSample(
+        cpu_percent=18.0,
+        memory_used_bytes=6e9,
+        memory_available_bytes=10e9,
+        disk_free_bytes=120 * 1024**3,
+    )
+    # Warm every limit first, so the benchmark measures the statistical path
+    # (median/MAD per scope) rather than the cold-start abstention path.
+    book = BaselineBook()
+    warm = build_features(
+        FeatureInputs(now=now, records=records, snapshot=_BENCH_SNAPSHOT, resources=resources)
+    )
+    for _ in range(30):
+        book.observe_many(observations_for(warm))
+
+    def tick() -> int:
+        features = build_features(
+            FeatureInputs(now=now, records=records, snapshot=_BENCH_SNAPSHOT, resources=resources)
+        )
+        signals = detect(DetectorContext(now=now, features=features, baselines=book))
+        outcomes = decide(signals, now=now, policy=TriagePolicy(), open_incidents={}, budget_used=0)
+        for outcome in outcomes:
+            render_summary(outcome.signal.label, outcome.signal.evidence, outcome.signal.detail)
+        return len(outcomes)
+
+    return run_benchmark(
+        tick,
+        name="monitor-evaluate",
+        warmups=warmups,
+        trials=trials,
+        config={
+            "pipeline": "features -> detectors -> triage -> render (no database)",
+            "features": len(FEATURE_NAMES_BENCH),
+            "detectors": 11,
+            "warm_scopes": len(book),
+            "trials": trials,
+            "database": "none; pure functions, no network",
+        },
+        dataset="synthetic-monitor-1window-v1",
+    )
+
+
 WORKLOADS: dict[str, Callable[[], BenchmarkResult | None]] = {
     "synthetic-episode-ingest": lambda: _ingest_microbenchmark(),
     "quality-analysis-303f": lambda: _quality_benchmark(303),
@@ -826,6 +997,8 @@ WORKLOADS: dict[str, Callable[[], BenchmarkResult | None]] = {
     "api-failures-summary": lambda: _api_failures_summary_benchmark(),
     "api-failing-episodes": lambda: _api_failing_episodes_benchmark(),
     "api-slice-manifest": lambda: _api_slice_manifest_benchmark(),
+    "api-incidents-catalog": lambda: _api_incidents_benchmark(),
+    "monitor-evaluate": lambda: _monitor_evaluate_benchmark(),
     "ui-insights-page": lambda: _ui_insights_benchmark(),
     "lerobot-ingest-v3": lambda: _lerobot_benchmark(),
 }

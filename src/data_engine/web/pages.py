@@ -34,6 +34,7 @@ NAV_LINKS = (
     ("/ui/episodes", "Episodes"),
     ("/ui/failures", "Failures"),
     ("/ui/slices", "Slices"),
+    ("/ui/incidents", "Incidents"),
     ("/ui/insights", "Insights"),
     ("/ui/metrics", "Metrics"),
     ("/ui/artifacts", "Artifacts"),
@@ -873,6 +874,135 @@ def _failures_body(model: dict[str, Any]) -> str:
         )
         + "</section>"
     )
+
+
+# ---------------------------------------------------------------- incidents
+
+
+def incidents_page(model: dict[str, Any], theme: str) -> str:
+    """The notifier's queue: what it would interrupt you for, and what it would not.
+
+    The notify/queue split is the whole point of the page, so it is stated visually
+    rather than buried in a column: an incident that would wake someone is separated
+    from one you would simply find tomorrow.
+    """
+    body = (
+        '<p class="de-sub">deterministic notifier // read-only</p>'
+        f"<div data-poll>{_incidents_body(model)}</div>"
+    )
+    return _page("Incidents", "/ui/incidents", body, theme, _script("/ui/incidents", 10000))
+
+
+def incidents_fragment(model: dict[str, Any]) -> str:
+    return _incidents_body(model)
+
+
+_SEVERITY_CSS = {
+    "critical": "error",
+    "high": "warning",
+    "medium": "info",
+    "info": "comment",
+}
+
+
+def _severity_badge(severity: str) -> str:
+    css = _SEVERITY_CSS.get(severity, "comment")
+    return f'<span class="text-{css}">{escape(severity)}</span>'
+
+
+def _incidents_body(model: dict[str, Any]) -> str:
+    rows = model.get("items") or []
+    summary = model.get("summary") or {}
+    health = model.get("health") or {}
+    by_severity = summary.get("by_severity") or {}
+    open_count = int((summary.get("by_status") or {}).get("open", 0))
+    notify_count = int(summary.get("notify_open", 0))
+
+    readouts = _readouts(
+        [
+            ("open", str(open_count), "error" if open_count else "success"),
+            ("would notify", str(notify_count), "warning" if notify_count else "success"),
+            ("critical", str(int(by_severity.get("critical", 0))), "error"),
+            ("high", str(int(by_severity.get("high", 0))), "warning"),
+            ("warm limits", str(int(health.get("warm_scopes", 0))), "info"),
+        ]
+    )
+
+    health_strip = _health_strip(health)
+    digest = model.get("digest") or "No incidents."
+    digest_block = f'<pre class="de-digest">{escape(str(digest))}</pre>'
+
+    if not rows:
+        table = (
+            '<p class="de-empty">// the notifier has nothing to say // '
+            "run one window with POST /api/v1/monitoring/tick</p>"
+        )
+    else:
+        body_rows = "".join(_incident_row(row) for row in rows)
+        table = (
+            '<table class="de-table"><thead><tr><th>Severity</th><th>Label</th>'
+            '<th>Scope</th><th>Evidence</th><th class="num">Seen</th>'
+            "<th>Status</th><th>Last seen</th><th>Channel</th></tr></thead>"
+            f"<tbody>{body_rows}</tbody></table>"
+        )
+
+    return (
+        readouts
+        + health_strip
+        + '<section class="de-section"><h2>Queue</h2>'
+        + table
+        + "</section>"
+        + '<section class="de-section"><h2>Notify preview</h2>'
+        + '<p class="de-sub">exactly what a notifier would deliver // nothing is sent</p>'
+        + digest_block
+        + "</section>"
+    )
+
+
+def _incident_row(row: dict[str, Any]) -> str:
+    severity = str(row.get("severity") or "info")
+    status = str(row.get("status") or "open")
+    channel = str(row.get("notify_class") or "queue")
+    channel_cell = (
+        '<span class="text-warning">notify</span>'
+        if channel == "notify"
+        else '<span class="text-comment">queue</span>'
+    )
+    return (
+        "<tr>"
+        f"<td>{_severity_badge(severity)}</td>"
+        f"<td><code>{escape(str(row.get('label') or '-'))}</code></td>"
+        f"<td>{escape(str(row.get('scope') or '-'))}</td>"
+        f"<td>{escape(str(row.get('summary') or '-'))}</td>"
+        f'<td class="num">{int(row.get("occurrence_count") or 1)}</td>'
+        f"<td>{_state_badge(status)}</td>"
+        f"<td>{escape(str(row.get('last_seen') or '-'))}</td>"
+        f"<td>{channel_cell}</td>"
+        "</tr>"
+    )
+
+
+def _health_strip(health: dict[str, Any]) -> str:
+    """The monitor's own vitals.
+
+    Shown on the same page as its output on purpose: a monitor that has silently
+    stopped looks exactly like a monitor with nothing to report, and only one of
+    those is healthy.
+    """
+    if not health:
+        return ""
+    last = str(health.get("last_tick_at") or "never")
+    blind = "no" if not health.get("blind") else "YES"
+    readouts = _readouts(
+        [
+            ("last tick", last, "info"),
+            ("baseline scopes", str(int(health.get("baseline_scopes", 0))), "comment"),
+            ("held", str(int(health.get("held_scopes", 0))), "warning"),
+            ("budget/window", str(int(health.get("alert_budget_per_window", 0))), "comment"),
+            ("blind", blind, "error" if health.get("blind") else "success"),
+        ]
+    )
+    return f'<section class="de-section"><h2>Monitor health</h2>{readouts}</section>'
 
 
 # ---------------------------------------------------------------- slices

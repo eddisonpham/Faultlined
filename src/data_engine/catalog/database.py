@@ -108,6 +108,56 @@ CREATE TABLE IF NOT EXISTS slice_memberships (
     PRIMARY KEY (slice_id, episode_id)
 );
 CREATE INDEX IF NOT EXISTS slice_memberships_slice_idx ON slice_memberships (slice_id);
+
+CREATE TABLE IF NOT EXISTS job_contracts (
+    job_id text PRIMARY KEY REFERENCES jobs(id) ON DELETE CASCADE,
+    expected_episodes integer,
+    expected_valid_fraction double precision,
+    max_duration_seconds double precision,
+    deadline_at timestamptz,
+    outcome text NOT NULL DEFAULT 'pending',
+    observed jsonb NOT NULL DEFAULT '{}',
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS job_contracts_outcome_idx ON job_contracts (outcome);
+
+CREATE TABLE IF NOT EXISTS monitor_baselines (
+    feature text NOT NULL,
+    scope text NOT NULL DEFAULT '',
+    samples jsonb NOT NULL DEFAULT '[]',
+    center double precision NOT NULL DEFAULT 0,
+    breached boolean NOT NULL DEFAULT false,
+    held_since double precision,
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (feature, scope)
+);
+
+CREATE TABLE IF NOT EXISTS monitor_incidents (
+    id text PRIMARY KEY,
+    fingerprint text NOT NULL,
+    label text NOT NULL,
+    severity text NOT NULL,
+    notify_class text NOT NULL DEFAULT 'queue',
+    scope text NOT NULL DEFAULT '',
+    summary text NOT NULL DEFAULT '',
+    evidence jsonb NOT NULL DEFAULT '{}',
+    status text NOT NULL DEFAULT 'open',
+    occurrence_count integer NOT NULL DEFAULT 1,
+    feature_schema_version integer NOT NULL DEFAULT 1,
+    first_seen timestamptz NOT NULL DEFAULT now(),
+    last_seen timestamptz NOT NULL DEFAULT now(),
+    acknowledged_at timestamptz,
+    resolved_at timestamptz
+);
+-- One unresolved incident per fingerprint. This is the dedup guarantee, enforced by
+-- the database rather than by the writer, so a crash between the check and the insert
+-- cannot open a second row for the same fault.
+CREATE UNIQUE INDEX IF NOT EXISTS monitor_incidents_unresolved_idx
+    ON monitor_incidents (fingerprint) WHERE status <> 'resolved';
+CREATE INDEX IF NOT EXISTS monitor_incidents_last_seen_idx
+    ON monitor_incidents (last_seen DESC);
+CREATE INDEX IF NOT EXISTS monitor_incidents_status_idx ON monitor_incidents (status);
 """
 
 # Columns the job lifecycle (retry / timeout / cancel) needs, added to pre-existing
@@ -133,6 +183,16 @@ ALTER TABLE episode_slices ADD COLUMN IF NOT EXISTS filter_config jsonb NOT NULL
 ALTER TABLE episode_slices ADD COLUMN IF NOT EXISTS updated_at timestamptz NOT NULL DEFAULT now();
 ALTER TABLE slice_memberships
   ADD COLUMN IF NOT EXISTS included_at timestamptz NOT NULL DEFAULT now();
+ALTER TABLE job_contracts ADD COLUMN IF NOT EXISTS outcome text NOT NULL DEFAULT 'pending';
+ALTER TABLE job_contracts ADD COLUMN IF NOT EXISTS observed jsonb NOT NULL DEFAULT '{}';
+ALTER TABLE monitor_incidents
+  ADD COLUMN IF NOT EXISTS notify_class text NOT NULL DEFAULT 'queue';
+ALTER TABLE monitor_incidents
+  ADD COLUMN IF NOT EXISTS feature_schema_version integer NOT NULL DEFAULT 1;
+ALTER TABLE monitor_incidents
+  ADD COLUMN IF NOT EXISTS acknowledged_at timestamptz;
+ALTER TABLE monitor_incidents
+  ADD COLUMN IF NOT EXISTS resolved_at timestamptz;
 """
 
 

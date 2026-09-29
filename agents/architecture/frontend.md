@@ -5,10 +5,11 @@ Visual design happens in phase 12 ([../prompts/12-frontend-design.md](../prompts
 HTML plus vanilla-JS polling, no framework and no build step. Style mandate (spec §4): clean, restrained,
 technically credible — a purpose-built engineering tool, not a generic dashboard.
 
-**Implemented in stage 2 so far:** Status/Overview, Jobs (list + detail), Artifacts, at `/ui`, `/ui/jobs`,
-`/ui/jobs/{id}`, `/ui/artifacts`. Polling re-requests the same page with `X-Fragment: 1` and swaps the returned
-HTML, so Python stays the only renderer. Episodes, Failures, Datasets & Builds, Runs, and Benchmarks remain
-stage-3 work.
+**Implemented in stage 2 so far:** Status/Overview, Jobs (list + detail), Artifacts, Episodes (list +
+detail), Insights, Metrics, Failures, Slices, and Incidents, at `/ui`, `/ui/jobs`, `/ui/jobs/{id}`,
+`/ui/artifacts`, `/ui/episodes`, `/ui/episodes/{id}`, `/ui/insights`, `/ui/metrics`, `/ui/failures`,
+`/ui/slices`, and `/ui/incidents`. Polling re-requests the same page with `X-Fragment: 1` and swaps the
+returned HTML, so Python stays the only renderer. Datasets & Builds, Runs, and Benchmarks remain stage-3 work.
 
 ## Scope
 
@@ -25,7 +26,9 @@ needs only the **Jobs / Artifacts / Status** slice; the rest lands by Production
 | **Episodes** | Curation index (state + quality flags: jerky/stalled/short/long), detail: channels, motion-quality panel (ADR 0018), validation result + reason codes | **Implemented** (run-intelligence slice; FR-005 query builder still Baseline) | data, ML |
 | **Insights** | Dataset curation view: length histogram, speed distribution, cross-episode variance heat matrix, outlier/removal-candidate lists | **Implemented** | data, ML |
 | **Metrics (live telemetry)** | Sparkline traces per metric, API-route latency table (p50/p95/p99), stage + catalog latency, worker heartbeat | **Implemented** | platform |
-| **Failures** | Validation failures grouped by reason code; job failures; revalidate/cancel actions | Baseline | data |
+| **Failures** | Validation failures grouped by reason code; job failures; revalidate/cancel actions | **Implemented** (read view; revalidate/cancel actions still Baseline) | data |
+| **Slices** | Named curation filters, member counts, links to each slice's curated manifest | **Implemented** | data |
+| **Incidents** | The notifier's queue: severity badges, occurrence counters, per-incident evidence line, ack/resolve, a monitor-health strip, and a rendered notify preview | **Implemented** (ADR 0020) | platform, data |
 | **Datasets & Builds** | Builds list; build detail: manifest view, **lineage graph** (backwards to episodes, forwards to runs) | Baseline | ML, eval |
 | **Runs** | Workload run records: provenance fields, metrics | Baseline | eval |
 | **Benchmarks** | Result tables + charts (p50/p95/p99, throughput), baseline diffs, regression flags | Baseline | platform |
@@ -35,7 +38,9 @@ needs only the **Jobs / Artifacts / Status** slice; the rest lands by Production
 - The UI consumes **only** `/api/v1`-shaped read models. As built (ADR 0014) the server-rendered pages call the
   catalog repository in the same process and serialize the same shapes the versioned API serves; external clients
   use `/api/v1`. No client-side DB or filesystem access, ever.
-- Mutations limited to: submit jobs, cancel jobs, trigger revalidation, trigger builds/runs. Everything else is read-only.
+- Mutations limited to: submit jobs, cancel jobs, trigger revalidation, trigger builds/runs, and acknowledge or
+  resolve an incident. Everything else is read-only. The incidents page is read-only in its markup; ack/resolve
+  are POST endpoints, and the page surfaces the queue and the monitor's own health without a mutation.
 - Live updates in v1: **polling** (jobs/episodes lists 3–5 s, metrics 5 s, insights 10 s, detail pages static;
   backoff when tab hidden). SSE/WebSocket is a deferred trigger (data-flow.md §5).
 - Charts read `/api/v1/metrics` — the same metric schema as benchmarks/runtime (ADR 0008), so UI, benchmarks, and

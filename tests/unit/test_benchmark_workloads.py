@@ -76,6 +76,20 @@ def test_workload_registry_covers_the_backlog() -> None:
         "api-failures-summary",
         "api-failing-episodes",
         "api-slice-manifest",
+        "api-incidents-catalog",
+        "monitor-evaluate",
         "ui-insights-page",
         "lerobot-ingest-v3",
     }
+
+
+@pytest.mark.unit
+def test_the_monitor_workload_is_deterministic() -> None:
+    # The notifier's whole value is that the same window produces the same
+    # verdict, so its benchmark must not depend on wall-clock or host state.
+    from benchmarks.harness import _monitor_evaluate_benchmark
+
+    result = _monitor_evaluate_benchmark(trials=5, warmups=1)
+    assert result.status == "ok"
+    assert result.summary is not None
+    assert result.summary.failure_count == 0

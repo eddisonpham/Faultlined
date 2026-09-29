@@ -383,3 +383,103 @@ class FailingEpisodeRow(BaseModel):
 
 class FailingEpisodesResponse(BaseModel):
     items: list[FailingEpisodeRow]
+
+
+# ---- monitoring notifier (ADR 0020) ----
+
+
+class IncidentPayload(BaseModel):
+    """One incident. ``evidence`` is never empty: triage rejects uncited signals."""
+
+    id: str
+    fingerprint: str
+    label: str
+    severity: str
+    notify_class: str = "queue"
+    scope: str = ""
+    summary: str
+    evidence: dict[str, Any] = Field(default_factory=dict)
+    status: str = "open"
+    occurrence_count: int = 1
+    feature_schema_version: int = 1
+    first_seen: Any
+    last_seen: Any
+    acknowledged_at: Any | None = None
+    resolved_at: Any | None = None
+
+
+class IncidentListResponse(BaseModel):
+    items: list[IncidentPayload]
+
+
+class IncidentSummaryResponse(BaseModel):
+    """Queue shape, so a header can render severity counts without listing incidents."""
+
+    by_status: dict[str, int] = Field(default_factory=dict)
+    by_severity: dict[str, int] = Field(default_factory=dict)
+    by_label: dict[str, int] = Field(default_factory=dict)
+    notify_open: int = 0
+
+
+class ContractRequest(BaseModel):
+    """A declared expectation for one run. Every field is optional; all absent = no-op."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    expected_episodes: int | None = Field(default=None, ge=0, le=1_000_000)
+    expected_valid_fraction: float | None = Field(default=None, ge=0.0, le=1.0)
+    max_duration_seconds: float | None = Field(default=None, gt=0)
+    deadline_at: datetime | None = None
+
+
+class ContractPayload(BaseModel):
+    job_id: str
+    expected_episodes: int | None = None
+    expected_valid_fraction: float | None = None
+    max_duration_seconds: float | None = None
+    deadline_at: Any | None = None
+    outcome: str = "pending"
+    observed: dict[str, Any] = Field(default_factory=dict)
+    job_state: str | None = None
+    job_type: str | None = None
+    created_at: Any | None = None
+    updated_at: Any | None = None
+
+
+class ContractListResponse(BaseModel):
+    items: list[ContractPayload]
+
+
+class MonitoringHealthResponse(BaseModel):
+    """The monitor's own state. A monitor that silently stops is the worst outcome."""
+
+    feature_schema_version: int
+    last_tick_at: str | None = None
+    tick_seconds: float
+    baseline_scopes: int
+    warm_scopes: int
+    held_scopes: int
+    alert_budget_per_window: int
+    budget_window_seconds: float
+    notify_labels: list[str] = Field(default_factory=list)
+    detectors: list[str] = Field(default_factory=list)
+
+
+class TickResponse(BaseModel):
+    """One evaluation tick, for the on-demand endpoint and for tests."""
+
+    observed_at: str
+    feature_schema_version: int
+    catalog_reachable: bool
+    blind: bool
+    sensor_availability: float
+    sink_lag_seconds: float
+    warm_scopes: int
+    held_scopes: int
+    signals: int = 0
+    written: int = 0
+    suppressed: dict[str, int] = Field(default_factory=dict)
+    budget_exhausted: bool = False
+    contract_outcomes: list[dict[str, Any]] = Field(default_factory=list)
+    notify_ready: list[str] = Field(default_factory=list)
+    duration_seconds: float = 0.0

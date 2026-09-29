@@ -11,12 +11,15 @@ from typing import Any, cast
 from uuid import uuid4
 
 from fastapi import FastAPI, Header, HTTPException, Request, Response
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
 
 from data_engine.api.errors import install_error_handling
 from data_engine.api.schemas import (
     AnyJobRequest,
     ArtifactListResponse,
+    ContractListResponse,
+    ContractPayload,
+    ContractRequest,
     EpisodeExportResponse,
     EpisodeListResponse,
     EpisodeQualityResponse,
@@ -24,10 +27,14 @@ from data_engine.api.schemas import (
     EpisodeValidationResponse,
     FailingEpisodesResponse,
     FailureSummaryResponse,
+    IncidentListResponse,
+    IncidentPayload,
+    IncidentSummaryResponse,
     JobListResponse,
     JobReportResponse,
     JobResponse,
     MetricsResponse,
+    MonitoringHealthResponse,
     QualitySummaryResponse,
     SliceCreateRequest,
     SliceDetailResponse,
@@ -36,12 +43,17 @@ from data_engine.api.schemas import (
     SliceUpdateRequest,
     StatusResponse,
     SubmitSourceJobRequest,
+    TickResponse,
 )
 from data_engine.catalog.database import initialize_schema
 from data_engine.catalog.repository import InvalidTransition, PostgresCatalog
 from data_engine.config import Settings, load_settings
 from data_engine.curation import REASON_CODES
 from data_engine.jobs.state import DEFAULT_MAX_ATTEMPTS, JobState
+from data_engine.monitoring.contracts import Expectation, InvalidExpectation
+from data_engine.monitoring.service import MonitorService
+from data_engine.monitoring.signals import Label, Severity
+from data_engine.monitoring.summary import render_digest
 from data_engine.observability.aggregate import (
     heartbeat_age_seconds,
     read_metric_records,
@@ -64,6 +76,8 @@ from data_engine.web import (
     failures_fragment,
     failures_page,
     font_bytes,
+    incidents_fragment,
+    incidents_page,
     insights_fragment,
     insights_page,
     job_detail_page,
@@ -202,6 +216,9 @@ def create_app(
         lifespan=lifespan,
     )
     app.state.catalog = app_catalog
+    app.state.monitor = MonitorService(
+        app_catalog, metrics=app_metrics, metrics_path=configured.metrics_path
+    )
     install_error_handling(app)
 
     @app.middleware("http")
@@ -733,5 +750,170 @@ def create_app(
         """Length/speed distributions, cross-episode variance matrix, outlier lists."""
         catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
         return catalog_for_request.quality_summary()
+
+    # ---- monitoring notifier (ADR 0020) ----
+
+    def _monitor_for(request: Request) -> MonitorService:
+        return cast(MonitorService, request.app.state.monitor)
+
+    @app.get("/api/v1/incidents", response_model=IncidentListResponse)
+    def list_incidents(
+        request: Request,
+        severity: str | None = None,
+        status: str | None = None,
+        label: str | None = None,
+        limit: int = 50,
+        before: str | None = None,
+    ) -> dict[str, Any]:
+        """The incident queue, newest first. Read-only."""
+        if limit < 1 or limit > 500:
+            raise HTTPException(status_code=422, detail="limit must be between 1 and 500")
+        if severity is not None and severity not in {item.value for item in Severity}:
+            raise HTTPException(status_code=422, detail=f"unknown severity: {severity}")
+        if label is not None:
+            try:
+                Label(label)
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=f"unknown label: {label}") from exc
+        catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
+        return {
+            "items": catalog_for_request.list_incidents(
+                severity=severity,
+                status=status,
+                label=label,
+                limit=limit,
+                before=_parse_cursor(before),
+            )
+        }
+
+    @app.get("/api/v1/incidents/summary", response_model=IncidentSummaryResponse)
+    def incidents_summary(request: Request) -> dict[str, Any]:
+        catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
+        return catalog_for_request.incident_summary()
+
+    @app.get("/api/v1/incidents/{incident_id}", response_model=IncidentPayload)
+    def get_incident(incident_id: str, request: Request) -> dict[str, Any]:
+        catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
+        row = catalog_for_request.get_incident(incident_id)
+        if row is None:
+            raise KeyError(incident_id)
+        return row
+
+    @app.post("/api/v1/incidents/{incident_id}/ack", response_model=IncidentPayload)
+    def acknowledge_incident(incident_id: str, request: Request) -> dict[str, Any]:
+        """Acknowledge: an append-only fact, so a recurrence opens a new incident."""
+        catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
+        row = catalog_for_request.set_incident_status(incident_id, "acknowledged")
+        if row is None:
+            raise KeyError(incident_id)
+        return row
+
+    @app.post("/api/v1/incidents/{incident_id}/resolve", response_model=IncidentPayload)
+    def resolve_incident(incident_id: str, request: Request) -> dict[str, Any]:
+        """Resolve. A same-fault recurrence then opens a new incident, subject to cooldown."""
+        catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
+        row = catalog_for_request.set_incident_status(incident_id, "resolved")
+        if row is None:
+            raise KeyError(incident_id)
+        return row
+
+    @app.get("/api/v1/monitoring/health", response_model=MonitoringHealthResponse)
+    def monitoring_health(request: Request) -> dict[str, Any]:
+        """The monitor's own state. A monitor that silently stops is the worst outcome."""
+        return _monitor_for(request).health()
+
+    @app.post("/api/v1/monitoring/tick", response_model=TickResponse)
+    def run_monitor_tick(request: Request) -> dict[str, Any]:
+        """Evaluate one window on demand.
+
+        The loop is a scheduler's job, not a webhook's; this exists so the notifier
+        can be driven deterministically from a test, a benchmark, or an operator who
+        wants to see what it would say right now.
+        """
+        return (
+            _monitor_for(request).tick(cast(PostgresCatalog, request.app.state.catalog)).to_dict()
+        )
+
+    @app.get("/api/v1/monitoring/notify-preview", response_class=PlainTextResponse)
+    def notify_preview(request: Request) -> str:
+        """What a notifier would send right now. Rendering only; nothing is sent.
+
+        Email delivery is deliberately not implemented (ADR 0020 §10.3): it needs
+        explicit owner authorization, and a dry run that is a real code path is the
+        only honest way to leave it switched off.
+        """
+        return _monitor_for(request).notify_preview(
+            cast(PostgresCatalog, request.app.state.catalog)
+        )
+
+    # ---- completion contracts ----
+
+    @app.put("/api/v1/contracts/{job_id}", response_model=ContractPayload)
+    def declare_contract(
+        job_id: str, body: ContractRequest, request: Request, response: Response
+    ) -> dict[str, Any]:
+        """Declare what a run is expected to produce; idempotent per job.
+
+        Re-declaring resets the outcome to pending, because a revised expectation
+        has not been evaluated yet and claiming otherwise would hide a breach.
+        """
+        catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
+        if catalog_for_request.get_job(job_id) is None:
+            raise KeyError(job_id)
+        expectation = Expectation(
+            expected_episodes=body.expected_episodes,
+            expected_valid_fraction=body.expected_valid_fraction,
+            max_duration_seconds=body.max_duration_seconds,
+            deadline_at=body.deadline_at,
+        )
+        try:
+            expectation.validate()
+        except InvalidExpectation as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        row = catalog_for_request.register_contract(job_id, expectation.to_dict())
+        response.headers["X-Correlation-Id"] = request.state.correlation_id or str(uuid4())
+        return row
+
+    @app.get("/api/v1/contracts", response_model=ContractListResponse)
+    def list_contracts(
+        request: Request, outcome: str | None = None, limit: int = 50, before: str | None = None
+    ) -> dict[str, Any]:
+        if limit < 1 or limit > 500:
+            raise HTTPException(status_code=422, detail="limit must be between 1 and 500")
+        catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
+        return {
+            "items": catalog_for_request.list_contracts(
+                outcome=outcome, limit=limit, before=_parse_cursor(before)
+            )
+        }
+
+    @app.get("/api/v1/contracts/{job_id}", response_model=ContractPayload)
+    def get_contract(job_id: str, request: Request) -> dict[str, Any]:
+        catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
+        row = catalog_for_request.get_contract(job_id)
+        if row is None:
+            raise KeyError(job_id)
+        return row
+
+    # ---- incidents UI ----
+
+    def _incidents_model(request: Request) -> dict[str, Any]:
+        """One read of the queue, reused by the page, its fragment, and the digest."""
+        catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
+        rows = catalog_for_request.list_incidents(limit=100)
+        return {
+            "items": rows,
+            "summary": catalog_for_request.incident_summary(),
+            "health": _monitor_for(request).health(),
+            "digest": render_digest(rows),
+        }
+
+    @app.get("/ui/incidents", response_class=HTMLResponse)
+    def incidents_page_route(request: Request, theme: str | None = None) -> HTMLResponse:
+        return HTMLResponse(incidents_page(_incidents_model(request), _theme(theme)))
+
+    @app.get("/ui/incidents/fragment", response_class=HTMLResponse)
+    def incidents_fragment_route(request: Request) -> HTMLResponse:
+        return HTMLResponse(incidents_fragment(_incidents_model(request)))
 
     return app

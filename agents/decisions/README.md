@@ -21,3 +21,10 @@ supersede it with a new ADR and update the affected docs.
 | [0011](0011-coverage-gate.md) | Initial coverage gate and ratchet policy | accepted |
 | [0012](0012-host-based-development.md) | Host-based local development; containers are optional | accepted |
 | [0013](0013-cross-platform-resource-telemetry.md) | Use psutil for cross-platform resource telemetry | accepted |
+| [0014](0014-minimal-ui-server-rendered.md) | Minimal server-rendered UI, no bundler | accepted |
+| [0015](0015-cooperative-job-lifecycle.md) | Cooperative job lifecycle: retries, deadlines, cancel | accepted |
+| [0016](0016-json-validation-profiles.md) | JSON validation profiles | accepted |
+| [0017](0017-runtime-metrics-aggregation.md) | Runtime metrics aggregation | accepted |
+| [0018](0018-episode-quality-signals.md) | Episode quality signals are summarized at ingest | accepted |
+| [0019](0019-benchmark-workload-isolation.md) | Benchmark workloads run in isolated processes | accepted |
+| [0020](0020-deterministic-monitoring-notifier.md) | The monitoring notifier is deterministic | accepted |

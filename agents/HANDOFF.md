@@ -6,6 +6,10 @@
 
 **Update 2026-09-29 (validation + run intelligence).** Two further slices landed: **validation** — hashed JSON validation profiles, a 7-rule engine, quarantine and re-validate without re-ingest ([ADR 0016](decisions/0016-json-validation-profiles.md)) — and **run intelligence** ([slice plan](implementation/run-intelligence-slice.md), [EXP-0002](experiments/0002-run-intelligence-workloads.md)): runtime metrics aggregation and `GET /api/v1/metrics` ([ADR 0017](decisions/0017-runtime-metrics-aggregation.md)), episode motion-quality analytics computed at ingest ([ADR 0018](decisions/0018-episode-quality-signals.md)), an instrument UI (`/ui/metrics`, `/ui/episodes`, `/ui/episodes/{id}`, `/ui/insights`), and run-inspection API surfaces — episode catalog with quality filters, per-episode validation verdicts and violations, job → episodes reverse lineage — each latency-measured in isolated benchmark processes ([ADR 0019](decisions/0019-benchmark-workload-isolation.md)). The suite is at 308 passing with 92.23% coverage, 22 of them against a live Postgres. The next MVP criteria are the rest of the `ingest → validation → indexing → builds` workflow: indexing and builds are still open, and MCAP ingest is the remaining format.
 
+**Update 2026-09-29 (curated layer + deterministic notifier).** Two more slices. The **curated build-ready layer** adds named curation slices (`/api/v1/slices`, `/ui/slices`) whose membership is recomputed on read so a saved view never goes stale, plus a read-only failures view (`/api/v1/failures`, `/ui/failures`). The **monitoring notifier** ([ADR 0020](decisions/0020-deterministic-monitoring-notifier.md), [plan](implementation/automated-monitoring-plan.md)) watches all of it for unattended curation. It is **deterministic by decision**: no trained model, no LLM call, no network in the detection path. Eleven rules and per-scope EWMA/median-MAD control limits over a versioned 26-feature vector, completion contracts as the anchor check, triage with fingerprinting, dedup, cooldown, evidence and severity gates, and a hard alert budget. `POST /api/v1/monitoring/tick` runs one window on demand; `/ui/incidents` and `GET /api/v1/monitoring/health` make the queue and the monitor's own blindness observable. Measured in isolation ([EXP-0003](experiments/0003-deterministic-notifier-latency.md)): `monitor-evaluate` P50 **0.2 ms**/tick, `api-incidents-catalog` P50 7.4 ms. Suite is at 557 passing, 93.31% coverage.
+
+**What the notifier deliberately does not do yet.** No detection-accuracy figure exists: that needs the chaos harness (plan §6 — scripted operator action space plus fault injection against the real system, with clean-replicate null bands) and it is backlog B-016, so no precision or recall is claimed. Outbound email is unimplemented and disabled pending explicit owner authorization. Coverage of the real fault space is the one number that cannot be obtained, and every report says so in its header.
+
 ## 1. Current problem definition
 
 Build a local-first robot episode data engine to ingest, validate, index/version, curate and build reproducible robot datasets (MCAP / LeRobot) with lineage for ML workloads. The platform is the product; models are workloads. The current vertical slice accepts only a small synthetic JSON episode, not real robotics data. See [problem](spec/problem.md) and [requirements](spec/requirements.md).
@@ -16,7 +20,7 @@ Python modular monolith, FastAPI API, PostgreSQL catalog/job table, one separate
 
 ## 3. Repository structure
 
-- `src/data_engine/`: API, catalog, jobs/worker, synthetic ingest, artifact storage, config, observability, CLI.
+- `src/data_engine/`: API, catalog, jobs/worker, synthetic ingest, artifact storage, config, observability, curation vocabulary, monitoring notifier, CLI.
 - `benchmarks/`: result schema, provenance capture, statistics, synthetic harness; no accepted baseline.
 - `tests/`: unit, contract, integration, and E2E tests.
 - `agents/`: persistent specifications, architecture, implementation status, test plans, benchmarking, observability, ADRs, reviews, prompts, experiments.
@@ -26,7 +30,7 @@ See [repo layout](architecture/repo-layout.md).
 
 ## 4. Technology stack
 
-Python 3.14, uv/uv.lock, just, Ruff, mypy, pytest/pytest-cov, FastAPI/Pydantic, psycopg 3/PostgreSQL 17+, PyArrow and MCAP dependencies (not yet used for real readers), psutil, optional `nvidia-ml-py` for NVML. Host development is the supported local path; Docker is optional. Decisions: [ADRs 0001–0013](decisions/README.md).
+Python 3.14, uv/uv.lock, just, Ruff, mypy, pytest/pytest-cov, FastAPI/Pydantic, psycopg 3/PostgreSQL 17+, PyArrow and MCAP dependencies (not yet used for real readers), psutil, optional `nvidia-ml-py` for NVML. Host development is the supported local path; Docker is optional. Decisions: [ADRs 0001–0020](decisions/README.md).
 
 ## 5. Implementation status — works / stubbed
 

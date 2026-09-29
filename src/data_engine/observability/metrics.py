@@ -154,3 +154,37 @@ class RuntimeMetrics:
     def worker_heartbeat(self, *, worker_state: str) -> None:
         """Liveness ping; the record's timestamp is the heartbeat, its value is 0."""
         self._emit("workers_heartbeat_age_seconds", 0, "seconds", {"worker_state": worker_state})
+
+    # ---- monitor self-observability (ADR 0020) ----
+    #
+    # `scope` is deliberately absent from every label below. For RUN_STALLED the
+    # scope is a job id, and a per-job metric series is exactly the unbounded
+    # cardinality ADR 0017 forbids: it would create a time series per job, none of
+    # which would ever be worth reading.
+
+    def monitor_tick(self, seconds: float) -> None:
+        self._emit("monitor_tick_seconds", seconds, "seconds")
+
+    def monitor_signal(self, label: str, severity: object) -> None:
+        self._emit("monitor_signals_total", 1, "count", {"label": label, "severity": str(severity)})
+
+    def monitor_suppressed(self, action: str, count: int) -> None:
+        self._emit("monitor_suppressed_total", count, "count", {"action": action})
+
+    def incident_opened(self, label: str, severity: str, notify_class: str) -> None:
+        self._emit("incidents_opened_total", 1, "count", {"label": label, "severity": severity})
+        self._emit(
+            "incidents_notified_total",
+            1 if notify_class == "notify" else 0,
+            "count",
+            {"label": label},
+        )
+
+    def monitor_sensor_availability(self, ratio: float) -> None:
+        self._emit("monitor_sensor_availability", ratio, "ratio")
+
+    def monitor_blind(self, blind: bool) -> None:
+        """1 while the monitor cannot see the platform. Never an incident: a monitor
+        reports itself blind on the health endpoint rather than paging about a
+        platform it is not observing."""
+        self._emit("monitor_blind", 1.0 if blind else 0.0, "boolean")

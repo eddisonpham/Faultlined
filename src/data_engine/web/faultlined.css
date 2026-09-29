@@ -449,3 +449,23 @@ pre.de-json {
 
 .de-outliers a { color: var(--fine-use-accent, #0c0); text-decoration: none; }
 .de-outliers a:hover { text-decoration: underline; }
+
+/* ---- incidents: the notifier's queue (ADR 0020) ---- */
+
+.de-digest {
+  margin: 0;
+  padding: 0.7rem 0.9rem;
+  border: 1px solid color-mix(in srgb, var(--fine-use-border, #0a0) 45%, transparent);
+  border-left: 3px solid var(--fine-use-accent, #0c0);
+  background: color-mix(in srgb, var(--fine-use-bg, #000) 88%, var(--fine-use-accent, #0c0));
+  color: var(--fine-use-text, #0f0);
+  font-size: 0.82rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-x: auto;
+}
+
+.de-table td:nth-child(4) {
+  max-width: 46ch;
+  color: var(--fine-use-dim, #0a0);
+}

@@ -55,6 +55,185 @@
         "title": "ArtifactSummary",
         "type": "object"
       },
+      "ContractListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ContractPayload"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "ContractListResponse",
+        "type": "object"
+      },
+      "ContractPayload": {
+        "properties": {
+          "created_at": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "deadline_at": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deadline At"
+          },
+          "expected_episodes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Episodes"
+          },
+          "expected_valid_fraction": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Valid Fraction"
+          },
+          "job_id": {
+            "title": "Job Id",
+            "type": "string"
+          },
+          "job_state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job State"
+          },
+          "job_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Type"
+          },
+          "max_duration_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Duration Seconds"
+          },
+          "observed": {
+            "additionalProperties": true,
+            "title": "Observed",
+            "type": "object"
+          },
+          "outcome": {
+            "default": "pending",
+            "title": "Outcome",
+            "type": "string"
+          },
+          "updated_at": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "required": [
+          "job_id"
+        ],
+        "title": "ContractPayload",
+        "type": "object"
+      },
+      "ContractRequest": {
+        "additionalProperties": false,
+        "description": "A declared expectation for one run. Every field is optional; all absent = no-op.",
+        "properties": {
+          "deadline_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deadline At"
+          },
+          "expected_episodes": {
+            "anyOf": [
+              {
+                "maximum": 1000000.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Episodes"
+          },
+          "expected_valid_fraction": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Valid Fraction"
+          },
+          "max_duration_seconds": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Duration Seconds"
+          }
+        },
+        "title": "ContractRequest",
+        "type": "object"
+      },
       "EpisodeExportResponse": {
         "description": "Curated episode manifest: content identity, state, and quality per row.",
         "properties": {
@@ -557,6 +736,145 @@
           }
         },
         "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "IncidentListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/IncidentPayload"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "IncidentListResponse",
+        "type": "object"
+      },
+      "IncidentPayload": {
+        "description": "One incident. ``evidence`` is never empty: triage rejects uncited signals.",
+        "properties": {
+          "acknowledged_at": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Acknowledged At"
+          },
+          "evidence": {
+            "additionalProperties": true,
+            "title": "Evidence",
+            "type": "object"
+          },
+          "feature_schema_version": {
+            "default": 1,
+            "title": "Feature Schema Version",
+            "type": "integer"
+          },
+          "fingerprint": {
+            "title": "Fingerprint",
+            "type": "string"
+          },
+          "first_seen": {
+            "title": "First Seen"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "last_seen": {
+            "title": "Last Seen"
+          },
+          "notify_class": {
+            "default": "queue",
+            "title": "Notify Class",
+            "type": "string"
+          },
+          "occurrence_count": {
+            "default": 1,
+            "title": "Occurrence Count",
+            "type": "integer"
+          },
+          "resolved_at": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolved At"
+          },
+          "scope": {
+            "default": "",
+            "title": "Scope",
+            "type": "string"
+          },
+          "severity": {
+            "title": "Severity",
+            "type": "string"
+          },
+          "status": {
+            "default": "open",
+            "title": "Status",
+            "type": "string"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "fingerprint",
+          "label",
+          "severity",
+          "summary",
+          "first_seen",
+          "last_seen"
+        ],
+        "title": "IncidentPayload",
+        "type": "object"
+      },
+      "IncidentSummaryResponse": {
+        "description": "Queue shape, so a header can render severity counts without listing incidents.",
+        "properties": {
+          "by_label": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "By Label",
+            "type": "object"
+          },
+          "by_severity": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "By Severity",
+            "type": "object"
+          },
+          "by_status": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "By Status",
+            "type": "object"
+          },
+          "notify_open": {
+            "default": 0,
+            "title": "Notify Open",
+            "type": "integer"
+          }
+        },
+        "title": "IncidentSummaryResponse",
         "type": "object"
       },
       "IngestPayload": {
@@ -1072,6 +1390,75 @@
           "jobs_queue_depth"
         ],
         "title": "MetricsResponse",
+        "type": "object"
+      },
+      "MonitoringHealthResponse": {
+        "description": "The monitor's own state. A monitor that silently stops is the worst outcome.",
+        "properties": {
+          "alert_budget_per_window": {
+            "title": "Alert Budget Per Window",
+            "type": "integer"
+          },
+          "baseline_scopes": {
+            "title": "Baseline Scopes",
+            "type": "integer"
+          },
+          "budget_window_seconds": {
+            "title": "Budget Window Seconds",
+            "type": "number"
+          },
+          "detectors": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Detectors",
+            "type": "array"
+          },
+          "feature_schema_version": {
+            "title": "Feature Schema Version",
+            "type": "integer"
+          },
+          "held_scopes": {
+            "title": "Held Scopes",
+            "type": "integer"
+          },
+          "last_tick_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Tick At"
+          },
+          "notify_labels": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Notify Labels",
+            "type": "array"
+          },
+          "tick_seconds": {
+            "title": "Tick Seconds",
+            "type": "number"
+          },
+          "warm_scopes": {
+            "title": "Warm Scopes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "feature_schema_version",
+          "tick_seconds",
+          "baseline_scopes",
+          "warm_scopes",
+          "held_scopes",
+          "alert_budget_per_window",
+          "budget_window_seconds"
+        ],
+        "title": "MonitoringHealthResponse",
         "type": "object"
       },
       "QualitySummaryResponse": {
@@ -1610,6 +1997,97 @@
         "title": "SyntheticEpisode",
         "type": "object"
       },
+      "TickResponse": {
+        "description": "One evaluation tick, for the on-demand endpoint and for tests.",
+        "properties": {
+          "blind": {
+            "title": "Blind",
+            "type": "boolean"
+          },
+          "budget_exhausted": {
+            "default": false,
+            "title": "Budget Exhausted",
+            "type": "boolean"
+          },
+          "catalog_reachable": {
+            "title": "Catalog Reachable",
+            "type": "boolean"
+          },
+          "contract_outcomes": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Contract Outcomes",
+            "type": "array"
+          },
+          "duration_seconds": {
+            "default": 0.0,
+            "title": "Duration Seconds",
+            "type": "number"
+          },
+          "feature_schema_version": {
+            "title": "Feature Schema Version",
+            "type": "integer"
+          },
+          "held_scopes": {
+            "title": "Held Scopes",
+            "type": "integer"
+          },
+          "notify_ready": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Notify Ready",
+            "type": "array"
+          },
+          "observed_at": {
+            "title": "Observed At",
+            "type": "string"
+          },
+          "sensor_availability": {
+            "title": "Sensor Availability",
+            "type": "number"
+          },
+          "signals": {
+            "default": 0,
+            "title": "Signals",
+            "type": "integer"
+          },
+          "sink_lag_seconds": {
+            "title": "Sink Lag Seconds",
+            "type": "number"
+          },
+          "suppressed": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Suppressed",
+            "type": "object"
+          },
+          "warm_scopes": {
+            "title": "Warm Scopes",
+            "type": "integer"
+          },
+          "written": {
+            "default": 0,
+            "title": "Written",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "observed_at",
+          "feature_schema_version",
+          "catalog_reachable",
+          "blind",
+          "sensor_availability",
+          "sink_lag_seconds",
+          "warm_scopes",
+          "held_scopes"
+        ],
+        "title": "TickResponse",
+        "type": "object"
+      },
       "ValidationError": {
         "properties": {
           "ctx": {
@@ -1782,6 +2260,165 @@
           }
         },
         "summary": "List Artifacts"
+      }
+    },
+    "/api/v1/contracts": {
+      "get": {
+        "operationId": "list_contracts_api_v1_contracts_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "outcome",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Outcome"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "before",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Before"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContractListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Contracts"
+      }
+    },
+    "/api/v1/contracts/{job_id}": {
+      "get": {
+        "operationId": "get_contract_api_v1_contracts__job_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContractPayload"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Contract"
+      },
+      "put": {
+        "description": "Declare what a run is expected to produce; idempotent per job.\n\nRe-declaring resets the outcome to pending, because a revised expectation\nhas not been evaluated yet and claiming otherwise would hide a breach.",
+        "operationId": "declare_contract_api_v1_contracts__job_id__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ContractRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContractPayload"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Declare Contract"
       }
     },
     "/api/v1/episodes": {
@@ -2163,6 +2800,248 @@
         "summary": "Health"
       }
     },
+    "/api/v1/incidents": {
+      "get": {
+        "description": "The incident queue, newest first. Read-only.",
+        "operationId": "list_incidents_api_v1_incidents_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "severity",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Severity"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "label",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Label"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "before",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Before"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IncidentListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Incidents"
+      }
+    },
+    "/api/v1/incidents/summary": {
+      "get": {
+        "operationId": "incidents_summary_api_v1_incidents_summary_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IncidentSummaryResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Incidents Summary"
+      }
+    },
+    "/api/v1/incidents/{incident_id}": {
+      "get": {
+        "operationId": "get_incident_api_v1_incidents__incident_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "incident_id",
+            "required": true,
+            "schema": {
+              "title": "Incident Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IncidentPayload"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Incident"
+      }
+    },
+    "/api/v1/incidents/{incident_id}/ack": {
+      "post": {
+        "description": "Acknowledge: an append-only fact, so a recurrence opens a new incident.",
+        "operationId": "acknowledge_incident_api_v1_incidents__incident_id__ack_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "incident_id",
+            "required": true,
+            "schema": {
+              "title": "Incident Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IncidentPayload"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Acknowledge Incident"
+      }
+    },
+    "/api/v1/incidents/{incident_id}/resolve": {
+      "post": {
+        "description": "Resolve. A same-fault recurrence then opens a new incident, subject to cooldown.",
+        "operationId": "resolve_incident_api_v1_incidents__incident_id__resolve_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "incident_id",
+            "required": true,
+            "schema": {
+              "title": "Incident Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IncidentPayload"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Resolve Incident"
+      }
+    },
     "/api/v1/jobs": {
       "get": {
         "description": "Newest-first page of jobs for the Jobs UI.\n\nCursor-based: pass the last item's ``created_at`` back as ``before``. The UI\nnever asks for every row.",
@@ -2529,6 +3408,63 @@
           }
         },
         "summary": "Runtime Metrics"
+      }
+    },
+    "/api/v1/monitoring/health": {
+      "get": {
+        "description": "The monitor's own state. A monitor that silently stops is the worst outcome.",
+        "operationId": "monitoring_health_api_v1_monitoring_health_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MonitoringHealthResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Monitoring Health"
+      }
+    },
+    "/api/v1/monitoring/notify-preview": {
+      "get": {
+        "description": "What a notifier would send right now. Rendering only; nothing is sent.\n\nEmail delivery is deliberately not implemented (ADR 0020 \u00a710.3): it needs\nexplicit owner authorization, and a dry run that is a real code path is the\nonly honest way to leave it switched off.",
+        "operationId": "notify_preview_api_v1_monitoring_notify_preview_get",
+        "responses": {
+          "200": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Notify Preview"
+      }
+    },
+    "/api/v1/monitoring/tick": {
+      "post": {
+        "description": "Evaluate one window on demand.\n\nThe loop is a scheduler's job, not a webhook's; this exists so the notifier\ncan be driven deterministically from a test, a benchmark, or an operator who\nwants to see what it would say right now.",
+        "operationId": "run_monitor_tick_api_v1_monitoring_tick_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TickResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Run Monitor Tick"
       }
     },
     "/api/v1/quality/summary": {
@@ -3179,6 +4115,70 @@
           }
         },
         "summary": "Ui Layout Css"
+      }
+    },
+    "/ui/incidents": {
+      "get": {
+        "operationId": "incidents_page_route_ui_incidents_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "theme",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Theme"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Incidents Page Route"
+      }
+    },
+    "/ui/incidents/fragment": {
+      "get": {
+        "operationId": "incidents_fragment_route_ui_incidents_fragment_get",
+        "responses": {
+          "200": {
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Incidents Fragment Route"
       }
     },
     "/ui/insights": {

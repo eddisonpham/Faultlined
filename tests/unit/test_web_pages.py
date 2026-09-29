@@ -24,6 +24,8 @@ from data_engine.web.pages import (
     episode_detail_page,
     episodes_page,
     font_bytes,
+    incidents_fragment,
+    incidents_page,
     insights_page,
     job_detail_page,
     jobs_page,
@@ -553,3 +555,111 @@ def test_job_detail_renders_the_run_report() -> None:
 
     without = job_detail_page(job, DEFAULT_THEME, [])
     assert "Run report" not in without
+
+
+def _incident(**overrides: object) -> dict[str, object]:
+    row: dict[str, object] = {
+        "id": "inc-1",
+        "label": "CONTRACT_BREACH",
+        "severity": "critical",
+        "notify_class": "notify",
+        "scope": "job-1",
+        "summary": "Run produced 0 valid episodes; 5 were expected",
+        "status": "open",
+        "occurrence_count": 3,
+        "last_seen": "2026-09-29T12:00:00Z",
+    }
+    row.update(overrides)
+    return row
+
+
+def _model(**overrides: object) -> dict[str, object]:
+    model: dict[str, object] = {
+        "items": [_incident()],
+        "summary": {
+            "by_status": {"open": 1},
+            "by_severity": {"critical": 1},
+            "by_label": {"CONTRACT_BREACH": 1},
+            "notify_open": 1,
+        },
+        "health": {
+            "last_tick_at": "2026-09-29T12:00:00+00:00",
+            "baseline_scopes": 26,
+            "warm_scopes": 12,
+            "held_scopes": 1,
+            "alert_budget_per_window": 10,
+            "blind": False,
+        },
+        "digest": "1 need attention:\n  - [CONTRACT_BREACH] short",
+    }
+    model.update(overrides)
+    return model
+
+
+@pytest.mark.unit
+def test_incidents_page_renders_the_queue_and_the_monitor_vitals() -> None:
+    html = incidents_page(_model(), DEFAULT_THEME)
+    assert "CONTRACT_BREACH" in html
+    assert "Run produced 0 valid episodes" in html
+    assert "Monitor health" in html
+    assert "Notify preview" in html
+    assert "INCIDENTS" in html.upper()
+
+
+@pytest.mark.unit
+def test_incidents_page_shows_occurrences_and_the_channel() -> None:
+    html = incidents_page(_model(), DEFAULT_THEME)
+    assert ">3<" in html
+    assert "notify" in html
+
+
+@pytest.mark.unit
+def test_incidents_fragment_is_bare() -> None:
+    fragment = incidents_fragment(_model())
+    assert "CONTRACT_BREACH" in fragment
+    assert "<!doctype html>" not in fragment
+
+
+@pytest.mark.unit
+def test_incidents_page_escapes_untrusted_incident_text() -> None:
+    html = incidents_page(
+        _model(items=[_incident(summary="<img src=x onerror=alert(1)>")]), DEFAULT_THEME
+    )
+    assert "<img src=x" not in html
+    assert "&lt;img src=x" in html
+
+
+@pytest.mark.unit
+def test_incidents_page_escapes_the_scope() -> None:
+    html = incidents_page(_model(items=[_incident(scope="<b>job</b>")]), DEFAULT_THEME)
+    assert "<b>job</b>" not in html
+
+
+@pytest.mark.unit
+def test_a_blind_monitor_is_called_out_on_its_own_page() -> None:
+    # A monitor that has silently stopped looks exactly like one with nothing to
+    # report, and only one of those is healthy.
+    health = dict(_model()["health"])  # type: ignore[arg-type]
+    health["blind"] = True
+    html = incidents_page(_model(health=health), DEFAULT_THEME)
+    assert ">YES<" in html
+
+
+@pytest.mark.unit
+def test_incidents_page_survives_missing_health() -> None:
+    html = incidents_page(_model(health={}), DEFAULT_THEME)
+    assert "CONTRACT_BREACH" in html
+    assert "Monitor health" not in html
+
+
+@pytest.mark.unit
+def test_incidents_page_survives_missing_summary() -> None:
+    html = incidents_page(_model(summary={}), DEFAULT_THEME)
+    assert "CONTRACT_BREACH" in html
+
+
+@pytest.mark.unit
+def test_incidents_page_polls_its_own_fragment() -> None:
+    html = incidents_page(_model(), DEFAULT_THEME)
+    assert "/ui/incidents/fragment" in html or "/ui/incidents" in html
+    assert "setInterval" in html
