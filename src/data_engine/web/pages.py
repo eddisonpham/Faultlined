@@ -31,9 +31,19 @@ DEFAULT_THEME = "vt220"
 NAV_LINKS = (
     ("/ui", "Status"),
     ("/ui/jobs", "Jobs"),
+    ("/ui/episodes", "Episodes"),
+    ("/ui/insights", "Insights"),
+    ("/ui/metrics", "Metrics"),
     ("/ui/artifacts", "Artifacts"),
     ("/docs", "API"),
 )
+
+FONT_URL = "/ui/vendor/departure-mono/DepartureMono-Regular.woff2"
+FONT_PATH = HERE / "vendor" / "departure-mono" / "DepartureMono-Regular.woff2"
+
+# Curation views on the Episodes page; mirrors catalog.list_episodes flags.
+EPISODE_FLAGS = ("", "jerky", "stalled", "short", "long")
+EPISODE_STATES = ("", "ingested", "valid", "quarantined")
 
 JOB_STATES = (
     "queued",
@@ -55,6 +65,10 @@ STRIP_STEPS = ("queued", "running", "succeeded")
 
 def vendor_css(name: str) -> str:
     return (VENDOR / name).read_text(encoding="utf-8")
+
+
+def font_bytes() -> bytes:
+    return FONT_PATH.read_bytes()
 
 
 def layout_css() -> str:
@@ -120,6 +134,71 @@ def _meter(fraction: float, width: int = 24) -> str:
         f'<span class="de-meter">[{"#" * filled}'
         f'<span class="off">{"." * (width - filled)}</span>] '
         f"{round(fraction * 100)}%</span>"
+    )
+
+
+def _verdict_badge(verdict: Any) -> str:
+    css = {"smooth": "success", "moderate": "warning", "jerky": "error"}.get(
+        str(verdict), "comment"
+    )
+    return f'<span class="text-{css}">{escape(str(verdict))}</span>'
+
+
+def _sparkline(values: list[float], *, width: int = 260, height: int = 44) -> str:
+    """SVG trace of a series on the graticule; one `<polyline>`, nothing fetched."""
+    data = [float(v) for v in values] or [0.0]
+    lo, hi = min(data), max(data)
+    span = (hi - lo) or 1.0
+    step = width / max(len(data) - 1, 1)
+    points = " ".join(
+        f"{i * step:.1f},{height - 3 - (v - lo) / span * (height - 6):.1f}"
+        for i, v in enumerate(data)
+    )
+    return (
+        f'<svg class="de-chart" viewBox="0 0 {width} {height}" '
+        f'preserveAspectRatio="none" role="img">'
+        f'<polyline points="{points}"/></svg>'
+    )
+
+
+def _histogram_svg(bins: list[dict[str, Any]], *, width: int = 260, height: int = 44) -> str:
+    """Bar chart of [{count}] bins on the same graticule as the sparkline."""
+    if not bins:
+        return _sparkline([])
+    peak = max((int(b.get("count") or 0) for b in bins), default=0) or 1
+    bar = width / len(bins)
+
+    def rect(index: int, count: int) -> str:
+        bar_h = count / peak * (height - 6)
+        return (
+            f'<rect x="{index * bar:.1f}" y="{height - 3 - bar_h:.1f}" '
+            f'width="{max(bar - 1, 1):.1f}" height="{bar_h:.1f}"/>'
+        )
+
+    rects = "".join(rect(i, int(b.get("count") or 0)) for i, b in enumerate(bins))
+    return (
+        f'<svg class="de-chart de-chart-bars" viewBox="0 0 {width} {height}" '
+        f'preserveAspectRatio="none" role="img">{rects}</svg>'
+    )
+
+
+def _scatter_svg(
+    items: list[dict[str, Any]], key: str, *, width: int = 260, height: int = 44
+) -> str:
+    """One dot per episode along the x axis, value on the y axis."""
+    values = [float(i.get(key) or 0) for i in items] or [0.0]
+    lo, hi = min(values), max(values)
+    span = (hi - lo) or 1.0
+    step = width / max(len(values) - 1, 1)
+
+    def dot(index: int, value: float) -> str:
+        cy = height - 3 - (value - lo) / span * (height - 6)
+        return f'<circle cx="{index * step:.1f}" cy="{cy:.1f}" r="2"/>'
+
+    dots = "".join(dot(i, v) for i, v in enumerate(values))
+    return (
+        f'<svg class="de-chart de-chart-dots" viewBox="0 0 {width} {height}" '
+        f'preserveAspectRatio="none" role="img">{dots}</svg>'
     )
 
 
@@ -470,3 +549,453 @@ def _artifacts_body(model: dict[str, Any]) -> str:
         '<th>Written</th><th class="num">Episodes</th></tr></thead>'
         f"<tbody>{rows}</tbody></table>"
     )
+
+
+# ---------------------------------------------------------------- metrics
+
+
+def _ms(value: Any) -> str:
+    try:
+        return f"{float(value) * 1000:.1f}"
+    except TypeError, ValueError:
+        return "-"
+
+
+# Traces worth a sparkline: what a data engine's operator watches. Anything not
+# present in the window simply does not render.
+TRACE_SERIES = (
+    ("api_request_duration_seconds", "api latency"),
+    ("jobs_run_time_seconds", "job run time"),
+    ("pipeline_stage_duration_seconds", "stage duration"),
+    ("catalog_query_duration_seconds", "catalog query"),
+    ("jobs_queue_depth", "queue depth"),
+)
+
+
+def metrics_page(model: dict[str, Any], theme: str) -> str:
+    body = (
+        '<p class="de-sub">runtime telemetry // poll 5s // window from /api/v1/metrics</p>'
+        f"<div data-poll>{_metrics_body(model)}</div>"
+    )
+    return _page("Metrics", "/ui/metrics", body, theme, _script("/ui/metrics", 5000))
+
+
+def metrics_fragment(model: dict[str, Any]) -> str:
+    return _metrics_body(model)
+
+
+def _metrics_body(model: dict[str, Any]) -> str:
+    summaries = model.get("summaries", [])
+    series = model.get("series", {})
+    depth = model.get("jobs_queue_depth", {})
+    heartbeat = model.get("worker_heartbeat_age_seconds")
+    by_name: dict[str, list[dict[str, Any]]] = {}
+    for summary in summaries:
+        by_name.setdefault(str(summary["name"]), []).append(summary)
+
+    api = by_name.get("api_request_duration_seconds", [])
+    runs = by_name.get("jobs_run_time_seconds", [])
+    queries = by_name.get("catalog_query_duration_seconds", [])
+
+    if heartbeat is None:
+        heartbeat_cell = '<span class="text-comment">no heartbeat</span>'
+    elif float(heartbeat) > 30:
+        heartbeat_cell = f'<span class="text-error">{float(heartbeat):.0f}s stale</span>'
+    else:
+        heartbeat_cell = f'<span class="text-success">{float(heartbeat):.0f}s</span>'
+
+    readouts = _readouts(
+        [
+            ("worker heartbeat", heartbeat_cell, ""),
+            ("records", str(model.get("record_count", 0)), ""),
+            ("queue depth", str(sum(int(v) for v in depth.values())), "jobs"),
+            ("api p95", _p95(api), "ms"),
+            ("run p95", _p95(runs), "ms"),
+            ("query p95", _p95(queries), "ms"),
+        ]
+    )
+
+    traces = "".join(
+        '<section class="de-section"><h2>'
+        + escape(label)
+        + "</h2>"
+        + _sparkline([float(p["v"]) for p in series.get(name, [])])
+        + f'<p class="de-sub">{len(series.get(name, []))} buckets</p></section>'
+        for name, label in TRACE_SERIES
+        if series.get(name)
+    )
+    if not traces:
+        traces = '<p class="de-empty">// no series in window</p>'
+
+    api_rows = "".join(
+        "<tr>"
+        f"<td><code>{escape(str(s['labels'].get('route', '-')))}</code></td>"
+        f"<td>{escape(str(s['labels'].get('method', '-')))}</td>"
+        f"<td>{escape(str(s['labels'].get('status_class', '-')))}</td>"
+        f'<td class="num">{s["count"]}</td>'
+        f'<td class="num">{_ms(s["p50"])}</td>'
+        f'<td class="num">{_ms(s["p95"])}</td>'
+        f'<td class="num">{_ms(s["p99"])}</td>'
+        "</tr>"
+        for s in sorted(api, key=lambda s: float(s["p95"]), reverse=True)
+    )
+    api_table = (
+        '<section class="de-section"><h2>API latency by route</h2>'
+        + (
+            '<table class="de-table"><thead><tr><th>Route</th><th>Method</th><th>Status</th>'
+            '<th class="num">Hits</th><th class="num">p50 ms</th><th class="num">p95 ms</th>'
+            f'<th class="num">p99 ms</th></tr></thead><tbody>{api_rows}</tbody></table>'
+            if api_rows
+            else '<p class="de-empty">// no api traffic in window</p>'
+        )
+        + "</section>"
+    )
+
+    stage_rows = "".join(
+        "<tr>"
+        f"<td>{escape(str(s['labels'].get('stage', '-')))}</td>"
+        f"<td>{escape(str(s['labels'].get('status', '-')))}</td>"
+        f'<td class="num">{s["count"]}</td>'
+        f'<td class="num">{_ms(s["p50"])}</td>'
+        f'<td class="num">{_ms(s["p95"])}</td>'
+        f"<td>{_meter(min(1.0, float(s['p95']) / 1.0), 10)}</td>"
+        "</tr>"
+        for s in sorted(
+            by_name.get("pipeline_stage_duration_seconds", []),
+            key=lambda s: float(s["p95"]),
+            reverse=True,
+        )
+    )
+    query_rows = "".join(
+        "<tr>"
+        f"<td><code>{escape(str(s['labels'].get('operation', '-')))}</code></td>"
+        f'<td class="num">{s["count"]}</td>'
+        f'<td class="num">{_ms(s["p50"])}</td>'
+        f'<td class="num">{_ms(s["p95"])}</td>'
+        "</tr>"
+        for s in sorted(queries, key=lambda s: float(s["p95"]), reverse=True)[:20]
+    )
+    tail = (
+        '<section class="de-section"><h2>Stage + catalog latency</h2>'
+        + (
+            '<table class="de-table"><thead><tr><th>Stage</th><th>Status</th>'
+            '<th class="num">Runs</th><th class="num">p50 ms</th><th class="num">p95 ms</th>'
+            f"<th>Load</th></tr></thead><tbody>{stage_rows}</tbody></table>"
+            if stage_rows
+            else '<p class="de-empty">// no stages measured</p>'
+        )
+        + (
+            '<table class="de-table"><thead><tr><th>Catalog op</th><th class="num">Calls</th>'
+            '<th class="num">p50 ms</th><th class="num">p95 ms</th></tr></thead>'
+            f"<tbody>{query_rows}</tbody></table>"
+            if query_rows
+            else ""
+        )
+        + "</section>"
+    )
+    return readouts + traces + api_table + tail
+
+
+def _p95(summaries: list[dict[str, Any]]) -> str:
+    if not summaries:
+        return "-"
+    return _ms(max(float(s["p95"]) for s in summaries))
+
+
+# ---------------------------------------------------------------- episodes
+
+
+def episodes_page(
+    model: dict[str, Any], state_filter: str | None, flag: str | None, theme: str
+) -> str:
+    query = ""
+    if state_filter or flag:
+        pairs = [f"state={escape(state_filter or '')}", f"flag={escape(flag or '')}"]
+        query = "?" + "&".join(pairs)
+    body = (
+        '<p class="de-sub">curation view // poll 5s</p>'
+        '<form class="de-filters" method="get" action="/ui/episodes">'
+        '<label for="state">state</label>'
+        f'<select id="state" name="state">{_pick(EPISODE_STATES, state_filter)}</select>'
+        '<label for="flag">flag</label>'
+        f'<select id="flag" name="flag">{_pick(EPISODE_FLAGS, flag, empty="all")}</select>'
+        '<button type="submit">apply</button></form>'
+        f"<div data-poll>{_episodes_body(model)}</div>"
+    )
+    return _page("Episodes", "/ui/episodes", body, theme, _script("/ui/episodes" + query, 5000))
+
+
+def episodes_fragment(model: dict[str, Any]) -> str:
+    return _episodes_body(model)
+
+
+def _pick(choices: tuple[str, ...], selected: str | None, empty: str = "all") -> str:
+    return "".join(
+        f'<option value="{c}"{" selected" if c == (selected or "") else ""}>{c or empty}</option>'
+        for c in choices
+    )
+
+
+def _episodes_body(model: dict[str, Any]) -> str:
+    items = model.get("items", [])
+    if not items:
+        return '<p class="de-empty">// no episodes match</p>'
+    rows = "".join(
+        "<tr>"
+        f'<td><a href="/ui/episodes/{escape(str(i["id"]))}">{escape(str(i["id"])[:8])}</a></td>'
+        f"<td>{escape(str(i.get('episode_key') or '-'))}</td>"
+        f"<td>{escape(str(i.get('format') or '-'))}</td>"
+        f"<td>{_state_badge(str(i.get('state') or 'ingested'))}</td>"
+        f'<td class="num">{escape(str(i.get("frame_count") or "-"))}</td>'
+        f'<td class="num">{_score(i.get("movement_score"))}</td>'
+        f'<td class="num">{_score(i.get("jerk_score"))}</td>'
+        f"<td>{_stall_cell(i)}</td>"
+        f"<td>{_verdict_cell(i)}</td>"
+        f"<td>{_when(i.get('created_at'))}</td>"
+        "</tr>"
+        for i in items
+    )
+    return (
+        '<table class="de-table"><thead><tr><th>Episode</th><th>Key</th><th>Format</th>'
+        '<th>State</th><th class="num">Frames</th><th class="num">Move</th>'
+        '<th class="num">Jerk</th><th>Stall</th><th>Verdict</th><th>Ingested</th></tr></thead>'
+        f"<tbody>{rows}</tbody></table>"
+    )
+
+
+def _score(value: Any) -> str:
+    if value is None:
+        return "-"
+    # Published channel stats can be per-dimension lists; show the head, not the list.
+    if isinstance(value, list | tuple):
+        return _score(value[0]) + ("&hellip;" if len(value) > 1 else "")
+    try:
+        return f"{float(value):.4f}"
+    except TypeError, ValueError:
+        return escape(str(value))
+
+
+def _stall_cell(item: dict[str, Any]) -> str:
+    value = item.get("stall_ratio")
+    return "-" if value is None else _meter(_bounded(value), 10)
+
+
+def _verdict_cell(item: dict[str, Any]) -> str:
+    verdict = item.get("verdict")
+    return _verdict_badge(verdict) if verdict else '<span class="text-comment">-</span>'
+
+
+def _bounded(value: Any, ceiling: float = 1.0) -> float:
+    try:
+        return max(0.0, min(ceiling, float(value)))
+    except TypeError, ValueError:
+        return 0.0
+
+
+# ---------------------------------------------------------------- episode detail
+
+
+def episode_detail_page(episode: dict[str, Any], quality: dict[str, Any] | None, theme: str) -> str:
+    meta = episode.get("metadata") or {}
+    facts = [
+        ("episode id", escape(str(episode.get("id")))),
+        ("key", escape(str(episode.get("episode_key") or "-"))),
+        ("format", escape(str(episode.get("format") or meta.get("format") or "-"))),
+        ("state", _state_badge(str(episode.get("state") or "ingested"))),
+        ("robot", escape(str(meta.get("robot") or "-"))),
+        ("task", escape(str(meta.get("task") or "-"))),
+        ("frames", escape(str(meta.get("frame_count") or "-"))),
+        ("duration", f"{float(meta.get('duration_seconds') or 0):.2f} s"),
+        ("fps", escape(str(meta.get("fps") or "-"))),
+    ]
+    blocks = [
+        '<section class="de-section"><h2>Record</h2><dl class="de-kv">'
+        + "".join(f"<dt>{k}</dt><dd>{v}</dd>" for k, v in facts)
+        + "</dl></section>"
+    ]
+    blocks.append(_quality_section(quality))
+    channels = meta.get("channel_stats") or {}
+    if channels:
+        rows = "".join(
+            "<tr>"
+            f"<td><code>{escape(str(name))}</code></td>"
+            f'<td class="num">{escape(str(c.get("count") or "-"))}</td>'
+            f'<td class="num">{_score(c.get("min"))}</td>'
+            f'<td class="num">{_score(c.get("max"))}</td>'
+            f'<td class="num">{_score(c.get("mean"))}</td>'
+            f'<td class="num">{_score(c.get("std"))}</td>'
+            "</tr>"
+            for name, c in sorted(channels.items())
+        )
+        blocks.append(
+            '<section class="de-section"><h2>Channels</h2>'
+            '<table class="de-table"><thead><tr><th>Channel</th><th class="num">n</th>'
+            '<th class="num">min</th><th class="num">max</th><th class="num">mean</th>'
+            f'<th class="num">std</th></tr></thead><tbody>{rows}</tbody></table></section>'
+        )
+    blocks.append(
+        '<section class="de-section"><h2>Metadata</h2>'
+        f'<pre class="de-json">{escape(_pretty(meta))}</pre></section>'
+    )
+    return _page(
+        "Episode " + str(episode.get("id"))[:8],
+        "/ui/episodes",
+        "".join(blocks),
+        theme,
+        _script(None, 0),
+    )
+
+
+def _quality_section(quality: dict[str, Any] | None) -> str:
+    if not quality:
+        return (
+            '<section class="de-section"><h2>Motion quality</h2>'
+            '<p class="de-empty">// no quality signals for this episode</p></section>'
+        )
+    readouts = _readouts(
+        [
+            ("verdict", _verdict_badge(quality.get("verdict")), ""),
+            ("movement", _score(quality.get("movement_score")), "/frame"),
+            ("jerk", _score(quality.get("jerk_score")), "norm"),
+            (
+                "stall",
+                _meter(_bounded(quality.get("stall_ratio")), 12),
+                "",
+            ),
+            ("length z", _score(quality.get("length_zscore")), "sigma"),
+            ("frames", escape(str(quality.get("frame_count") or "-")), ""),
+        ]
+    )
+    dims = quality.get("dims") or []
+    rows = "".join(
+        "<tr>"
+        f"<td><code>{escape(str(d.get('name')))}</code></td>"
+        f"<td>{'act' if d.get('active') else 'idle'}</td>"
+        f"<td>{'disc' if d.get('discrete') else '-'}</td>"
+        f"<td>{'grip' if d.get('gripper') else '-'}</td>"
+        f"<td>{_meter(_bounded(d.get('norm_delta_std'), 0.25), 12)}</td>"
+        f'<td class="num">{_score(d.get("mean_abs_delta_norm"))}</td>'
+        "</tr>"
+        for d in dims
+    )
+    table = ""
+    if rows:
+        table = (
+            '<table class="de-table"><thead><tr><th>Dim</th><th>Mode</th><th>Kind</th>'
+            '<th>Grip</th><th>sigma(d)/range</th><th class="num">mean|d|/range</th>'
+            f"</tr></thead><tbody>{rows}</tbody></table>"
+        )
+    return '<section class="de-section"><h2>Motion quality</h2>' + readouts + table + "</section>"
+
+
+# ---------------------------------------------------------------- insights
+
+
+def insights_page(model: dict[str, Any], theme: str) -> str:
+    body = (
+        '<p class="de-sub">dataset curation // poll 10s // /api/v1/quality/summary</p>'
+        f"<div data-poll>{_insights_body(model)}</div>"
+    )
+    return _page("Insights", "/ui/insights", body, theme, _script("/ui/insights", 10000))
+
+
+def insights_fragment(model: dict[str, Any]) -> str:
+    return _insights_body(model)
+
+
+def _insights_body(model: dict[str, Any]) -> str:
+    verdicts = model.get("verdicts", {})
+    length = model.get("length", {})
+    readouts = _readouts(
+        [
+            ("episodes", str(model.get("episode_count", 0)), "scored"),
+            ("smooth", f'<span class="text-success">{verdicts.get("smooth", 0)}</span>', ""),
+            ("moderate", f'<span class="text-warning">{verdicts.get("moderate", 0)}</span>', ""),
+            ("jerky", f'<span class="text-error">{verdicts.get("jerky", 0)}</span>', ""),
+            ("unknown", f'<span class="text-comment">{verdicts.get("unknown", 0)}</span>', ""),
+            ("length mean", _score(length.get("mean")), "frames"),
+            ("length spread", _score(length.get("std")), "sigma"),
+        ]
+    )
+
+    length_section = (
+        '<section class="de-section"><h2>Episode lengths</h2>'
+        + _histogram_svg(length.get("histogram") or [])
+        + f'<p class="de-sub">min {escape(str(length.get("min", "-")))}'
+        f" // max {escape(str(length.get('max', '-')))} frames</p></section>"
+    )
+
+    speed = model.get("speed_distribution", [])
+    speed_section = (
+        '<section class="de-section"><h2>Speed distribution</h2>'
+        + (_scatter_svg(speed, "movement_score") if speed else '<p class="de-empty">// no data</p>')
+        + f'<p class="de-sub">{len(speed)} episodes // movement per frame</p></section>'
+    )
+
+    matrix = model.get("heat_matrix", {})
+    dims = (matrix.get("dims") or [])[:16]
+    heat = ""
+    if dims:
+        episodes = (matrix.get("episodes") or [])[:20]
+        peak = (
+            max(
+                (v for e in episodes for v in (e.get("values") or []) if v is not None),
+                default=0.0,
+            )
+            or 1.0
+        )
+        head = "".join(f"<th>{escape(str(d))}</th>" for d in dims)
+        body_rows = ""
+        for e in episodes:
+            cells = ""
+            for index, d in enumerate(dims):
+                values = e.get("values") or []
+                value = values[index] if index < len(values) else None
+                if value is None:
+                    cells += '<td class="de-heat">·</td>'
+                else:
+                    cells += (
+                        f'<td class="de-heat" style="--v:{float(value) / peak:.3f}" '
+                        f'title="{escape(str(d))} = {float(value):.4f}"></td>'
+                    )
+            body_rows += (
+                f'<tr><td><a href="/ui/episodes/{escape(str(e["episode_id"]))}">'
+                f"{escape(str(e['episode_id'])[:8])}</a></td>{cells}</tr>"
+            )
+        heat = (
+            '<section class="de-section"><h2>Cross-episode variance // sigma(d)/range</h2>'
+            '<div class="de-heat-wrap"><table class="de-table de-heat-table"><thead><tr><th>Ep</th>'
+            f"{head}</tr></thead><tbody>{body_rows}</tbody></table></div>"
+            '<p class="de-sub">brighter = rougher // hover for values</p></section>'
+        )
+
+    outliers = model.get("outliers", {})
+    lists = "".join(
+        '<div><h3 class="de-outlier-h">'
+        + escape(title)
+        + '</h3><ul class="de-outliers">'
+        + "".join(
+            f'<li><a href="/ui/episodes/{escape(str(o.get("episode_id")))}">'
+            f"{escape(str(o.get('episode_id'))[:8])}</a> "
+            f'<span class="dim">{escape(str(o.get("episode_key") or ""))}</span> '
+            f'<span class="num">{_score(o.get("value"))}</span> '
+            f"{_verdict_badge(o.get('verdict'))}</li>"
+            for o in items
+        )
+        + "</ul></div>"
+        for title, items in (
+            ("top jerk", outliers.get("jerk", [])),
+            ("top stall", outliers.get("stall", [])),
+            ("length outliers", outliers.get("length", [])),
+        )
+    )
+    outlier_section = (
+        '<section class="de-section"><h2>Outliers // removal candidates</h2>'
+        + (
+            f'<div class="de-outlier-grid">{lists}</div>'
+            if lists
+            else '<p class="de-empty">// no data</p>'
+        )
+        + "</section>"
+    )
+    return readouts + length_section + speed_section + heat + outlier_section

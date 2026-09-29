@@ -10,13 +10,24 @@ from data_engine.web.pages import (
     _bytes,
     _cancel_action,
     _deadline,
+    _histogram_svg,
+    _insights_body,
     _meter,
+    _metrics_body,
+    _scatter_svg,
+    _sparkline,
     _state_badge,
     _strip,
+    _verdict_badge,
     _when,
     artifacts_page,
+    episode_detail_page,
+    episodes_page,
+    font_bytes,
+    insights_page,
     job_detail_page,
     jobs_page,
+    metrics_page,
     status_page,
 )
 
@@ -239,3 +250,224 @@ def test_job_detail_shows_the_cancel_control_for_a_live_job() -> None:
     assert "de-cancel" in html
     assert "1/3" in html
     assert "data-deadline" in html
+
+
+# ------------------------------------------- run-intelligence pages (ADR 0017/18)
+
+
+@pytest.mark.unit
+def test_font_is_vendored_and_nothing_is_fetched_remotely() -> None:
+    assert font_bytes()[:4] == b"wOF2"
+    css = layout_css()
+    assert "@font-face" in css
+    assert 'url("vendor/departure-mono/DepartureMono-Regular.woff2")' in css
+    assert "http://" not in css and "https://" not in css
+
+
+@pytest.mark.unit
+def test_sparkline_draws_a_trace_even_without_samples() -> None:
+    assert '<polyline points="' in _sparkline([1.0, 2.0, 1.5])
+    assert "<svg" in _sparkline([])
+
+
+@pytest.mark.unit
+def test_histogram_bars_and_scatter_dots_scale() -> None:
+    bars = _histogram_svg([{"lo": 0, "hi": 1, "count": 1}, {"lo": 1, "hi": 2, "count": 3}])
+    assert bars.count("<rect") == 2
+    dots = _scatter_svg([{"v": 0.1}, {"v": 0.2}, {"v": 0.3}], "v")
+    assert dots.count("<circle") == 3
+    assert "<svg" in _histogram_svg([])
+
+
+@pytest.mark.unit
+def test_metrics_body_reports_latency_and_a_stale_worker() -> None:
+    model = {
+        "record_count": 12,
+        "summaries": [
+            {
+                "name": "api_request_duration_seconds",
+                "labels": {
+                    "route": "/api/v1/jobs/{job_id}",
+                    "method": "GET",
+                    "status_class": "2xx",
+                },
+                "count": 5,
+                "p50": 0.002,
+                "p95": 0.004,
+                "p99": 0.005,
+            },
+            {
+                "name": "pipeline_stage_duration_seconds",
+                "labels": {"stage": "ingest", "status": "succeeded"},
+                "count": 3,
+                "p50": 0.01,
+                "p95": 0.02,
+                "p99": 0.03,
+            },
+        ],
+        "series": {"api_request_duration_seconds": [{"t": "t", "v": 0.003, "count": 5}]},
+        "jobs_queue_depth": {"queued": 2},
+        "worker_heartbeat_age_seconds": 45.0,
+    }
+    body = _metrics_body(model)
+    assert "45s stale" in body
+    assert "/api/v1/jobs/{job_id}" in body
+    assert "API latency by route" in body
+    assert "api latency" in body
+    assert "4.0" in body  # p95 ms of the api route
+
+
+@pytest.mark.unit
+def test_metrics_body_marks_a_worker_that_never_reported() -> None:
+    body = _metrics_body(
+        {
+            "summaries": [],
+            "series": {},
+            "jobs_queue_depth": {},
+            "worker_heartbeat_age_seconds": None,
+        }
+    )
+    assert "no heartbeat" in body
+    assert "// no api traffic in window" in body
+
+
+@pytest.mark.unit
+def test_verdict_badges_colour_by_severity() -> None:
+    assert 'text-success">smooth' in _verdict_badge("smooth")
+    assert 'text-warning">moderate' in _verdict_badge("moderate")
+    assert 'text-error">jerky' in _verdict_badge("jerky")
+    assert 'text-comment">unknown' in _verdict_badge("unknown")
+
+
+@pytest.mark.unit
+def test_episodes_page_renders_quality_columns_and_escapes() -> None:
+    html = episodes_page(
+        {
+            "items": [
+                {
+                    "id": "e-1",
+                    "episode_key": "<script>alert(1)</script>",
+                    "format": "lerobot-v3",
+                    "state": "valid",
+                    "frame_count": 303,
+                    "movement_score": 0.04,
+                    "jerk_score": 0.01,
+                    "stall_ratio": 0.1,
+                    "verdict": "jerky",
+                    "created_at": "2026-09-29T00:00:00Z",
+                }
+            ]
+        },
+        None,
+        "jerky",
+        DEFAULT_THEME,
+    )
+    assert "&lt;script&gt;" in html and "<script>alert" not in html
+    assert 'text-error">jerky' in html
+    assert "0.0400" in html
+    assert "curation view" in html
+
+
+@pytest.mark.unit
+def test_episode_detail_renders_the_quality_panel_with_dims() -> None:
+    episode = {
+        "id": "e-1",
+        "episode_key": "episode_index=0",
+        "format": "lerobot-v3",
+        "state": "valid",
+        "metadata": {
+            "robot": "so100_follower",
+            "task": "pick",
+            "frame_count": 303,
+            "duration_seconds": 10.06,
+            "fps": 30,
+            "channel_stats": {"action": {"count": 303, "min": 0.0, "max": 1.0}},
+        },
+    }
+    quality = {
+        "verdict": "smooth",
+        "movement_score": 0.04,
+        "jerk_score": 0.01,
+        "stall_ratio": 0.1,
+        "length_zscore": 0.2,
+        "frame_count": 303,
+        "dims": [
+            {
+                "name": "action[0]",
+                "active": True,
+                "discrete": False,
+                "gripper": False,
+                "norm_delta_std": 0.01,
+                "mean_abs_delta_norm": 0.005,
+            }
+        ],
+    }
+    html = episode_detail_page(episode, quality, DEFAULT_THEME)
+    assert "Motion quality" in html
+    assert "action[0]" in html
+    assert "Channels" in html
+    assert "so100_follower" in html
+
+    without = episode_detail_page(episode, None, DEFAULT_THEME)
+    assert "no quality signals" in without
+
+
+@pytest.mark.unit
+def test_insights_body_renders_distributions_heat_and_outliers() -> None:
+    body = _insights_body(
+        {
+            "episode_count": 2,
+            "verdicts": {"smooth": 1, "jerky": 1},
+            "length": {
+                "count": 2,
+                "mean": 250.0,
+                "std": 70.0,
+                "min": 200,
+                "max": 300,
+                "histogram": [
+                    {"lo": 200, "hi": 250, "count": 1},
+                    {"lo": 250, "hi": 300, "count": 1},
+                ],
+            },
+            "speed_distribution": [
+                {"episode_id": "e-1", "movement_score": 0.1, "verdict": "smooth"},
+                {"episode_id": "e-2", "movement_score": 0.9, "verdict": "jerky"},
+            ],
+            "heat_matrix": {
+                "dims": ["action[0]", "action[1]"],
+                "episodes": [
+                    {"episode_id": "e-1", "values": [0.01, None]},
+                    {"episode_id": "e-2", "values": [0.2, 0.1]},
+                ],
+            },
+            "outliers": {
+                "jerk": [
+                    {
+                        "episode_id": "e-2",
+                        "episode_key": "episode_index=1",
+                        "value": 0.9,
+                        "verdict": "jerky",
+                    }
+                ],
+                "stall": [],
+                "length": [],
+            },
+        }
+    )
+    assert "Cross-episode variance" in body
+    assert "de-heat" in body
+    assert "/ui/episodes/e-2" in body
+    assert "top jerk" in body
+    assert "Speed distribution" in body
+    assert "Episode lengths" in body
+
+
+@pytest.mark.unit
+def test_metrics_and_insights_pages_carry_the_shell() -> None:
+    for html in (
+        metrics_page({}, DEFAULT_THEME),
+        insights_page({}, DEFAULT_THEME),
+        episodes_page({"items": []}, None, None, DEFAULT_THEME),
+    ):
+        assert html.startswith("<!doctype html>")
+        assert "de-nav" in html

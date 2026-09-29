@@ -592,6 +592,43 @@ class PostgresCatalog:
             ).fetchall()
         return _assemble_quality_summary([dict(row) for row in rows])
 
+    def list_episodes(
+        self, *, limit: int = 50, state: str | None = None, flag: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Episode page with quality columns for the Episodes UI.
+
+        Flags are curation views: `jerky`/`stalled` filter on quality signals and
+        rank by the signal, `short`/`long` reorder by frame count so the tails of
+        the length distribution surface first. Default is newest first.
+        """
+        where = []
+        params: list[Any] = []
+        order = "e.created_at DESC"
+        if state:
+            where.append("e.state = %s")
+            params.append(state)
+        if flag == "jerky":
+            where.append("q.verdict = 'jerky'")
+            order = "q.jerk_score DESC"
+        elif flag == "stalled":
+            where.append("q.stall_ratio >= 0.5")
+            order = "q.stall_ratio DESC"
+        elif flag == "short":
+            order = "COALESCE(q.frame_count, 0) ASC"
+        elif flag == "long":
+            order = "COALESCE(q.frame_count, 0) DESC"
+        clause = " WHERE " + " AND ".join(where) if where else ""
+        with connect(self.settings) as connection:
+            rows = connection.execute(
+                f"""SELECT e.id, e.episode_key, e.format, e.state, e.created_at,
+                           q.frame_count, q.movement_score, q.jerk_score,
+                           q.stall_ratio, q.verdict
+                    FROM episodes e LEFT JOIN episode_quality q ON q.episode_id = e.id
+                    {clause} ORDER BY {order} LIMIT %s""",
+                (*params, limit),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
     def count_jobs(self, state: JobState) -> int:
         """Number of jobs currently in ``state``; feeds the queue-depth gauge."""
         with connect(self.settings) as connection:

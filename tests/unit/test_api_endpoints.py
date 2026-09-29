@@ -128,6 +128,82 @@ class ListingCatalogStub(CatalogStub):
             }
         ][:limit]
 
+    def list_episodes(
+        self, *, limit: int = 50, state: str | None = None, flag: str | None = None
+    ) -> list[dict[str, Any]]:
+        rows = [
+            {
+                "id": "episode-1",
+                "episode_key": "episode_index=0",
+                "format": "lerobot-v3",
+                "state": "valid",
+                "created_at": "2026-09-28T00:00:00Z",
+                "frame_count": 303,
+                "movement_score": 0.04,
+                "jerk_score": 0.01,
+                "stall_ratio": 0.1,
+                "verdict": "smooth",
+            }
+        ]
+        if flag == "jerky":
+            return []
+        return rows[:limit]
+
+    def get_episode_quality(self, episode_id: str) -> dict[str, Any] | None:
+        return {
+            "episode_id": episode_id,
+            "frame_count": 303,
+            "movement_score": 0.04,
+            "jerk_score": 0.01,
+            "stall_ratio": 0.1,
+            "verdict": "smooth",
+            "dims": [
+                {
+                    "name": "action[0]",
+                    "active": True,
+                    "discrete": False,
+                    "gripper": False,
+                    "norm_delta_std": 0.01,
+                    "mean_abs_delta_norm": 0.005,
+                }
+            ],
+            "length_zscore": 0.2,
+            "computed_at": "2026-09-29T00:00:00Z",
+        }
+
+    def quality_summary(self) -> dict[str, Any]:
+        return {
+            "episode_count": 1,
+            "verdicts": {"smooth": 1},
+            "length": {
+                "count": 1,
+                "mean": 303.0,
+                "std": 0.0,
+                "min": 303,
+                "max": 303,
+                "histogram": [{"lo": 303, "hi": 304, "count": 1}],
+            },
+            "speed_distribution": [
+                {"episode_id": "episode-1", "movement_score": 0.04, "verdict": "smooth"}
+            ],
+            "heat_matrix": {
+                "dims": ["action[0]"],
+                "episodes": [{"episode_id": "episode-1", "values": [0.01]}],
+            },
+            "outliers": {
+                "jerk": [
+                    {
+                        "episode_id": "episode-1",
+                        "episode_key": "episode_index=0",
+                        "value": 0.01,
+                        "verdict": "smooth",
+                    }
+                ],
+                "stall": [],
+                "length": [],
+            },
+        }
+
     def count_jobs(self, state: Any) -> int:
         return sum(1 for s in self.states if s == state.value)
 
@@ -258,6 +334,58 @@ def test_theme_selection_falls_back_for_unknown_names() -> None:
     client = _ui_client()
     assert 'data-theme="amber"' in client.get("/ui?theme=amber").text
     assert 'data-theme="vt220"' in client.get("/ui?theme=../../etc/passwd").text
+
+
+@pytest.mark.contract
+def test_ui_run_intelligence_pages_render() -> None:
+    client = _ui_client()
+    for path, expected in (
+        ("/ui/metrics", "worker heartbeat"),
+        ("/ui/episodes", "curation view"),
+        ("/ui/episodes/episode-1", "Motion quality"),
+        ("/ui/insights", "Cross-episode variance"),
+        ("/ui/vendor/departure-mono/DepartureMono-Regular.woff2", None),
+    ):
+        response = client.get(path)
+        assert response.status_code == 200, path
+        if expected is not None:
+            assert expected in response.text, path
+
+
+@pytest.mark.contract
+def test_ui_font_is_served_as_a_woff2() -> None:
+    response = _ui_client().get("/ui/vendor/departure-mono/DepartureMono-Regular.woff2")
+    assert response.headers["content-type"] == "font/woff2"
+    assert response.content[:4] == b"wOF2"
+
+
+@pytest.mark.contract
+def test_ui_fragments_return_bodies_without_the_shell() -> None:
+    client = _ui_client()
+    for path, expected in (
+        ("/ui/metrics", "de-readouts"),
+        ("/ui/episodes", "de-table"),
+        ("/ui/insights", "de-chart"),
+    ):
+        body = client.get(path, headers={"X-Fragment": "1"}).text
+        assert "<html" not in body, path
+        assert expected in body, path
+
+
+@pytest.mark.contract
+def test_ui_episode_filters_reject_unknown_values() -> None:
+    client = _ui_client()
+    assert client.get("/ui/episodes?state=nonsense").status_code == 422
+    assert client.get("/ui/episodes?flag=nonsense").status_code == 422
+
+
+@pytest.mark.contract
+def test_ui_episode_detail_shows_quality_and_404s() -> None:
+    client = _ui_client()
+    body = client.get("/ui/episodes/episode-1").text
+    assert "smooth" in body
+    assert "action[0]" in body
+    assert client.get("/ui/episodes/nope").status_code == 404
 
 
 @pytest.mark.contract

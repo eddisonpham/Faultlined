@@ -22,7 +22,9 @@ needs only the **Jobs / Artifacts / Status** slice; the rest lands by Production
 | **Status / Overview** | Health: queue depth, workers, GPU/CPU/disk telemetry, recent failures | MVP | platform |
 | **Jobs** | List (filters: type, state, time), detail with state transitions, attempts, logs-by-correlation-id, cancel action | MVP | all |
 | **Artifacts** | Browse content-addressed artifacts, sizes, references | MVP | data |
-| **Episodes** | Metadata search (FR-005 query builder over indexed fields), detail: stats, validation result + reason codes, quarantine actions | Baseline | data, ML |
+| **Episodes** | Curation index (state + quality flags: jerky/stalled/short/long), detail: channels, motion-quality panel (ADR 0018), validation result + reason codes | **Implemented** (run-intelligence slice; FR-005 query builder still Baseline) | data, ML |
+| **Insights** | Dataset curation view: length histogram, speed distribution, cross-episode variance heat matrix, outlier/removal-candidate lists | **Implemented** | data, ML |
+| **Metrics (live telemetry)** | Sparkline traces per metric, API-route latency table (p50/p95/p99), stage + catalog latency, worker heartbeat | **Implemented** | platform |
 | **Failures** | Validation failures grouped by reason code; job failures; revalidate/cancel actions | Baseline | data |
 | **Datasets & Builds** | Builds list; build detail: manifest view, **lineage graph** (backwards to episodes, forwards to runs) | Baseline | ML, eval |
 | **Runs** | Workload run records: provenance fields, metrics | Baseline | eval |
@@ -30,10 +32,12 @@ needs only the **Jobs / Artifacts / Status** slice; the rest lands by Production
 
 ## API boundary rules
 
-- The UI consumes **only** `/api/v1` (OpenAPI-generated client; ADR 0009). No direct DB or filesystem access, ever.
+- The UI consumes **only** `/api/v1`-shaped read models. As built (ADR 0014) the server-rendered pages call the
+  catalog repository in the same process and serialize the same shapes the versioned API serves; external clients
+  use `/api/v1`. No client-side DB or filesystem access, ever.
 - Mutations limited to: submit jobs, cancel jobs, trigger revalidation, trigger builds/runs. Everything else is read-only.
-- Live updates in v1: **polling** (jobs list 3 s, detail 5 s, backoff when tab hidden). SSE/WebSocket is a deferred
-  trigger (data-flow.md §5).
+- Live updates in v1: **polling** (jobs/episodes lists 3–5 s, metrics 5 s, insights 10 s, detail pages static;
+  backoff when tab hidden). SSE/WebSocket is a deferred trigger (data-flow.md §5).
 - Charts read `/api/v1/metrics` — the same metric schema as benchmarks/runtime (ADR 0008), so UI, benchmarks, and
   experiment records never disagree.
 - Error rendering mirrors problem-object codes (api.md); the UI shows `correlation_id` prominently for support/debug.
@@ -47,6 +51,22 @@ needs only the **Jobs / Artifacts / Status** slice; the rest lands by Production
 | Client state, fetching, caching | UI (framework's query layer; choice at phase 12) |
 | Visualization components (time series, lineage graph, tables) | UI; data contracts stable in `/api/v1/metrics` and lineage endpoints |
 | Auth | None in v1 (localhost); UI assumes trusted local user (ADR 0009) |
+
+## Design language
+
+The visual identity is an **instrument panel**, executed consistently (run-intelligence slice):
+
+- **Display face:** vendored [Departure Mono](../implementation/departure-mono-vendored.md) (SIL OFL) on
+  headings, numeric readouts, meters, chart chrome; body prose stays on the vendored terminal-ui monospace stack.
+- **Charts are oscilloscope traces:** inline SVG (`<polyline>`/`<rect>`/`<circle>` only — no chart library, no
+  runtime fetch) on a dotted graticule, phosphor accent from the active theme's `--fine-use-*` variables, so all
+  four vendored themes stay coherent.
+- **ASCII meters** (`[###.....] 42%`) for loads, stall ratios, and per-dim sigma — the terminal vocabulary is kept
+  where it communicates faster than a graphic.
+- **Heat matrix** for cross-episode per-dim variance: CSS-grid intensity cells (`color-mix` on the accent), hover
+  for exact values, horizontal scroll with a themed thin scrollbar.
+- Escaping is owned by `web/pages.py` (`html.escape` on every dynamic value); themes are the four vendored ones,
+  anything else falls back to `vt220`.
 
 ## Non-goals (UI)
 

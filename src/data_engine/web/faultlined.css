@@ -3,11 +3,38 @@
  *
  * The terminal/instrument vocabulary (colours, type scale, tables, status badges,
  * ASCII bars) comes from the vendored stylesheet; see vendor/terminal-ui/NOTICE.md.
- * This file only adds what Faultlined specifically needs on top of it.
+ * The display face is vendored Departure Mono; see vendor/departure-mono/NOTICE.md.
+ * This file owns layout, the chart/graticule language, and where each face is used.
  */
+
+@font-face {
+  font-family: "Departure Mono";
+  src: url("vendor/departure-mono/DepartureMono-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
 
 :root {
   --de-gap: 0.75rem;
+  --de-display: "Departure Mono", ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+
+/* The pixel face carries the instrument register: headings, readouts, meters,
+   clocks, chart chrome. Prose stays on the vendored body stack. */
+.de-head h1,
+.de-brand,
+.de-section > h2,
+.de-outlier-h,
+.de-readout dd,
+.de-readout dd small,
+.de-meter,
+.de-clock,
+.de-strip,
+.de-table td.num,
+.de-kv dd,
+.de-outliers .num {
+  font-family: var(--de-display);
 }
 
 /* ---- shell ---------------------------------------------------------------- */
@@ -314,3 +341,108 @@ pre.de-json {
 @keyframes de-blink {
   to { opacity: 0.25; }
 }
+
+/* ---- oscilloscope charts -------------------------------------------------- */
+
+/* Traces sit on a graticule like a scope screen: dotted grid, phosphor line,
+   no gradients or shadows. The SVGs hold one polyline/rect set and nothing else. */
+.de-chart {
+  display: block;
+  width: 100%;
+  max-width: 46rem;
+  height: 3.25rem;
+  border: 1px solid var(--fine-use-border, #0a0);
+  background-image:
+    repeating-linear-gradient(
+      to right,
+      color-mix(in srgb, var(--fine-use-border, #0a0) 40%, transparent) 0 1px,
+      transparent 1px 10%
+    ),
+    repeating-linear-gradient(
+      to bottom,
+      color-mix(in srgb, var(--fine-use-border, #0a0) 40%, transparent) 0 1px,
+      transparent 1px 25%
+    );
+}
+
+.de-chart polyline {
+  fill: none;
+  stroke: var(--fine-use-accent, #0c0);
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
+.de-chart-bars rect {
+  fill: var(--fine-use-accent, #0c0);
+  opacity: 0.7;
+}
+
+.de-chart-dots circle { fill: var(--fine-use-accent, #0c0); }
+
+/* The heat matrix scrolls horizontally on narrow screens; keep the scrollbar in
+   the instrument palette instead of the OS default. */
+.de-heat-wrap {
+  scrollbar-width: thin;
+  scrollbar-color: var(--fine-use-accent, #0c0) transparent;
+}
+
+/* ---- cross-episode heat matrix -------------------------------------------- */
+
+.de-heat-wrap { overflow-x: auto; }
+.de-heat-table { width: auto; }
+.de-heat-table th { font-family: var(--de-display); font-size: 0.6rem; padding: 0.2rem; }
+
+.de-heat-table td.de-heat {
+  width: 1.7rem;
+  height: 1.15rem;
+  padding: 0;
+  text-align: center;
+  color: var(--fine-use-comment, #080);
+  background: color-mix(
+    in srgb,
+    var(--fine-use-accent, #0c0) calc(var(--v, 0) * 100%),
+    transparent
+  );
+}
+
+.de-heat-table td.de-heat[title] { cursor: help; }
+
+/* ---- outlier lists -------------------------------------------------------- */
+
+.de-outlier-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  gap: 1rem;
+}
+
+.de-outlier-h {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--fine-use-comment, #080);
+  margin: 0 0 0.35rem;
+}
+
+.de-outliers {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 0.8rem;
+}
+
+.de-outliers li {
+  display: flex;
+  gap: 0.5rem;
+  align-items: baseline;
+  padding: 0.18rem 0;
+  border-bottom: 1px dashed color-mix(in srgb, var(--fine-use-border, #0a0) 35%, transparent);
+}
+
+.de-outliers .num {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+  color: var(--fine-use-text, #0f0);
+}
+
+.de-outliers a { color: var(--fine-use-accent, #0c0); text-decoration: none; }
+.de-outliers a:hover { text-decoration: underline; }

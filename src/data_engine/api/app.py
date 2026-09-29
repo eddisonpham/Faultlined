@@ -46,14 +46,23 @@ from data_engine.web import (
     THEMES,
     artifacts_fragment,
     artifacts_page,
+    episode_detail_page,
+    episodes_fragment,
+    episodes_page,
+    font_bytes,
+    insights_fragment,
+    insights_page,
     job_detail_page,
     jobs_fragment,
     jobs_page,
     layout_css,
+    metrics_fragment,
+    metrics_page,
     status_fragment,
     status_page,
     vendor_css,
 )
+from data_engine.web.pages import EPISODE_FLAGS, EPISODE_STATES
 
 # Only these two filename shapes are servable; anything else is a 404.
 _SAFE_STYLESHEET = re.compile(r"(core|theme-[a-z0-9-]+)")
@@ -88,6 +97,31 @@ def _status_model(catalog: PostgresCatalog) -> dict[str, Any]:
             "gpu_present": sample.gpu_present,
             "gpu_memory_total_bytes": sample.gpu_memory_total_bytes,
         },
+    }
+
+
+def _metrics_model(
+    configured: Settings,
+    catalog: PostgresCatalog,
+    window_seconds: float | None,
+    bucket_seconds: float = 60.0,
+) -> dict[str, Any]:
+    """Aggregate the metrics sink; shared by the API endpoint and the Metrics UI."""
+    records = read_metric_records(configured.metrics_path, max_records=200_000)
+    since = (
+        datetime.now(UTC) - timedelta(seconds=window_seconds)
+        if window_seconds is not None
+        else None
+    )
+    windowed = window_records(records, since=since)
+    return {
+        "generated_at": datetime.now(UTC).isoformat(),
+        "window_seconds": window_seconds,
+        "record_count": len(windowed),
+        "summaries": summarize(windowed),
+        "series": metric_series(windowed, bucket_seconds=bucket_seconds),
+        "jobs_queue_depth": {state.value: catalog.count_jobs(state) for state in JobState},
+        "worker_heartbeat_age_seconds": heartbeat_age_seconds(records),
     }
 
 
@@ -301,24 +335,7 @@ def create_app(
         window (a dead worker must not vanish from a narrow window).
         """
         catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
-        records = read_metric_records(configured.metrics_path, max_records=200_000)
-        since = (
-            datetime.now(UTC) - timedelta(seconds=window_seconds)
-            if window_seconds is not None
-            else None
-        )
-        windowed = window_records(records, since=since)
-        return {
-            "generated_at": datetime.now(UTC).isoformat(),
-            "window_seconds": window_seconds,
-            "record_count": len(windowed),
-            "summaries": summarize(windowed),
-            "series": metric_series(windowed, bucket_seconds=bucket_seconds),
-            "jobs_queue_depth": {
-                state.value: catalog_for_request.count_jobs(state) for state in JobState
-            },
-            "worker_heartbeat_age_seconds": heartbeat_age_seconds(records),
-        }
+        return _metrics_model(configured, catalog_for_request, window_seconds, bucket_seconds)
 
     @app.get("/ui/faultlined.css")
     def ui_layout_css() -> Response:
@@ -402,6 +419,76 @@ def create_app(
         if x_fragment:
             return HTMLResponse(artifacts_fragment(items))
         return HTMLResponse(artifacts_page(items, _theme(theme)))
+
+    @app.get("/ui/vendor/departure-mono/DepartureMono-Regular.woff2")
+    def ui_font() -> Response:
+        """Serve the vendored display font. See web/vendor/departure-mono/NOTICE.md."""
+        return Response(font_bytes(), media_type="font/woff2")
+
+    @app.get("/ui/metrics", response_class=HTMLResponse)
+    def ui_metrics(
+        request: Request,
+        window_seconds: float | None = None,
+        theme: str | None = None,
+        x_fragment: str | None = Header(default=None),
+    ) -> HTMLResponse:
+        """Live telemetry dashboard over the same model as /api/v1/metrics."""
+        catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
+        model = _metrics_model(configured, catalog_for_request, window_seconds)
+        if x_fragment:
+            return HTMLResponse(metrics_fragment(model))
+        return HTMLResponse(metrics_page(model, _theme(theme)))
+
+    @app.get("/ui/episodes", response_class=HTMLResponse)
+    def ui_episodes(
+        request: Request,
+        state: str | None = None,
+        flag: str | None = None,
+        theme: str | None = None,
+        x_fragment: str | None = Header(default=None),
+    ) -> HTMLResponse:
+        """Episode index with curation flags (jerky / stalled / short / long)."""
+        if state is not None and state not in EPISODE_STATES:
+            raise HTTPException(status_code=422, detail=f"unknown episode state: {state}")
+        if flag is not None and flag not in EPISODE_FLAGS:
+            raise HTTPException(status_code=422, detail=f"unknown flag: {flag}")
+        catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
+        model = {
+            "items": catalog_for_request.list_episodes(
+                limit=50, state=state or None, flag=flag or None
+            )
+        }
+        if x_fragment:
+            return HTMLResponse(episodes_fragment(model))
+        return HTMLResponse(episodes_page(model, state, flag, _theme(theme)))
+
+    @app.get("/ui/episodes/{episode_id}", response_class=HTMLResponse)
+    def ui_episode_detail(
+        episode_id: str, request: Request, theme: str | None = None
+    ) -> HTMLResponse:
+        catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
+        episode = catalog_for_request.get_episode(episode_id)
+        if episode is None:
+            return HTMLResponse(
+                '<!doctype html><p class="de-empty">// no such episode. '
+                '<a href="/ui/episodes">back to episodes</a></p>',
+                status_code=404,
+            )
+        quality = catalog_for_request.get_episode_quality(episode_id)
+        return HTMLResponse(episode_detail_page(episode, quality, _theme(theme)))
+
+    @app.get("/ui/insights", response_class=HTMLResponse)
+    def ui_insights(
+        request: Request,
+        theme: str | None = None,
+        x_fragment: str | None = Header(default=None),
+    ) -> HTMLResponse:
+        """Dataset curation view: distributions, variance heat, outlier lists."""
+        catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
+        model = catalog_for_request.quality_summary()
+        if x_fragment:
+            return HTMLResponse(insights_fragment(model))
+        return HTMLResponse(insights_page(model, _theme(theme)))
 
     @app.get("/api/v1/episodes/{episode_id}", response_model=EpisodeResponse)
     def get_episode(episode_id: str, request: Request) -> dict[str, Any]:
