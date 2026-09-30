@@ -1,0 +1,156 @@
+"""Can the embeddings separate the two classes at all?
+
+This is the premise test for the whole stage. Every clustering method downstream
+assumes that "same task" pairs sit closer together than "different task" pairs, by
+enough that some distance threshold can tell them apart. If the two similarity
+distributions overlap - which they will, because "pick up the red cube" and
+"pick up the blue cube" differ by one word and "grab the red cube" and
+"pick up the red cube" are the same task written twice - then no threshold works,
+and the honest conclusion is that a single-view clustering cannot do this job at
+any radius.
+
+The number that answers it is the **overlap**: how far the best achievable
+threshold still mixes the classes. A mean similarity for each class is not
+enough, because two distributions can share a mean and be perfectly separable.
+So this reports the full picture - both distributions, the best threshold, and
+what that threshold still gets wrong - rather than a single score that would look
+fine either way.
+
+It also reports the same measurement per view, because that is the whole reason
+for the two-view design: the action view may be separable while the object view
+is not, or the reverse, and that asymmetry is the finding that decides whether
+clustering on embeddings is viable at all.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Sequence
+from dataclasses import dataclass
+
+import numpy as np
+
+from experiments.clustering.evaluation.gold import GoldPair, vocab
+
+
+@dataclass(frozen=True, slots=True)
+class ViewSeparability:
+    """Where the two classes sit, and the best a single threshold can do."""
+
+    view: str
+    positives: int
+    negatives: int
+    positive_min: float
+    positive_mean: float
+    negative_max: float
+    negative_mean: float
+    #: Cosine similarity at the threshold that maximises balanced accuracy. Below
+    #: this is "same", above is "different".
+    best_threshold: float
+    best_accuracy: float
+    #: How many negatives fall above the best threshold, and positives below it.
+    #: Non-zero on both sides means the classes genuinely interleave.
+    false_merges: int
+    false_splits: int
+    #: The classes are disjoint below this similarity: no false merges at all.
+    #: `None` when they interleave at every threshold.
+    clean_threshold: float | None
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "view": self.view,
+            "positives": self.positives,
+            "negatives": self.negatives,
+            "positive_min": self.positive_min,
+            "positive_mean": self.positive_mean,
+            "negative_max": self.negative_max,
+            "negative_mean": self.negative_mean,
+            "best_threshold": self.best_threshold,
+            "best_accuracy": self.best_accuracy,
+            "false_merges": self.false_merges,
+            "false_splits": self.false_splits,
+            "clean_threshold": self.clean_threshold,
+        }
+
+
+def _similarity(vectors: dict[str, np.ndarray], a: str, b: str) -> float:
+    return float(vectors[a] @ vectors[b])
+
+
+def _separability_for(
+    view: str,
+    pairs: Sequence[GoldPair],
+    vectors: dict[str, np.ndarray],
+) -> ViewSeparability:
+    attribute = f"same_{view}"
+    positives = [_similarity(vectors, p.a, p.b) for p in pairs if getattr(p, attribute) is True]
+    negatives = [_similarity(vectors, p.a, p.b) for p in pairs if getattr(p, attribute) is False]
+    if not positives or not negatives:
+        raise ValueError(f"view {view!r} has no decided pairs of both classes")
+
+    pos = np.array(sorted(positives))
+    neg = np.array(sorted(negatives))
+
+    # Sweep every midpoint between the classes; balanced accuracy, because the
+    # two classes are not the same size and plain accuracy would reward a
+    # threshold that simply predicts the majority.
+    best_threshold = 0.0
+    best_accuracy = -1.0
+    for candidate in np.concatenate([pos, neg]):
+        true_positive = float((pos >= candidate).sum())
+        true_negative = float((neg < candidate).sum())
+        balanced = 0.5 * (true_positive / len(pos) + true_negative / len(neg))
+        if balanced > best_accuracy:
+            best_accuracy = balanced
+            best_threshold = float(candidate)
+
+    false_merges = int((neg >= best_threshold).sum())
+    false_splits = int((pos < best_threshold).sum())
+
+    # A threshold that admits no negative is only possible when the classes do
+    # not overlap at all, which is rare and worth distinguishing from "very good".
+    clean = float(pos.min()) if float(neg.max()) < float(pos.min()) else None
+
+    return ViewSeparability(
+        view=view,
+        positives=len(pos),
+        negatives=len(neg),
+        positive_min=float(pos.min()),
+        positive_mean=float(pos.mean()),
+        negative_max=float(neg.max()),
+        negative_mean=float(neg.mean()),
+        best_threshold=best_threshold,
+        best_accuracy=best_accuracy,
+        false_merges=false_merges,
+        false_splits=false_splits,
+        clean_threshold=clean,
+    )
+
+
+def separability(
+    vectors_by_text: dict[str, np.ndarray],
+    pairs: Sequence[GoldPair] | None = None,
+) -> dict[str, ViewSeparability]:
+    """Measure per-view separability. Uses the full gold set, both splits.
+
+    This is a premise check rather than a scored result: it reports where the two
+    classes sit, so it is informative on every pair and does not need a split.
+    Deciding a threshold *from* it is a different act, and that is what the dev
+    split is for.
+    """
+    from experiments.clustering.evaluation import gold
+
+    chosen = tuple(pairs) if pairs is not None else gold.GOLD_PAIRS
+    return {view: _separability_for(view, chosen, vectors_by_text) for view in ("action", "object")}
+
+
+def matrix_for(vectors_by_text: dict[str, np.ndarray], texts: Sequence[str]) -> np.ndarray:
+    """Stack vectors in a caller-chosen order, for reuse by other steps."""
+    return np.stack([vectors_by_text[text] for text in texts])
+
+
+def all_vectors(vectors: np.ndarray, texts: Sequence[str]) -> dict[str, np.ndarray]:
+    return dict(zip(texts, vectors, strict=True))
+
+
+def vocabulary() -> tuple[str, ...]:
+    return vocab()

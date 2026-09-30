@@ -1,0 +1,40 @@
+{
+  "embedding": {
+    "backend": "null",
+    "dim": 64,
+    "fingerprint": "null-v1-dim64-seed0",
+    "model": null,
+    "semantic": false
+  },
+  "experiment": "separability",
+  "views": {
+    "action": {
+      "best_accuracy": 0.75,
+      "best_threshold": 0.75,
+      "clean_threshold": null,
+      "false_merges": 0,
+      "false_splits": 11,
+      "negative_max": 0.6708203554153442,
+      "negative_mean": 0.5409463763236999,
+      "negatives": 15,
+      "positive_mean": 0.7460324628786608,
+      "positive_min": 0.6324555277824402,
+      "positives": 22,
+      "view": "action"
+    },
+    "object": {
+      "best_accuracy": 0.6395833333333334,
+      "best_threshold": 0.5773502588272095,
+      "clean_threshold": null,
+      "false_merges": 11,
+      "false_splits": 1,
+      "negative_max": 0.919866144657135,
+      "negative_mean": 0.6042864508926868,
+      "negatives": 16,
+      "positive_mean": 0.6887065430482229,
+      "positive_min": 0.3333333134651184,
+      "positives": 30,
+      "view": "object"
+    }
+  }
+}

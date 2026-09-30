@@ -1,0 +1,132 @@
+{
+  "embedding": {
+    "backend": "m2v-8m",
+    "dim": 256,
+    "fingerprint": "minishlab/potion-base-8M@7d84d5c3ca02de18bcc75db9b072a699",
+    "model": "minishlab/potion-base-8M@7d84d5c3ca02de18bcc75db9b072a699",
+    "semantic": true
+  },
+  "experiment": "centroids",
+  "inputs": 32,
+  "outcomes": [
+    {
+      "cluster_count": 16,
+      "distinct_counts": 3,
+      "drift": 0.031854636734351516,
+      "micros_per_point": 14.216668205335736,
+      "outlier_pull": 0.0,
+      "over_merge_rate": 0.5,
+      "pair_f1": 0.5454545454545454,
+      "points_retained": 64,
+      "recovery": 1.0,
+      "rule": "robust_trim_64_0.2",
+      "under_merge_rate": 0.4
+    },
+    {
+      "cluster_count": 16,
+      "distinct_counts": 3,
+      "drift": 0.031854636734351516,
+      "micros_per_point": 17.240625311387703,
+      "outlier_pull": 0.0,
+      "over_merge_rate": 0.5,
+      "pair_f1": 0.5454545454545454,
+      "points_retained": 32,
+      "recovery": 1.0,
+      "rule": "robust_trim_32_0.25",
+      "under_merge_rate": 0.4
+    },
+    {
+      "cluster_count": 16,
+      "distinct_counts": 3,
+      "drift": 0.03185463813133538,
+      "micros_per_point": 10.602084027292827,
+      "outlier_pull": 0.0,
+      "over_merge_rate": 0.5,
+      "pair_f1": 0.5454545454545454,
+      "points_retained": 32,
+      "recovery": 1.0,
+      "rule": "sliding_32",
+      "under_merge_rate": 0.4
+    },
+    {
+      "cluster_count": 16,
+      "distinct_counts": 3,
+      "drift": 0.03185463813133538,
+      "micros_per_point": 9.79999943713968,
+      "outlier_pull": 0.0,
+      "over_merge_rate": 0.5,
+      "pair_f1": 0.5454545454545454,
+      "points_retained": 8,
+      "recovery": 1.0,
+      "rule": "sliding_8",
+      "under_merge_rate": 0.4
+    },
+    {
+      "cluster_count": 16,
+      "distinct_counts": 3,
+      "drift": 0.03185463813133538,
+      "micros_per_point": 18.832290758534025,
+      "outlier_pull": 0.0,
+      "over_merge_rate": 0.5,
+      "pair_f1": 0.5454545454545454,
+      "points_retained": 64,
+      "recovery": 1.0,
+      "rule": "huber_64_1.0",
+      "under_merge_rate": 0.4
+    },
+    {
+      "cluster_count": 16,
+      "distinct_counts": 3,
+      "drift": 0.03185465862043202,
+      "micros_per_point": 14.083332644077018,
+      "outlier_pull": 0.0,
+      "over_merge_rate": 0.5,
+      "pair_f1": 0.5454545454545454,
+      "points_retained": 0,
+      "recovery": 1.0,
+      "rule": "running_mean",
+      "under_merge_rate": 0.4
+    },
+    {
+      "cluster_count": 17,
+      "distinct_counts": 3,
+      "drift": 0.036821883358061316,
+      "micros_per_point": 9.974999557016417,
+      "outlier_pull": 0.03232233598828316,
+      "over_merge_rate": 0.5,
+      "pair_f1": 0.47619047619047616,
+      "points_retained": 32,
+      "recovery": 0.9676775932312012,
+      "rule": "medoid_32",
+      "under_merge_rate": 0.5
+    },
+    {
+      "cluster_count": 17,
+      "distinct_counts": 3,
+      "drift": 0.049604436551982704,
+      "micros_per_point": 12.658332707360387,
+      "outlier_pull": 0.0605437345802784,
+      "over_merge_rate": 0.5,
+      "pair_f1": 0.47619047619047616,
+      "points_retained": 0,
+      "recovery": 0.9394562840461731,
+      "rule": "ema_0.98",
+      "under_merge_rate": 0.5
+    },
+    {
+      "cluster_count": 16,
+      "distinct_counts": 3,
+      "drift": 0.05380368698388338,
+      "micros_per_point": 10.528126343463859,
+      "outlier_pull": 0.0,
+      "over_merge_rate": 0.5,
+      "pair_f1": 0.5454545454545454,
+      "points_retained": 0,
+      "recovery": 1.0,
+      "rule": "ema_0.90",
+      "under_merge_rate": 0.4
+    }
+  ],
+  "radius": 0.35,
+  "split": "dev"
+}

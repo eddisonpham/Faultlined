@@ -1,0 +1,40 @@
+{
+  "embedding": {
+    "backend": "m2v-32m",
+    "dim": 512,
+    "fingerprint": "minishlab/potion-base-32M@3b393362969361b7834b263489ad4acf",
+    "model": "minishlab/potion-base-32M@3b393362969361b7834b263489ad4acf",
+    "semantic": true
+  },
+  "experiment": "separability",
+  "views": {
+    "action": {
+      "best_accuracy": 0.6833333333333333,
+      "best_threshold": 0.7397562265396118,
+      "clean_threshold": null,
+      "false_merges": 2,
+      "false_splits": 11,
+      "negative_max": 0.8063308000564575,
+      "negative_mean": 0.5060366317008932,
+      "negatives": 15,
+      "positive_mean": 0.7350092394785448,
+      "positive_min": 0.42693638801574707,
+      "positives": 22,
+      "view": "action"
+    },
+    "object": {
+      "best_accuracy": 0.8083333333333333,
+      "best_threshold": 0.6998662352561951,
+      "clean_threshold": null,
+      "false_merges": 4,
+      "false_splits": 4,
+      "negative_max": 0.827944278717041,
+      "negative_mean": 0.48453869338845834,
+      "negatives": 16,
+      "positive_mean": 0.7707446336746215,
+      "positive_min": 0.6197783350944519,
+      "positives": 30,
+      "view": "object"
+    }
+  }
+}
