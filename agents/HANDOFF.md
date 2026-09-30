@@ -3,7 +3,7 @@
 Current state of Faultlined for whoever picks it up next. Recent slices are listed in [§14](#14-recent-slices); detail lives in the linked ADR, experiment and review records.
 
 - Stage: production baseline, open since 2026-09-30. MVP complete, all 27 criteria evidenced ([definition of done](spec/definition-of-done.md)).
-- Suite: 903 passing, coverage above 92%, mypy strict clean, OpenAPI contract matches.
+- Suite: 971 passing, coverage 92.37%, mypy strict clean, OpenAPI contract matches.
 - Everything is committed on `main`. Do not tag `scaffold-complete` until the open items in [§6](#6-known-technical-risks) and [§7](#7-next-steps) close.
 
 ## 1. Problem
@@ -36,7 +36,7 @@ Python 3.14, uv with a committed lock, just, Ruff, mypy, pytest with a 70% cover
 
 ### Working
 
-- **Job lifecycle**: submission with `max_attempts` and `deadline_seconds`, atomic claim, cooperative cancel, deadline sweep, terminal-vs-retryable failure classification ([ADR 0015](decisions/0015-cooperative-job-lifecycle.md)).
+- **Job lifecycle**: submission with `max_attempts` and `deadline_seconds`, atomic claim, cooperative cancel, deadline sweep, dead-worker recovery, terminal-vs-retryable failure classification ([ADR 0015](decisions/0015-cooperative-job-lifecycle.md)). The reapers run from the worker loop and a database blip backs off instead of ending the process.
 - **Ingest, both chosen formats**: `ingest_source` jobs over a sniff-based reader registry. LeRobot v2.1 and v3.0, verified end to end against real Hub datasets. MCAP as a second registry entry with no core change ([ADR 0022](decisions/0022-mcap-ingest-reader.md)). Episode identity is `(source_hash, episode_key)`, so many episodes in one shard each get a catalog row while the file is stored once.
 - **Validation**: hashed JSON profiles, a 7-rule engine, quarantine and re-validate without re-ingest ([ADR 0016](decisions/0016-json-validation-profiles.md)).
 - **Quality signals**: movement, jerk, stall ratio, length z-score, temporal integrity, verdict on the median judged dimension. Non-finite input stops the analysis instead of poisoning dataset statistics; all three readers supply a clock ([ADR 0023](decisions/0023-quality-metrics-honesty.md), which amends ADR 0018).
@@ -165,6 +165,7 @@ One line each. Detail in the linked record.
 | 2026-09-30 | Page-transition blur and navigation indicator removed, nav made opaque; `just ui-audit` measures computed styles in headless Chrome over all eleven pages | [ADR 0021](decisions/0021-frontend-instrument-pass.md) |
 | 2026-09-30 | Theme swap no longer leaves a duplicate stylesheet that re-enabled the vendor glow (F20); the audit now runs every page under every theme | [failure modes](testing/failure-modes.md) |
 | 2026-09-30 | Fixture download hardened against truncated bodies (F21) and the hosted runner removed after repeated intermittent failures; the local gate is `just ci` | [definition of done](spec/definition-of-done.md) |
+| 2026-09-30 | Fault-tolerance and efficiency audit: two write N+1s batched, a bounded `statement_timeout`, dead-worker job recovery, the worker survives a database outage, and one page-limit policy across every route (F22, F23, F24) | [failure modes](testing/failure-modes.md) |
 
 ### Lessons worth keeping
 
