@@ -1777,6 +1777,14 @@
             "title": "Heat Matrix",
             "type": "object"
           },
+          "integrity": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "default": {},
+            "title": "Integrity",
+            "type": "object"
+          },
           "length": {
             "additionalProperties": true,
             "title": "Length",

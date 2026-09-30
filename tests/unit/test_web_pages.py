@@ -585,8 +585,57 @@ def test_insights_body_renders_distributions_heat_and_outliers() -> None:
     assert "de-heat" in body
     assert "/ui/episodes/e-2" in body
     assert "top jerk" in body
-    assert "Speed distribution" in body
+    assert "Motion, comparable across datasets" in body
     assert "Episode lengths" in body
+
+
+@pytest.mark.unit
+def test_the_motion_chart_is_plotted_on_the_dimensionless_score() -> None:
+    """The chart this replaced plotted a quantity with no shared unit.
+
+    `movement_score` is an L2 norm in the source's own units, so the reference
+    run put a driving fixture at 1.0e8 beside arm joints at 0.02 and four of the
+    five episodes collapsed onto the floor of a linear axis. `jerk_score` is the
+    same motion divided by each dimension's range, so the axis is meaningful
+    across datasets. Both numbers are still shown, because "how far did this joint
+    actually travel" is a real question with a real-unit answer.
+    """
+    body = _insights_body(
+        {
+            "episode_count": 2,
+            "verdicts": {"smooth": 1, "moderate": 1},
+            "length": {"mean": 10.0, "std": 1.0, "min": 5, "max": 20, "histogram": []},
+            "speed_distribution": [
+                {
+                    "episode_id": "e-1",
+                    "movement_score": 1.0e8,
+                    "jerk_score": 0.018,
+                    "integrity": "ok",
+                    "verdict": "moderate",
+                },
+                {
+                    "episode_id": "e-2",
+                    "movement_score": 0.02,
+                    "jerk_score": 0.004,
+                    "integrity": "gapped",
+                    "verdict": "smooth",
+                },
+            ],
+            "integrity": {"gapped": 1, "ok": 1},
+            "heat_matrix": {},
+            "outliers": {},
+        }
+    )
+    # The dots are placed from jerk_score, so a 1e8 raw score cannot drag the
+    # small episode to the floor: the two dots sit at clearly different heights
+    # and the axis is labelled in the normalised unit.
+    assert "log10" not in body  # 0.004..0.018 is under two decades; linear is right
+    assert "0.018" in body
+    assert "Recording reliability" in body
+    assert "gapped" in body
+    # Both units remain available, labelled, for the per-dataset question.
+    assert "raw /frame" in body
+    assert "100000000" in body  # the raw score, in its own units, still shown
 
 
 @pytest.mark.unit

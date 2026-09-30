@@ -138,18 +138,37 @@ def _assemble_quality_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
     for row in rows:
         verdicts[row["verdict"]] = verdicts.get(row["verdict"], 0) + 1
 
+    def _count_by(key: str) -> dict[str, int]:
+        counts: dict[str, int] = {}
+        for row in rows:
+            name = str(row.get(key) or "unknown")
+            counts[name] = counts.get(name, 0) + 1
+        return counts
+
     return {
         "episode_count": len(rows),
         "verdicts": verdicts,
         "length": _length_summary(lengths),
+        # `jerk_score` is mean(|delta|) / the dimension's own range, averaged
+        # over the active dimensions, so it is dimensionless: radians and
+        # millimetres land on the same axis. `movement_score` is the same motion
+        # in raw units, which is what you want when you ask how far a joint
+        # actually travelled and useless when you ask which of two datasets
+        # moved more. Both are published; only one of them is comparable.
         "speed_distribution": [
             {
                 "episode_id": row["episode_id"],
                 "movement_score": float(row["movement_score"]),
+                "jerk_score": float(row["jerk_score"]),
+                "integrity": row.get("integrity", "unknown"),
                 "verdict": row["verdict"],
             }
             for row in rows
         ],
+        "integrity": {
+            str(value): count
+            for value, count in sorted(_count_by("integrity").items(), key=lambda kv: -kv[1])
+        },
         "heat_matrix": {"dims": dim_names, "episodes": heat_episodes},
         "outliers": {
             "jerk": top("jerk_score"),

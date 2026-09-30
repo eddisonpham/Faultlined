@@ -1389,3 +1389,69 @@ pre.de-json {
   .de-filters { display: none; }
   .de-section { break-inside: avoid; border-color: #999; }
 }
+
+/* ---- plot primitives (ADR 0024) ------------------------------------------- */
+
+/* Distinct from `.de-chart`, the 4.5rem scope-screen trace: a plot carries axis
+   labels and units, so it is taller, keeps its aspect ratio (text must not
+   stretch when the viewBox is scaled), and draws its own graticule instead of
+   inheriting the repeating-gradient one. */
+.de-plot {
+  display: block;
+  width: 100%;
+  height: auto;
+  margin: 0.35rem 0 0.2rem;
+  border: 1px solid var(--de-line);
+  border-radius: var(--de-radius);
+  background: color-mix(in srgb, var(--de-fg) 2%, transparent);
+}
+
+.de-plot .de-grid {
+  stroke: var(--de-faint);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.de-plot .de-tick {
+  fill: var(--de-dim);
+  font-family: var(--de-mono);
+  font-size: 10px;
+}
+
+.de-plot .de-trace {
+  fill: none;
+  stroke: var(--fine-use-accent, #0c0);
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.de-plot .de-point { fill: var(--fine-use-accent, #0c0); }
+
+.de-plot .de-bar { fill: var(--fine-use-accent, #0c0); opacity: 0.6; }
+.de-plot .de-bar:hover,
+.de-plot .de-bar-hi { opacity: 1; }
+.de-plot .de-bar-hi { fill: var(--de-warn); }
+
+.de-plot-empty .de-tick { fill: var(--de-muted); }
+
+/* The numbers behind every chart, always present, so the page survives a screen
+   reader, a stripped stylesheet and a print. */
+.de-chart-note {
+  margin: 0.1rem 0 0;
+  color: var(--de-dim);
+  font-size: 0.78rem;
+}
+
+.de-plot-grid {
+  display: grid;
+  gap: var(--de-gap);
+  grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr));
+}
+
+/* Dots are the drilldown: every episode dot is a link to that episode, so the
+   chart is navigation rather than decoration. */
+.de-plot-dots { height: auto; }
+.de-plot-dots .de-point { cursor: pointer; }
+.de-dot-link { fill: none; }

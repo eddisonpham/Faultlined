@@ -31,3 +31,4 @@ supersede it with a new ADR and update the affected docs.
 | [0021](0021-frontend-instrument-pass.md) | Instrument UI pass: one client runtime, visible failure, no Swagger surface | accepted |
 | [0022](0022-mcap-ingest-reader.md) | MCAP ingest: one file is one episode, and the file's own words are the only metadata | accepted |
 | [0023](0023-quality-metrics-honesty.md) | Quality metrics: refuse what cannot be measured, judge by majority, and score time | accepted |
+| [0024](0024-observability-visual-surface.md) | The visual layer is server-rendered SVG over data the product already collects | accepted |

@@ -367,6 +367,13 @@ class QualitySummaryResponse(BaseModel):
     verdicts: dict[str, int]
     length: dict[str, Any]
     speed_distribution: list[dict[str, Any]]
+    """One row per episode. `jerk_score` is dimensionless and therefore
+    comparable across datasets; `movement_score` is the same motion in raw
+    units, which is meaningful per dataset and meaningless between them."""
+
+    integrity: dict[str, int] = {}
+    """How many episodes recorded continuously, and how many dropped frames."""
+
     heat_matrix: dict[str, Any]
     outliers: dict[str, list[dict[str, Any]]]
 

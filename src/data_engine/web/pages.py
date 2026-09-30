@@ -18,6 +18,7 @@ because a row lacks a field is worse than one that renders a dash. See
 from __future__ import annotations
 
 import json
+import re
 from datetime import UTC, datetime
 from html import escape
 from pathlib import Path
@@ -57,6 +58,15 @@ FONT_PATH = HERE / "vendor" / "departure-mono" / "DepartureMono-Regular.woff2"
 # Curation views on the Episodes page; the vocabulary and its SQL predicates live
 # in data_engine.curation so the API, the catalog, and a saved slice cannot drift.
 from data_engine.curation import EPISODE_FLAGS, EPISODE_STATES  # noqa: E402
+from data_engine.web.charts import (  # noqa: E402
+    PAD_LEFT,
+    PAD_RIGHT,
+    axis_ticks,
+    bar_chart,
+    choose_scale,
+    format_value,
+    line_chart,
+)
 
 __all__ = ["EPISODE_FLAGS", "EPISODE_STATES"]
 
@@ -304,6 +314,62 @@ def _copyable(value: str, shown: str | None = None) -> str:
     full = escape(str(value))
     text = escape(str(shown if shown is not None else value))
     return f'<code class="de-copy" data-copy="{full}" title="click to copy">{text}</code>'
+
+
+def _episode_dots(items: list[dict[str, Any]], key: str, *, width: int = 720) -> str:
+    """One labelled, linked dot per episode on a shared scale.
+
+    The previous revision was a bare `<circle>` per episode with no axis, so a
+    reader could count the dots and nothing else. Every dot here is a link to the
+    episode, carries its value in a `<title>`, and sits on an axis whose bounds
+    are computed from the data by `web.charts` - including the automatic switch
+    to a log axis, which is what keeps a wide spread from flattening into a line.
+    """
+    if not items:
+        return _empty("no scored episodes", "ingest something to populate this")
+    values = [float(item.get(key) or 0.0) for item in items]
+    scale = choose_scale(values)
+    top, bottom = 12.0, 96.0
+    step = (width - PAD_LEFT - PAD_RIGHT) / max(len(items), 1)
+    dots = []
+    for index, (item, value) in enumerate(zip(items, values, strict=True)):
+        x = PAD_LEFT + step * (index + 0.5)
+        y = scale.pixel(value, bottom, top)
+        episode_id = str(item.get("episode_id") or "")
+        label = (
+            f"episode {episode_id[:8]}: {format_value(value)} ({item.get('verdict', 'unknown')})"
+        )
+        dots.append(
+            f'<a href="/ui/episodes/{escape(episode_id)}" class="de-dot-link">'
+            f'<circle class="de-point" cx="{x:.1f}" cy="{y:.1f}" r="4">'
+            f"<title>{escape(label)}</title></circle></a>"
+        )
+    described = (
+        f"{len(items)} episodes by {key}, "
+        f"{format_value(scale.lo)} to {format_value(scale.hi)}"
+        f"{' log10' if scale.logarithmic else ''}"
+    )
+    grid = "".join(
+        f'<line class="de-grid" x1="{PAD_LEFT}" y1="{scale.pixel(tick, bottom, top):.1f}" '
+        f'x2="{width - PAD_RIGHT}" y2="{scale.pixel(tick, bottom, top):.1f}"/>'
+        f'<text class="de-tick" x="{PAD_LEFT - 6}" '
+        f'y="{scale.pixel(tick, bottom, top) + 3:.1f}" text-anchor="end">'
+        f"{escape(format_value(tick))}</text>"
+        for tick in axis_ticks(scale)
+    )
+    return (
+        f'<svg class="de-plot de-plot-dots" viewBox="0 0 {width} 130" role="img" '
+        f'aria-label="{escape(described)}" preserveAspectRatio="xMidYMid meet">'
+        + grid
+        + "".join(dots)
+        + "</svg>"
+    )
+
+
+def _integrity_badge(integrity: Any) -> str:
+    """`ok` / `gapped` / `unknown`, as a word - never colour alone."""
+    css = {"ok": "success", "gapped": "error"}.get(str(integrity), "comment")
+    return f'<span class="text-{css}">{escape(str(integrity or "unknown"))}</span>'
 
 
 def _verdict_badge(verdict: Any) -> str:
@@ -959,14 +1025,67 @@ def _ms(value: Any) -> str:
 
 # Traces worth a sparkline: what a data engine's operator watches. Anything not
 # present in the window simply does not render.
+#: (metric key, operator label, axis unit, drilldown target). The key is an
+#: internal name and the label is what the operator reads. The unit goes on the
+#: axis because a duration axis with no unit is a number nobody can act on, and
+#: the target is where an operator goes once the plot has told them to look.
 TRACE_SERIES = (
-    # The metric key is an internal name; the label is what the operator reads.
-    ("api_request_duration_seconds", "request handling"),
-    ("jobs_run_time_seconds", "job run time"),
-    ("pipeline_stage_duration_seconds", "stage duration"),
-    ("catalog_query_duration_seconds", "catalog search"),
-    ("jobs_queue_depth", "queue depth"),
+    ("api_request_duration_seconds", "request handling", "s", "/ui/jobs"),
+    ("jobs_run_time_seconds", "job run time", "s", "/ui/jobs"),
+    ("pipeline_stage_duration_seconds", "stage duration", "s", "/ui/jobs"),
+    ("catalog_query_duration_seconds", "catalog search", "s", "/ui/episodes"),
+    ("jobs_queue_depth", "queue depth", "jobs", "/ui/jobs"),
 )
+
+#: Plot geometry, mirrored from `web.charts` so the x tick labels land on the
+#: same pixels the renderer draws into.
+_PLOT_WIDTH = 720
+
+
+def _series_plot(buckets: list[dict[str, Any]], *, label: str, unit: str, href: str) -> str:
+    """One ADR 0017 series as a real plot: axis, unit, and a peak you can follow.
+
+    The previous revision drew a 44-pixel polyline with no axis and no scale, so
+    a latency spike and a latency improvement were the same squiggle and neither
+    could be located in time. Samples are indexed rather than timestamped because
+    the buckets are already ordered and evenly spaced; the x axis carries the
+    real clock times, and the caption names the peak with its event count so the
+    reader can decide whether it is worth following.
+    """
+    if not buckets:
+        return line_chart([], label=label, caption="no buckets in window")
+    values = [float(bucket.get("v") or 0.0) for bucket in buckets]
+    peak = max(range(len(values)), key=lambda i: values[i])
+    span = max(len(buckets) - 1, 1)
+    usable = _PLOT_WIDTH - PAD_LEFT - PAD_RIGHT
+    # Clamped, because a single-bucket window has no middle or last index to
+    # point at and an out-of-range subscript is how a chart takes down a page.
+    x_ticks = [
+        (PAD_LEFT + index / span * usable, _bucket_time(buckets[index]))
+        for index in sorted({0, span // 2, span})
+        if index < len(buckets)
+    ]
+    caption = (
+        f"{len(buckets)} buckets, peak {format_value(values[peak])} {unit} "
+        f"at {_bucket_time(buckets[peak])} "
+        f"({int(buckets[peak].get('count') or 0)} events), "
+        f"mean {format_value(sum(values) / len(values))} {unit}"
+    )
+    return line_chart(
+        list(enumerate(values)),
+        label=label,
+        unit=unit,
+        x_ticks=x_ticks,
+        caption=caption,
+        link=("drill down", href),
+    )
+
+
+def _bucket_time(bucket: dict[str, Any]) -> str:
+    """`2026-09-30T03:38:00+00:00` as `03:38`, falling back to the raw prefix."""
+    stamp = str(bucket.get("t", ""))
+    match = re.search(r"T([0-9]{2}):([0-9]{2})", stamp)
+    return f"{match.group(1)}:{match.group(2)}" if match else stamp[:16]
 
 
 def metrics_page(model: dict[str, Any], theme: str) -> str:
@@ -1011,11 +1130,10 @@ def _metrics_body(model: dict[str, Any]) -> str:
     traces = "".join(
         _section(
             label,
-            _sparkline([float(p["v"]) for p in series.get(name, [])], label=label)
-            + f'<p class="de-sub">{len(series.get(name, []))} buckets</p>',
+            _series_plot(series.get(name, []), label=label, unit=unit, href=href),
             f"{len(series.get(name, []))} buckets",
         )
-        for name, label in TRACE_SERIES
+        for name, label, unit, href in TRACE_SERIES
         if series.get(name)
     )
     if not traces:
@@ -1711,12 +1829,62 @@ def _insights_body(model: dict[str, Any]) -> str:
         f"mean {_score(length.get('mean'))}",
     )
 
+    # Plotted on `jerk_score`, not `movement_score`. The raw score is an L2 norm
+    # in the source's own units, so the driving fixture (millimetres) reads
+    # 1.0e8 beside arm joints in radians at 0.02 and every arm episode collapses
+    # onto the floor of the axis. `jerk_score` is the same motion divided by
+    # each dimension's range, so the five episodes of the reference run land in
+    # a 4x band instead of a 4-billion-x one and the chart can be read. The raw
+    # score is still in the table below, labelled with its unit.
     speed = model.get("speed_distribution", [])
     speed_section = _section(
-        "Speed distribution",
-        (_scatter_svg(speed, "movement_score") if speed else _empty("no data"))
-        + f'<p class="de-sub">{len(speed)} episodes // movement per frame</p>',
-        "one dot per episode",
+        "Motion, comparable across datasets",
+        (
+            _episode_dots(speed, "jerk_score")
+            if speed
+            else _empty("no scored episodes", "ingest something to populate this")
+        )
+        + '<p class="de-sub">mean |delta| / range, per frame &#183; dimensionless'
+        " &#183; higher is faster relative to the joint's own travel</p>"
+        + _table(
+            "Per-episode motion in both units",
+            "<th>Episode</th>"
+            '<th class="num">normalised</th><th class="num">raw /frame</th>'
+            "<th>Integrity</th><th>Verdict</th>",
+            "".join(
+                "<tr>"
+                f'<td><a href="/ui/episodes/{escape(str(row.get("episode_id")))}">'
+                f"{_copyable(str(row.get('episode_id')), str(row.get('episode_id'))[:8])}</a></td>"
+                f'<td class="num">{_score(row.get("jerk_score"))}</td>'
+                f'<td class="num">{_score(row.get("movement_score"))}</td>'
+                f"<td>{_integrity_badge(row.get('integrity'))}</td>"
+                f"<td>{_verdict_badge(row.get('verdict'))}</td>"
+                "</tr>"
+                for row in speed
+            ),
+            empty="no scored episodes",
+        ),
+        "one row per episode",
+    )
+
+    # Recording reliability, rolled up. Nothing in the pipeline counts this: a
+    # dataset assembled half from gappy recordings is a dataset with holes, and
+    # per-episode verdicts are not a number anyone can hold in their head.
+    integrity_counts = model.get("integrity") or {}
+    gapped = int(integrity_counts.get("gapped", 0))
+    scored = sum(int(v) for v in integrity_counts.values())
+    reliability = _section(
+        "Recording reliability",
+        bar_chart(
+            [(name, count) for name, count in sorted(integrity_counts.items())],
+            label="episodes by temporal integrity",
+            unit="episodes",
+            highlight="gapped" if gapped else None,
+        )
+        + f'<p class="de-sub">{gapped} of {scored} recordings dropped frames'
+        " &#183; a gapped episode has a hole in the middle of it that no later"
+        " stage can detect</p>",
+        "ADR 0023",
     )
 
     matrix = model.get("heat_matrix", {})
@@ -1790,4 +1958,4 @@ def _insights_body(model: dict[str, Any]) -> str:
             else _empty("no data", "score more episodes to populate this")
         ),
     )
-    return readouts + length_section + speed_section + heat + outlier_section
+    return readouts + length_section + speed_section + reliability + heat + outlier_section
