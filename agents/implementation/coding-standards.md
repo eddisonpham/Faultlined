@@ -47,6 +47,7 @@ Run from the repository root (`just` is the single task entry point; `uv.lock` p
 | Benchmark (compare baseline) | `just bench` |
 | Create/update baseline (one-time, deliberate) | `just bench --write-baseline --baseline benchmarks/baselines/<name>.json` |
 | Run locally | `just run` |
+| Stop the local server | `just stop` |
 | Hygiene | `just hygiene` |
 | All CI gates | `just ci` |
 

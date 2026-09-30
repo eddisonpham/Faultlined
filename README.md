@@ -128,6 +128,7 @@ just test        # fast tests + coverage gate
 just test-all    # include slow and GPU-marked tests
 just bench       # synthetic harness + comparison against the committed baseline
 just run         # local API + worker together (Ctrl+C to stop)
+just stop        # stop the server from `just run` (safe: refuses foreign processes)
 just api         # HTTP API only
 just worker      # ingest worker only (-- --once to process a single job)
 just doctor      # check database connectivity and catalog schema

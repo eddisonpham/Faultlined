@@ -58,6 +58,14 @@ run:
     uv run --all-extras python scripts/check_port.py
     uv run --all-extras de dev
 
+# Stop the dev server listening on the API port. The counterpart to `run`:
+# a forgotten background server is the single most common way `just run`
+# "breaks", and netstat-then-taskkill is a ritual that gets mistyped.
+# Refuses to kill a process whose image name does not look like this
+# project's own server (see scripts/stop_server.py).
+stop:
+    uv run --all-extras python scripts/stop_server.py
+
 # Run only the HTTP API
 api:
     uv run --all-extras de api
