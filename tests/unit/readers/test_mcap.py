@@ -21,7 +21,14 @@ import pytest
 from mcap.writer import CompressionType, Writer
 
 from data_engine.ingest.readers.base import ReaderError
-from data_engine.ingest.readers.mcap_reader import MAGIC, QUALITY_WINDOW, McapReader
+from data_engine.ingest.readers.mcap_reader import (
+    MAGIC,
+    QUALITY_WINDOW,
+    McapReader,
+    _dimensions,
+    _to_float,
+    _Topic,
+)
 from data_engine.ingest.readers.registry import read_episode, reader_for
 
 pytestmark = [pytest.mark.unit]
@@ -343,3 +350,110 @@ def test_a_real_drop_before_the_retained_window_is_still_reported(tmp_path: Path
     assert quality is not None
     assert quality.integrity == "gapped"
     assert quality.max_gap_seconds == pytest.approx(30.0, rel=1e-3)
+
+
+# ---------------------------------------------------- compiled flatten plan
+#
+# The plan is a speed trick, and speed tricks are where behaviour quietly
+# changes. The oracle is the dict path the plan replaced: `_observe_dims` is
+# still shipped code (the fallback), so the fast path is held to bit-identical
+# output against the very implementation it stands in for.
+
+
+def _state(topic: Any) -> tuple[Any, ...]:
+    stats = topic.stats()
+    series = {name: tuple(values) for name, values in topic.quality_series().items()}
+    return (
+        stats.count,
+        stats.min,
+        stats.max,
+        stats.mean,
+        stats.std,
+        topic.reference,
+        series,
+        tuple(topic.quality_clock() or ()),
+        topic.widest_interval(),
+    )
+
+
+_EQUIVALENCE_PAYLOADS = [
+    {"position": [1.0, 2.0], "velocity": [0.1, 0.2], "name": ["a", "b"]},
+    {"position": [1.5, 2.5], "velocity": [0.3, 0.4], "name": ["a", "b"]},
+    # Same keys, different order: traversal order changed, so the plan must
+    # rebuild (floats do not add associatively and the dict path follows order).
+    {"name": ["a", "b"], "position": [1.5, 2.5], "velocity": [0.3, 0.4]},
+    # Ragged: missing a reference name.
+    {"position": [9.0]},
+    # Extra numeric name beyond the reference set.
+    {"position": [2.0, 3.0], "velocity": [0.5, 0.6], "name": ["a", "b"], "effort": [7.0]},
+    # Leaf kind flip: velocity is numeric no more -> ragged again.
+    {"position": [2.0, 3.0], "velocity": ["x", "y"], "name": ["a", "b"]},
+    # List length change is a shape change.
+    {
+        "position": [3.0, 4.0],
+        "velocity": [0.7, 0.8],
+        "name": ["a", "b"],
+        "effort": [8.0, 9.0, 10.0],
+    },
+    # Deep nesting, bool/str/None leaves, and a number float cannot hold.
+    {"nested": {"a": {"b": [1, 2]}, "c": True}, "s": "str", "n": None, "big": 10**400},
+    [1, 2, [3, 4]],
+    {"mixed": [{"x": 1}, {"x": 2}]},
+    42,
+    {"a": (1, 2)},
+    {"position": [1.0, 2.0], "velocity": [0.1, 0.2], "name": ["a", "b"]},
+]
+
+
+def test_the_plan_path_and_the_dict_path_agree_on_every_message() -> None:
+    fast = _Topic("/j", "json", "state", 1)
+    slow = _Topic("/j", "json", "state", 1)
+    for index, payload in enumerate(_EQUIVALENCE_PAYLOADS):
+        stamp = _START_NANOS + index * 20_000_000
+        fast.observe(payload, stamp)
+        slow._observe_dims(_dimensions(payload), stamp)
+        assert _state(fast) == _state(slow), f"diverged at message {index}: {payload!r}"
+
+
+def test_the_plan_is_compiled_once_per_shape() -> None:
+    """The win is the plan being reused; this pins that it actually is."""
+    topic = _Topic("/j", "json", "state", 1)
+    topic.observe({"a": [1.0, 2.0]}, _START_NANOS)
+    plan = topic.plan
+    assert plan is not None
+    for index in range(1, 5):
+        topic.observe({"a": [1.0 + index, 2.0]}, _START_NANOS + index * 20_000_000)
+    assert topic.plan is plan
+
+
+def test_a_changed_shape_replans_and_stays_consistent() -> None:
+    fast = _Topic("/j", "json", "state", 1)
+    slow = _Topic("/j", "json", "state", 1)
+    messages = [{"a": [1.0]}, {"a": [2.0], "b": 3.0}, {"a": [4.0], "b": 5.0}]
+    for index, payload in enumerate(messages):
+        stamp = _START_NANOS + index * 20_000_000
+        fast.observe(payload, stamp)
+        slow._observe_dims(_dimensions(payload), stamp)
+    assert set(fast.names) == {"a[0]", "b"}
+    assert _state(fast) == _state(slow)
+
+
+def test_a_number_float_cannot_hold_is_dropped_not_fatal() -> None:
+    """JSON parses a 400-digit integer; one leaf must not fail the episode."""
+    assert _to_float(10**400) is None
+    assert _dimensions({"x": 10**400, "y": 2.0}) == {"y": 2.0}
+    topic = _Topic("/j", "json", "state", 1)
+    topic.observe({"x": 10**400, "y": 2.0}, _START_NANOS)
+    assert topic.numbers == 1
+    assert topic.stats().max == 2.0
+
+
+def test_an_unrepresentable_number_survives_the_whole_read(tmp_path: Path) -> None:
+    bag = _bag(
+        tmp_path / "huge.mcap",
+        {"/j": (10.0, [{"a": 10**400, "b": 2.0}, {"a": 10**400, "b": 3.0}])},
+    )
+    episode = read_episode(bag)
+    joints = next(channel for channel in episode.channels if channel.name == "/j")
+    assert joints.count == 2
+    assert joints.max == 3.0

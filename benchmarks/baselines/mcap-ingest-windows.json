@@ -8,7 +8,7 @@
     "database": "in-memory benchmark catalog; production filesystem artifact store",
     "path": "var\\real-data\\so101_pick_place.mcap",
     "source_sha256": "8973d57bc16e93477358d3507331af5230b17605e181b9449d6a16b76e984b3e",
-    "throughput_mib_per_second_p50": 6.205,
+    "throughput_mib_per_second_p50": 18.283,
     "trials": 5,
     "warmups": 1
   },
@@ -25,19 +25,19 @@
     "ram_bytes": 33752997888
   },
   "schema_version": 1,
-  "source_run_id": "a5723e9b-23d8-4a6c-90e3-27b5e65f2753",
+  "source_run_id": "b0fd1ca5-e305-40a4-9ca8-5442cf435489",
   "summary": {
     "ci95_mean_seconds": [
-      2.2643518600030803,
-      3.2921411999966947
+      0.9690108199836687,
+      1.6776456400053577
     ],
     "failure_count": 0,
-    "mean_seconds": 2.9311994199990297,
+    "mean_seconds": 1.245326879993081,
     "n": 5,
-    "p50_seconds": 3.2468986000167206,
-    "p95_seconds": 3.318516900006216,
-    "p99_seconds": 3.318516900006216,
-    "stddev_seconds": 0.740456044535214,
+    "p50_seconds": 1.1019478000234812,
+    "p95_seconds": 2.0675795000279322,
+    "p99_seconds": 2.0675795000279322,
+    "stddev_seconds": 0.4704784991445127,
     "warmup_count": 1,
     "warmup_failure_count": 0
   }

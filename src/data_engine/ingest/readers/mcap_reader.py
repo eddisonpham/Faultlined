@@ -32,7 +32,10 @@ frame-count rules work on a ROS 2 bag today.
 
 The pass is streaming. Per-channel statistics are running accumulators and the quality
 sample is a decimated window (`_Window`), so peak memory is a function of the number of
-topics, not of the length of the log (`architecture/storage.md` §1).
+topics, not of the length of the log (`architecture/storage.md` §1). Per-message dimension
+extraction runs a flatten plan compiled once per message shape (`_compile`): rebuilding the
+`path -> number` strings on every message was 51% of ingest (EXP-0004), and a bag's
+messages all share one shape, so the strings only need building once.
 """
 
 from __future__ import annotations
@@ -93,6 +96,7 @@ class _Topic:
     """Everything one MCAP channel contributes, accumulated in a single pass."""
 
     __slots__ = (
+        "buffer",
         "clock",
         "encoding",
         "first",
@@ -100,7 +104,10 @@ class _Topic:
         "last",
         "lowest",
         "messages",
+        "names",
         "numbers",
+        "plan",
+        "ref",
         "reference",
         "schema_id",
         "schema_name",
@@ -109,6 +116,7 @@ class _Topic:
         "total",
         "widest",
         "windows",
+        "wins",
     )
 
     def __init__(self, topic: str, encoding: str, schema_name: str, schema_id: int) -> None:
@@ -126,6 +134,16 @@ class _Topic:
         self.last = 0
         self.reference: tuple[str, ...] = ()
         self.windows: dict[str, _Window] = {}
+        self.plan: tuple[Any, ...] | None = None
+        """Compiled flatten plan for the current message shape, or None."""
+        self.names: tuple[str, ...] = ()
+        """Dimension path per plan slot, in traversal order."""
+        self.buffer: list[float | None] = []
+        """One slot per leaf: the value when numeric this message, else None."""
+        self.ref: tuple[int, ...] = ()
+        """Slot holding each reference name's value, in reference order."""
+        self.wins: list[_Window] = []
+        """The `windows` values in reference order, without per-message lookups."""
         self.widest = 0.0
         """Exact largest interval between consecutive accepted samples, whole log."""
         self.clock: list[float] = []
@@ -158,28 +176,109 @@ class _Topic:
         return max((self.last - self.first) / NANOSECONDS_PER_SECOND, 0.0)
 
     def observe(self, payload: Any, log_time: int = 0) -> None:
-        dims = _dimensions(payload)
+        """Accumulate one decoded message.
+
+        The hot path runs the compiled flatten plan (`_compile`) rather than
+        rebuilding the `path -> number` dict on every message: the path strings
+        are built once per shape, and per message the tree is walked once with
+        no allocation beyond the slot buffer. When the shape changes, the walk
+        reports it and the message takes `_observe_dims` - the original dict
+        path, kept both as the fallback and as the oracle the equivalence tests
+        compare the fast path against.
+        """
+        plan = self.plan
+        if plan is None or not _run(plan, payload, self.buffer):
+            self._replan(payload)
+            plan = self.plan
+            if plan is None or not _run(plan, payload, self.buffer):
+                self._observe_dims(_dimensions(payload), log_time)
+                return
+        seen = False
+        for value in self.buffer:
+            if value is None:
+                continue
+            seen = True
+            self.numbers += 1
+            self.total += value
+            self.squares += value * value
+            if value < self.lowest:
+                self.lowest = value
+            if value > self.highest:
+                self.highest = value
+        if not seen:
+            return
+        if not self.reference:
+            names = sorted(
+                name
+                for name, value in zip(self.names, self.buffer, strict=True)
+                if value is not None
+            )
+            self.reference = tuple(names)
+            self.windows = {name: _Window() for name in names}
+            self.wins = [self.windows[name] for name in names]
+            self._rebind()
+        self._sample_slots(log_time)
+
+    def _replan(self, payload: Any) -> None:
+        """Compile the flatten plan for this message's shape and rebind names."""
+        names: list[str] = []
+        self.plan = _compile(payload, "", names)
+        self.names = tuple(names)
+        self.buffer = [None] * len(names)
+        self._rebind()
+
+    def _rebind(self) -> None:
+        """Point the reference names at their slots in the current plan.
+
+        A name that vanished from the shape maps to -1 and makes every later
+        message un-sampleable, which is exactly what the dict path does: the
+        name can never be present again, so the window must stay ragged-free.
+        """
+        index = {name: i for i, name in enumerate(self.names)}
+        self.ref = tuple(index.get(name, -1) for name in self.reference)
+
+    def _sample_slots(self, log_time: int) -> None:
+        """Feed the quality window from the slot buffer.
+
+        The first message that carries numbers fixes the dimension set; later
+        messages are used only if they carry all of it, because `analyze`
+        rejects ragged series and a half-filled window would misreport a gap as
+        a jitter spike. Numeric names beyond the reference set are counted in
+        the channel statistics but do not enter the window.
+        """
+        buffer = self.buffer
+        for slot in self.ref:
+            if slot < 0 or buffer[slot] is None:
+                return
+        for window, slot in zip(self.wins, self.ref, strict=True):
+            value = buffer[slot]
+            if value is not None:
+                window.add(value)
+        self._decimate_clock(log_time)
+
+    def _observe_dims(self, dims: dict[str, float], log_time: int = 0) -> None:
+        """The dict-shaped path: identical semantics to the plan, no plan needed.
+
+        Used for payloads whose shape the compiled plan cannot express, and by
+        the equivalence tests as the reference behaviour the fast path must
+        reproduce exactly.
+        """
         if not dims:
             return
         for value in dims.values():
             self.numbers += 1
             self.total += value
             self.squares += value * value
-            self.lowest = min(self.lowest, value)
-            self.highest = max(self.highest, value)
-        self._sample(dims, log_time)
-
-    def _sample(self, dims: dict[str, float], log_time: int = 0) -> None:
-        """Feed the quality window, keeping every dimension the same length.
-
-        The first decodable message fixes the dimension set. Later messages are used
-        only if they carry all of it, because `analyze` rejects ragged series and a
-        half-filled window would misreport a gap as a jitter spike.
-        """
+            if value < self.lowest:
+                self.lowest = value
+            if value > self.highest:
+                self.highest = value
         if not self.reference:
             self.reference = tuple(sorted(dims))
             self.windows = {name: _Window() for name in self.reference}
-        elif any(name not in dims for name in self.reference):
+            self.wins = [self.windows[name] for name in self.reference]
+            self._rebind()
+        if any(name not in dims for name in self.reference):
             return
         for name in self.reference:
             self.windows[name].add(dims[name])
@@ -368,18 +467,106 @@ def _scorable(topics: dict[int, _Topic]) -> _Topic | None:
     return min(candidates, key=lambda t: (-t.messages, -len(t.reference), t.topic))
 
 
-def _dimensions(value: Any, prefix: str = "") -> dict[str, float] | None:
+def _to_float(value: int | float) -> float | None:
+    """`float()`, but an unrepresentable number is unmeasurable, not fatal.
+
+    JSON happily parses a 400-digit integer and `float()` raises OverflowError
+    on it. Letting one such leaf fail the whole episode read is the same defect
+    class as the sqrt overflow in `analyze` (ADR 0023): the formula is not the
+    data. The leaf is dropped instead.
+    """
+    try:
+        return float(value)
+    except OverflowError:
+        return None
+
+
+def _compile(value: Any, prefix: str, names: list[str]) -> tuple[Any, ...]:
+    """Compile a flatten plan for one message shape; names are built once, ever.
+
+    Mirrors `_dimensions` exactly - same traversal order, same path strings -
+    so the fast path and the fallback cannot disagree about what a dimension is
+    called. Nodes: `("d", keys, children)`, `("l", length, children)`,
+    `("v", slot)` where `slot` indexes `names`.
+    """
+    if isinstance(value, dict):
+        keys = tuple(value)
+        return (
+            "d",
+            keys,
+            tuple(
+                _compile(item, f"{prefix}.{key}" if prefix else str(key), names)
+                for key, item in value.items()
+            ),
+        )
+    if isinstance(value, list | tuple):
+        return (
+            "l",
+            len(value),
+            tuple(_compile(item, f"{prefix}[{index}]", names) for index, item in enumerate(value)),
+        )
+    names.append(prefix or "value")
+    return ("v", len(names) - 1)
+
+
+def _run(node: tuple[Any, ...], value: Any, slots: list[float | None]) -> bool:
+    """Fill `slots` per the plan. False means the shape moved; replan and retry.
+
+    The container checks are load-bearing in one unusual way: a dict whose keys
+    arrive in a different order reports a changed shape even though the key set
+    matches. That is deliberate - the dict path accumulates statistics in
+    traversal order, and floats do not add associatively, so honouring the new
+    order (by replanning) is what keeps both paths bit-identical.
+    """
+    kind = node[0]
+    if kind == "d":
+        if not isinstance(value, dict) or len(value) != len(node[2]):
+            return False
+        for (key, item), expected, child in zip(value.items(), node[1], node[2], strict=True):
+            if key != expected:
+                return False
+            if not _run(child, item, slots):
+                return False
+        return True
+    if kind == "l":
+        if not isinstance(value, list | tuple) or len(value) != node[1]:
+            return False
+        ok = True
+        for item, child in zip(value, node[2], strict=True):
+            if not _run(child, item, slots):
+                ok = False
+                break
+        return ok
+    slot = node[1]
+    exact = type(value)
+    if exact is float:
+        slots[slot] = value
+    elif exact is int:
+        slots[slot] = _to_float(value)
+    elif value is None or exact is str or exact is bool:
+        slots[slot] = None
+    elif isinstance(value, dict | list | tuple):
+        return False
+    elif isinstance(value, int | float):
+        slots[slot] = _to_float(value)
+    else:
+        slots[slot] = None
+    return True
+
+
+def _dimensions(value: Any, prefix: str = "") -> dict[str, float]:
     """Flatten a decoded JSON message into `path -> number`.
 
     Non-numeric leaves are dropped rather than failing the message: a joint-state
     message carries a `name` list of strings next to its positions, and refusing to
-    score it because of that would throw away the signal. Returns None only when
-    there is no number at all.
+    score it because of that would throw away the signal. A message with no number
+    in it at all flattens to the empty dict.
     """
     if value is None or isinstance(value, bool):
         return {}
     if isinstance(value, int | float):
-        return {prefix or "value": float(value)}
+        converted = _to_float(value)
+        return {} if converted is None else {prefix or "value": converted}
     if isinstance(value, str):
         return {}
     if isinstance(value, dict):
