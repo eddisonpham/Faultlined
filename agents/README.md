@@ -1,26 +1,27 @@
 # agents/ — persistent project context
 
-Everything an agent needs to work on this project lives here. If it isn't here, it doesn't exist.
+Project knowledge that outlives a session. If it is not here, it is not known.
 
-| Directory / file | Contents | Status |
+| Directory | Holds | State |
 |---|---|---|
-| [spec/](spec/) | Original specs (read-only), living definition of done, problem, requirements, environment | problem (01), requirements (02), environment (01) filled |
-| [research/](research/) | Source log, industry patterns, technology matrix, problem candidates | filled (phase 01–02) |
-| [architecture/](architecture/) | Overview, components, data flow, APIs, storage, compute, failure handling, repo layout, decision matrix | written in phases 02–03 |
-| [implementation/](implementation/) | Coding standards, implementation status, vertical-slice definition | tooling + synthetic ingest slice implemented; phase 05/06 work uncommitted; review follow-ups open |
-| [testing/](testing/) | Testing standards and failure-mode catalog | standards + failure-mode plan; slice-related failure tests added (phase 05) |
-| [benchmarking/](benchmarking/) | Methodology (definitive), metric schema, backlog | schema/harness foundations implemented; no measured baseline; backlog populated |
-| [observability/](observability/) | Logging/metrics/tracing conventions | JSON logging, correlation, telemetry and metric primitives; runtime instrumentation incomplete |
-| [experiments/](experiments/) | Experiment records + registry (current / tested / rejected / deferred) | EXP-0001 planned only; no measured experiments |
-| [reviews/](reviews/) | Engineering reviews | 2026-09-28 scaffolding review rejects stage acceptance; follow-ups open |
-| [decisions/](decisions/) | ADRs — canonical record of architectural decisions | ADRs 0001–0013 accepted |
-| [roles/](roles/) | Specialized agent role definitions | seeded |
-| [prompts/](prompts/) | Phase prompts, run in order | seeded |
-| [HANDOFF.md](HANDOFF.md) | Current status for the next agent | current implementation, review findings, blockers, and next work |
+| [spec/](spec/) | Problem, requirements, environment, original specs, definition of done | Current; MVP stage closed |
+| [research/](research/) | Source log, industry patterns, technology matrix | Written in phases 01-02 |
+| [architecture/](architecture/) | Overview, components, data flow, API, storage, repo layout, decision matrix | Written; matches the shipped code |
+| [implementation/](implementation/) | Coding standards, implementation status, slice plans | Current |
+| [testing/](testing/) | Testing standards, failure-mode catalog | Catalog complete, no row left `planned` |
+| [benchmarking/](benchmarking/) | Methodology, metric schema, backlog | One baseline committed, more need owner approval |
+| [observability/](observability/) | Logging, metrics, tracing conventions | JSON logs, correlation ids, runtime metrics |
+| [experiments/](experiments/) | Experiment records and the registry | EXP-0001 to EXP-0007 |
+| [reviews/](reviews/) | Engineering reviews and assessments | Three reviews, findings closed |
+| [decisions/](decisions/) | Architecture decision records | ADR 0001 to ADR 0025 |
+| [roles/](roles/) | Agent role definitions | Seeded |
+| [prompts/](prompts/) | Phase prompts, run in order | Phases 01-03 used, 04-07 remaining |
+| [HANDOFF.md](HANDOFF.md) | Current state, risks, next steps | Read this first |
 
 ## Conventions
 
-- All docs are Markdown. Update docs in the same commit as the change they describe.
-- Docs describe the **current** state. History belongs in ADRs, experiment records, and git.
+- Markdown only. Update a doc in the same commit as the change it describes.
+- Describe the current state. History belongs in ADRs, experiment records and git.
 - Link to other docs instead of copying content.
-- Mark unfinished sections `TODO(phase NN)` so they are greppable.
+- Mark unfinished sections `TODO(phase NN)` so they stay greppable.
+- Table over prose, one fact per row or bullet.

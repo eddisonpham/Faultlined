@@ -1,305 +1,168 @@
 # Handoff
 
-**Status: Scaffolding; review verdict is accept-with-follow-ups (2026-09-28).** The project is **Faultlined**. All engineering findings are resolved and gated; the synthetic-ingest benchmark baseline is measured and committed (2026-09-28, owner-authorized — [§13](#13-baseline-runbook-owner-green-flag-required)). See [engineering review](reviews/2026-09-28-scaffolding.md) and [definition of done](spec/definition-of-done.md). All work is committed on `main` and pushed. Do not tag `scaffold-complete` until the residual verifications below are closed.
+Current state of Faultlined for whoever picks it up next. Recent slices are listed in [§14](#14-recent-slices); detail lives in the linked ADR, experiment and review records.
 
-**Update 2026-09-29 (stage 2 / MVP).** Four slices landed on `main` since the scaffolding tag: the minimal server-rendered UI ([ADR 0014](decisions/0014-minimal-ui-server-rendered.md)), the committed OpenAPI contract with a drift gate, the job lifecycle — bounded retries, job deadlines, cooperative cancellation, and terminal-vs-retryable failure classification ([ADR 0015](decisions/0015-cooperative-job-lifecycle.md)) — and **real-format ingest**: a LeRobot reader covering v2.1 and v3.0, exercised end to end against real Hub datasets.
+- Stage: production baseline, open since 2026-09-30. MVP complete, all 27 criteria evidenced ([definition of done](spec/definition-of-done.md)).
+- Suite: 903 passing, coverage above 92%, mypy strict clean, OpenAPI contract matches.
+- Everything is committed on `main`. Do not tag `scaffold-complete` until the open items in [§6](#6-known-technical-risks) and [§7](#7-next-steps) close.
 
-**Update 2026-09-29 (validation + run intelligence).** Two further slices landed: **validation** — hashed JSON validation profiles, a 7-rule engine, quarantine and re-validate without re-ingest ([ADR 0016](decisions/0016-json-validation-profiles.md)) — and **run intelligence** ([slice plan](implementation/run-intelligence-slice.md), [EXP-0002](experiments/0002-run-intelligence-workloads.md)): runtime metrics aggregation and `GET /api/v1/metrics` ([ADR 0017](decisions/0017-runtime-metrics-aggregation.md)), episode motion-quality analytics computed at ingest ([ADR 0018](decisions/0018-episode-quality-signals.md)), an instrument UI (`/ui/metrics`, `/ui/episodes`, `/ui/episodes/{id}`, `/ui/insights`), and run-inspection API surfaces — episode catalog with quality filters, per-episode validation verdicts and violations, job → episodes reverse lineage — each latency-measured in isolated benchmark processes ([ADR 0019](decisions/0019-benchmark-workload-isolation.md)). The suite is at 308 passing with 92.23% coverage, 22 of them against a live Postgres. The next MVP criteria are the rest of the `ingest → validation → indexing → builds` workflow: indexing and builds are still open, and MCAP ingest is the remaining format.
+## 1. Problem
 
-**Update 2026-09-29 (curated layer + deterministic notifier).** Two more slices. The **curated build-ready layer** adds named curation slices (`/api/v1/slices`, `/ui/slices`) whose membership is recomputed on read so a saved view never goes stale, plus a read-only failures view (`/api/v1/failures`, `/ui/failures`). The **monitoring notifier** ([ADR 0020](decisions/0020-deterministic-monitoring-notifier.md), [plan](implementation/automated-monitoring-plan.md)) watches all of it for unattended curation. It is **deterministic by decision**: no trained model, no LLM call, no network in the detection path. Eleven rules and per-scope EWMA/median-MAD control limits over a versioned 26-feature vector, completion contracts as the anchor check, triage with fingerprinting, dedup, cooldown, evidence and severity gates, and a hard alert budget. `POST /api/v1/monitoring/tick` runs one window on demand; `/ui/incidents` and `GET /api/v1/monitoring/health` make the queue and the monitor's own blindness observable. Measured in isolation ([EXP-0003](experiments/0003-deterministic-notifier-latency.md)): `monitor-evaluate` P50 **0.2 ms**/tick, `api-incidents-catalog` P50 7.4 ms. Suite is at 557 passing, 93.31% coverage.
+Local-first robot episode data engine: ingest, validate, curate and build reproducible robot datasets (MCAP / LeRobot) with lineage for ML workloads. The platform is the product; models are workloads. See [problem](spec/problem.md), [requirements](spec/requirements.md).
 
-**Update 2026-09-29 (instrument UI pass).** The visual-design work ADR 0014 deferred has landed ([ADR 0021](decisions/0021-frontend-instrument-pass.md)), and it fixed three things that were broken rather than merely plain. **The vendored themes did nothing** — the CRT scanlines, phosphor glow and panel treatment were live CSS targeting class hooks the markup never used, so all four themes rendered as plain text; the hooks are now in the markup, verified by computed-style audit in a real browser. **A dead backend looked exactly like a healthy one** — the poller swallowed fetch errors, so a laptop that had lost the server showed stale numbers as if current; `web/app.js` now owns a visible failure policy (hazard-striped banner, LED state, stale clock, exponential backoff, permanent-4xx give-up, and the last good render is never discarded), with every failure *and* the recovery written to an `aria-live` region. **`/ui` errors returned raw JSON** — they now render a full error page with the correlation id in the operator's theme, while `/api/v1` keeps its JSON contract unchanged. `/docs` and `/redoc` are gone; `/openapi.json` stays for the drift gate. Also: skip link, table captions, chart and meter labels, click-to-copy identifiers, keyboard navigation, and no animation that ignores `prefers-reduced-motion`. Nine inlined script blobs collapsed into one file. Suite is at 601 passing.
+## 2. Architecture
 
-**Follow-up pass, same day.** Reviewing that against real browser screenshots found three defects that reading the source had not. **Sticky column headers sat under the nav** — `top: 2.4rem` was a hardcoded guess and the nav measures 45px, so every header pinned 6.6px above the nav's bottom edge and overlapped the rows it labelled; the offset is now measured at runtime. **Charts filled 61% of their panel** from a `max-width: 46rem` cap; removed, now 97%. **The status colour was a sore thumb** — the vendored `--fine-use-success` is `#00ff00` and `core.css` applies it at full weight, so one neon `ok` sat in a row of grey numbers and read as a highlighted button; inline status words now use a per-theme ramp derived from Okabe-Ito, desaturated and pulled toward each theme's background, with no ramp using the theme accent. The `live` LED is hidden until it has news. Motion is either a published **Material 3 v0.192 token** or, for the loading indicator, an actual damped harmonic oscillator integrated per frame (k=170 c=14 m=1, zeta=0.537, ~13.5% overshoot — the first constants gave zeta=0.85 and the physics was invisible). `@playwright/mcp` is registered in `.mcp.json`; it is what found all three, because a `max-width` that renders fine and a `top` 6px too high both look correct in the source.
-
-**Update 2026-09-29 (MVP complete).** The last two open MVP criteria closed, and both closed with
-evidence rather than with a caveat. **Builds are real**: `builds/service.py` makes a build's identity
-the SHA-256 of its own manifest and nothing else — no timestamp is hashed, episodes are sorted by id,
-the validation policy is cited by content address, the code commit is recorded — so rebuilding the
-same selection under the same policy and commit produces the same `bld_` address *by construction*.
-NFR-004 is asserted by 13 tests, each pinning a way the hash can change without the data changing.
-`builds`/`build_episodes` carry membership, `lineage_edges` the graph, and
-`GET /api/v1/episodes/{id}/builds` answers FR-008's reverse direction. **The MCAP reader exists**
-([ADR 0022](decisions/0022-mcap-ingest-reader.md)) and is a second entry in the reader registry with
-**no core change** — which is the first real test of the promise `registry.py` had been making. And
-**the first real-format benchmark baseline is committed** ([EXP-0004](experiments/0004-mcap-ingest-baseline.md),
-`benchmarks/baselines/mcap-ingest-windows.json`).
-
-
-**Update 2026-09-30 (stage 3: honest metrics, and a visual layer).** Two things happened, and the
-first one is the reason the second exists. An adversarial probe of the episode quality metrics
-([review](reviews/2026-09-30-metrics-and-visualization-assessment.md)) found **five defects**, all now
-fixed and pinned by 26 edge-case tests ([ADR 0023](decisions/0023-quality-metrics-honesty.md), which
-amends 0018 rather than editing it):
-
-- **One `NaN` from one encoder poisoned every dataset-level statistic.** A mean over a population
-  containing one non-finite value returns non-finite for the *whole dataset* — the mean movement
-  score, the monitoring baseline, every control limit derived from it. Non-finite input now stops
-  the analysis and reports the count, which is the only outcome that leaves the rest of the
-  product's arithmetic true.
-- **`sqrt(sum(d*d))` raised `OverflowError` above ~1e154** and failed a whole ingest over a detail of
-  the formula rather than of the data. `math.hypot` is specified not to overflow.
-- **One noisy joint out of eighteen condemned a clean episode**, with nothing in the API naming it.
-  The verdict is now the *median* judged dimension; the worst band is still published as `worst_dim`.
-- **`analyze()` had no concept of time.** A robot frozen for five minutes scored identically to one
-  moving continuously. It now takes timestamps and reports `integrity`, `max_gap_seconds` and
-  `gap_ratio` — the only signals in the product that distinguish "the robot was still" from "the
-  recorder stopped". All three readers supply a clock.
-- **Ragged synthetic rows** were accepted at the boundary and failed three layers down as a
-  retryable `INTERNAL_ERROR`, burning three attempts on input that could never succeed.
-
-**Then the end-to-end run immediately falsified the fix.** Re-running the 86-assertion driver from an
-empty catalog, the new temporal signal published the 20-minute MCAP log as `integrity=gapped` with a
-**501-second maximum gap**. The log is a clean 50 Hz stream; measured directly, its largest real
-interval is 20 ms. The clock buffer was being halved with `[::2]` in lockstep with the value windows,
-which is right for values (their statistics ignore order and spacing) and wrong for a clock: sample 0
-survives every halving, so the buffer degenerated into one ancient timestamp followed by dense recent
-ones and the gap detector read the distance between them as a dropout. The clock now trims its oldest
-half, and the reader additionally tracks the exact whole-log maximum in constant memory, because a
-bounded window cannot see a freeze that happened before it filled. Both regression tests were
-confirmed to **fail** against the stride-halving version. No unit test caught this, because every
-unit test used a series shorter than the window.
-
-**The visual layer** ([ADR 0024](decisions/0024-observability-visual-surface.md)) is built from that,
-and the review's most important finding drove its first step. `/ui/insights` was plotting
-`movement_score` — an L2 norm in the source's own units — so the driving fixture read `1.0e8` beside
-arm joints at `0.02` and four of five episodes collapsed onto the floor of a linear axis. **The chart
-was not misdrawn; it was showing nothing.** It now plots `jerk_score`, the same motion divided by each
-dimension's range, which `analyze` was already computing per dimension and which is therefore already
-dimensionless: the same five episodes land in a 4x band instead of a 4-billion-x one. The raw score
-stays in the table beside it, labelled with its unit. Four things then followed from eleven metric
-series that had been collected since scaffolding and displayed as five unlabelled squiggles:
-
-- **`/ui/metrics`** — real axes, units, the peak's clock time and event count, and a drilldown link.
-- **`/ui/schema`** — the catalog read **live** by introspection, with the entity graph built from the
-  real foreign keys, live row counts, and the path data takes through the system. A hand-drawn schema
-  is a snapshot that goes stale; this cannot, because it is the database asking about itself.
-- **`/ui/builds`** and `/ui/builds/{hash}` — lineage as the DAG it is, which until now existed only as
-  JSON an operator had to read.
-- **Recording reliability** rolled up on Insights: nothing in the pipeline counted how many of your
-  recordings dropped frames.
-
-Charts are a module of pure functions from data to markup, which is what makes them testable: **37
-tests assert path coordinates, tick labels and empty states instead of screenshots.** The scale picks
-log10 on its own above two decades, a recording gap breaks the trace rather than drawing motion across
-a dropout, and an unreachable catalog renders an explicit state rather than a 500. No new dependency,
-no CDN, no bundler, no build step. Writing the `referenced_by` test caught an inversion in the first
-cut — the page claimed `episodes` was referenced by `episode_quality` when the constraint says the
-opposite. Suite is at **777 passing, 91.96% coverage**, mypy strict clean over 62 modules, and the
-end-to-end driver is at **109/109 assertions from an empty catalog**.
-
-Three findings from this pass are worth more than the features, because each is a measurement that
-corrected something we believed:
-
-- **A latent worker bug had been failing every non-ingest job.** `process_one` read
-  `result["episode_id"]` unconditionally, so every `validate` and every `build` raised `KeyError`
-  *after* doing its work correctly and was then marked failed. Nothing had caught it because nothing
-  had run a non-ingest job through the live worker. Regression test in `tests/unit/test_job_result_shape.py`.
-- **Ingest is 8× short of its target and the cost is ours.** MCAP ingest measures 6.21 MiB/s against a
-  provisional 50 MB/s. The attribution: the MCAP container alone reads at 92 MiB/s, JSON decode at
-  58 MiB/s, and `_dimensions` — which rebuilds a dotted path string per numeric leaf, 540 000 times
-  for one 10-minute log — is **51% of total ingest time**, roughly 8× the JSON parse it operates on.
-  Content-addressing and writing 20 MiB costs 65 ms, so "the disk is slow" would have been wrong by
-  an order of magnitude. The fix is backlog B-019 and the next stage starts there.
-- **Two selection rules in the MCAP reader were wrong on the first run and look obviously right.**
-  Frame rate was `messages / span`, which reads a 50 Hz stream as 50.05 Hz and would let a
-  `max_fps: 50` rule quarantine correct data. Motion quality was read from the busiest topic, which on
-  a real log is a 1-dimension gripper command that `analyze` excludes from the verdict *by design* —
-  so it reported `unknown` on a log with an 18-dimension joint stream in it. Both rules are now
-  stated in terms of what the analyser can use, and both are asserted by tests.
-
-**What the notifier deliberately does not do yet.** No detection-accuracy figure exists: that needs the chaos harness (plan §6 — scripted operator action space plus fault injection against the real system, with clean-replicate null bands) and it is backlog B-016, so no precision or recall is claimed. Outbound email is unimplemented and disabled pending explicit owner authorization. Coverage of the real fault space is the one number that cannot be obtained, and every report says so in its header.
-
-**Update 2026-09-29 (end-to-end run).** MVP criteria being checked is not the same as the pipeline
-working, so the database was truncated to 12 empty tables, the artifacts and metrics log deleted, and
-the whole thing driven again from nothing across three input formats ([review](reviews/2026-09-29-mvp-end-to-end-run.md)).
-Three things came out of it.
-
-**Five defects had shipped, all in the wiring around correct code.** A build included the
-quarantined episode the validator had just rejected — `BuildPayload`'s own docstring promised the
-opposite and no code implemented it. The build manifest cited its policy by an address that was
-always `""`, because `ValidationProfile.content_hash` was a field nothing ever set. Six read paths
-reported an episode's length from the quality sample, so a 72 600-message MCAP log displayed as an
-816-frame episode — correct for every non-streaming reader, which is why it held. Reverse lineage
-selected four columns against a seven-field schema and returned three permanently null fields. A
-terminal failure spent three attempts and inflated the failure metric enough to trip the notifier.
-All five are fixed, each pinned by a test in `tests/unit/test_end_to_end_defects.py`, and the whole
-sequence was re-run to 42/42 assertions.
-
-**The lesson is the one worth keeping.** `DatasetBuilder` is pure and has 13 determinism tests, and
-it was never wrong. Every defect was in the selection, the serialization, or the query *around* it.
-Line coverage was 92% throughout. "Pure core, unit-tested" is not coverage of a feature, and the
-next thing this project should build is an end-to-end test that exercises the wiring over HTTP
-rather than more tests of the core.
-
-**What held.** Rebuild determinism through the live queue and a real database — identical `bld_`
-address, no second row; a different policy, a different address. The MCAP reader needed no change to
-the ingest service, validation, the catalog, the API, or the queue: one list entry, which is the
-architecture finally paying off rather than promising to. And the notifier caught a real fault during
-the run, before anyone read the logs.
-
-**Update 2026-09-30 (stage 3b: the bottleneck, the trace, and what a slice drops).** Three
-follow-ups landed, each measured or pinned before it was called done.
-
-**Update 2026-09-30 (production-baseline opens: harness, hardening, scale).** Five slices, each committed with
-its docs: the **chaos harness first increment** (`monitoring/chaos.py`,
-[EXP-0006](experiments/0006-chaos-harness-first-increment.md)) - replay seams plus labeled window scoring
-through the unmodified tick pipeline; no accuracy figure yet, the full §6 campaign remains open. The **e2e
-driver moved and hardened** - `scripts/verify_e2e.py` (was gitignored under `var/run/`) now refuses a populated
-catalog with the exact remediation, stops cleanly instead of tracebacking, and exits nonzero so CI can drive
-it; verified live 145/0 from empty. The **heavy-load campaign**
-([EXP-0007](experiments/0007-heavy-load-and-sink-tail-read.md)): 30k-frame quality and an hour-long 42.9 MiB
-MCAP ingest are both linear; 500k-record aggregation fired B-015's revisit condition and exposed the real
-hazard - `read_metric_records` parsed the whole sink per monitor tick - now tail-read in chunks so cost is the
-window, not the history. **Adversarial API probing** found two shipped defects, fixed and cataloged (F17/F18):
-the echoed `X-Correlation-Id` accepted CRLF (header injection), and three pages passed negative `limit` to
-PostgreSQL. And `just stop` exists, because a stale server holding port 8000 is why `just run` looked broken.
-Suite: **901 passing**, coverage gate green, mypy strict clean.
-
-**B-019 is closed, and the target it was measured against is not reachable.** The dimension
-layout is now compiled once per message shape instead of rebuilding a path string per numeric
-leaf ([EXP-0005](experiments/0005-mcap-ingest-flatten-plan.md), superseding EXP-0004's baseline):
-the engine's own ingest stage fell 3.5x (+1.65 s to +0.47 s on the B-002 fixture) and whole-ingest
-P50 from 6.21 to 10.8-18.3 MiB/s across three runs, with byte-identical output pinned by a
-full-extraction snapshot and fast-path-vs-dict-path equivalence tests over a 13-message hazard
-sequence. The honest verdict is in the record: container iteration plus JSON decode alone run at
-42.6 MiB/s before the engine works at all, so the provisional 50 MB/s target cannot be met by this
-design and needs re-scoping (owner decision: per-stage targets, or a decode-avoiding reader).
-
-**The motion trace renders gaps as holes** ([ADR 0024](decisions/0024-observability-visual-surface.md)
-decisions 8-9). Every episode now carries a bounded per-episode trace - the `jerk_score` the
-verdict already averages, over time - as runs of `(seconds since start, score)` capped at 240
-points. A transition spanning a dropout is two poses, not motion, so it is not drawn: the hole
-between runs *is* the recording gap, at its measured width. That required fixing the chart
-primitive itself, which mapped x by index and rendered a 30-second hole as wide as a 100 ms blip.
-
-**A curation slice now says what it drops versus the whole dataset, and why** (`/ui/slices/{id}`,
-`GET /api/v1/slices/{id}/impact`): kept and dropped partition the dataset with quality medians on
-both sides, every drop is attributed to the first predicate it fails (`state=quarantined`,
-`verdict=smooth`, `unscored`), and an ordering filter (`short`/`long`) says "it excludes nothing"
-rather than manufacturing a zero. The kept/dropped split resolves through the same
-`episode_predicates` the manifest uses, so the two cannot disagree.
-
-The human eye found more than the audits again: the poller nested the whole page inside
-`/ui/incidents` after its first refresh (the route ignored `X-Fragment`; the contract test had
-proven the *wrong* URL worked), and the phosphor glow read as cheap decoration and is now off -
-neon colours intact. Writing the trace round-trip test found `get_episode_quality` raising
-TypeError on any episode whose metadata lacks a frame count. Suite: 814 passing, 91.9% coverage,
-144/144 end-to-end assertions from an empty catalog, browser-audited at two widths.
-
-## 1. Current problem definition
-
-Build a local-first robot episode data engine to ingest, validate, index/version, curate and build reproducible robot datasets (MCAP / LeRobot) with lineage for ML workloads. The platform is the product; models are workloads. The current vertical slice accepts only a small synthetic JSON episode, not real robotics data. See [problem](spec/problem.md) and [requirements](spec/requirements.md).
-
-## 2. Current architecture
-
-Python modular monolith, FastAPI API, PostgreSQL catalog/job table, one separate local worker process, content-addressed local filesystem artifact store, stdlib JSON logging, psutil host snapshots with optional NVML sampling. The phase 05 path is API submit → Postgres queue → worker → synthetic canonical JSON artifact → episode/lineage catalog → API read. Current schema initialization is inline idempotent DDL, not migrations; artifact and DB updates are not a cross-store atomic transaction. Benchmark foundations are separate and use an in-memory catalog. See [architecture overview](architecture/overview.md), [data flow](architecture/data-flow.md), and [vertical slice](implementation/vertical-slice.md).
+- Python modular monolith, FastAPI API, PostgreSQL catalog and job queue, one separate worker process.
+- Content-addressed local filesystem artifact store, stdlib JSON logging, psutil host snapshots with optional NVML.
+- Path: API submit to Postgres queue to worker to canonical JSON artifact to episode/lineage catalog to API read.
+- Known gaps in the foundation: schema init is inline idempotent DDL rather than migrations; artifact writes and catalog writes are not one cross-store transaction.
+- Reading: [overview](architecture/overview.md), [data flow](architecture/data-flow.md), [components](architecture/components.md), [storage](architecture/storage.md), [repo layout](architecture/repo-layout.md).
 
 ## 3. Repository structure
 
-- `src/data_engine/`: API, catalog, jobs/worker, synthetic ingest, artifact storage, config, observability, curation vocabulary, monitoring notifier, web (server-rendered pages + one client runtime), CLI.
-- `benchmarks/`: result schema, provenance capture, statistics, synthetic harness; no accepted baseline.
-- `tests/`: unit, contract, integration, and E2E tests.
-- `agents/`: persistent specifications, architecture, implementation status, test plans, benchmarking, observability, ADRs, reviews, prompts, experiments.
-- `.github/workflows/`: CI and hygiene workflows currently duplicate the same quality job.
-
-See [repo layout](architecture/repo-layout.md).
+| Path | Contents |
+|---|---|
+| `src/data_engine/` | API, catalog, jobs/worker, ingest, validation, analysis, builds, curation, monitoring, observability, storage, web, CLI |
+| `benchmarks/` | Result schema, provenance, statistics, harness, committed baselines |
+| `tests/` | unit, contract, integration, e2e |
+| `scripts/` | Port checks, dev Postgres, reset, OpenAPI contract, e2e driver, MCAP log generator |
+| `agents/` | Specs, architecture, implementation status, testing, benchmarking, observability, ADRs, reviews, experiments, prompts |
 
 ## 4. Technology stack
 
-Python 3.14, uv/uv.lock, just, Ruff, mypy, pytest/pytest-cov, FastAPI/Pydantic, psycopg 3/PostgreSQL 17+, PyArrow and MCAP dependencies (not yet used for real readers), psutil, optional `nvidia-ml-py` for NVML. Host development is the supported local path; Docker is optional. Decisions: [ADRs 0001–0021](decisions/README.md).
+Python 3.14, uv with a committed lock, just, Ruff, mypy, pytest with a 70% coverage floor, FastAPI/Pydantic, psycopg 3 with PostgreSQL 17+, PyArrow and MCAP, psutil, optional `nvidia-ml-py`. Host-based development is the supported path; Docker is optional (ADR 0012). Decisions: [ADRs](decisions/README.md).
 
-## 5. Implementation status — works / stubbed
+## 5. Implementation status
 
-**Implemented foundations (current checkout):**
-- FastAPI POST job submission and GET job/episode/health subset; correlation middleware and typed request/response schema.
-- Postgres schema/repository for jobs, artifacts, episodes, and lineage; idempotent submission and atomic queue claim; queue-depth query; **job lifecycle** — attempt counting in the claim, `max_attempts` / `deadline_seconds` on submission, cooperative cancel, deadline sweep, and terminal-vs-retryable failure classification (ADR 0015).
-- **Real-format ingest, both formats**: `ingest_source` job type + a sniff-based registry holding two readers. LeRobot (v2.1 and v3.0) is verified end to end against `lerobot/svla_so101_pickplace` and `yaak-ai/lerobot-driving-school`. MCAP ([ADR 0022](decisions/0022-mcap-ingest-reader.md)) reads a bag as one episode, with the frame rate taken from the busiest topic's interval count and motion quality from the busiest topic with more than one dimension; statistics are exact and streaming, and the quality sample is a self-halving window so peak memory is a function of topic count rather than log length. Episode identity is `(source_hash, episode_key)`, so many episodes in one Parquet shard each get a catalog row while the file itself is stored once.
-- **Content-addressed builds** (`builds/`): a `build` job over a selection, manifest hashed alone, membership in `build_episodes`, graph in `lineage_edges`, read back at `GET /api/v1/builds`, `GET /api/v1/builds/{hash}` and `GET /api/v1/episodes/{id}/builds`. Rebuilding the same selection reproduces the same address (NFR-004, asserted).
-- Server-rendered UI at `/ui` (Status / Jobs / Artifacts) with a committed OpenAPI contract and a drift check in `just ci` (ADR 0014), extended by the instrument pass in ADR 0021: a bezel/silkscreen/LED skin, the vendored CRT theme hooks actually adopted, one `web/app.js` runtime with a visible failure policy, and HTML error pages for `/ui` routes. `/docs` and `/redoc` are removed.
-- One ingest worker process; atomic SHA-256 filesystem artifact writes; synthetic JSON canonicalization and lineage readback.
-- Unit/contract/E2E tests and Postgres-marked integration tests.
-- JSON log formatter, request/job correlation context, psutil/NVML host telemetry with nullable fallbacks.
-- **Runtime metrics emitted at call sites**: queue depth, queue/run time, stage duration, failures by reason code, retries, cancellations, timeouts, episode and artifact counters, API request latency, catalog query timing, worker heartbeats (`RuntimeMetrics`, JSONL sink configured by `DE_METRICS_PATH`). Read-back aggregation into percentile summaries, time-bucketed series, and heartbeat ages serves `GET /api/v1/metrics` and the UI (ADR 0017).
-- **Validation and quality**: hashed JSON validation profiles with a 7-rule engine, quarantine + re-validate (ADR 0016); motion-quality signals (movement, jerk, stall ratio, length z-score, absolute σ-band verdict) computed at ingest and persisted per episode (ADR 0018).
-- **Run inspection**: `GET /api/v1/episodes` (state/quality-flag filters), `GET /api/v1/episodes/{id}/quality` and `/validation`, `GET /api/v1/quality/summary`, `GET /api/v1/jobs/{id}/episodes` (reverse lineage), `GET /api/v1/jobs/{id}/report` (run triage card, also on the job page), `GET /api/v1/episodes/export` (curated manifest for dataset builds); UI pages `/ui/metrics`, `/ui/episodes`, `/ui/episodes/{id}`, `/ui/insights`.
-- **Curated build-ready layer**: named slices (`GET/POST /api/v1/slices`, `GET/PATCH/DELETE /api/v1/slices/{id}`, `GET /api/v1/slices/{id}/manifest`) store a declarative `{state, flag}` filter and **recompute membership on read**, so a saved curation view never goes stale; the manifest carries content identity (source/artifact hashes) for a downstream dataset build. A read-only failures view (`GET /api/v1/failures`, `/failures/episodes`) aggregates reason-code, profile, and format failure counts and lists quarantined episodes. UI: `/ui/slices`, `/ui/failures`. Filter vocabulary is shared in `data_engine/curation.py`. Plan: [telldown plan](implementation/telldown-plan.md).
-- Benchmark schema v2, deterministic statistics, provenance capture, and a CLI that validates results and baselines, refuses to publish from a failed run, and fails closed with an actionable message.
+### Working
 
-**Not implemented or incomplete:**
-- **Materialising a build as LeRobot v3 dataset files on disk** — the manifest and its lineage are real, the dataset directory is not. **CDR/protobuf MCAP payload decoding** (JSON channels only, by decision — a guessed struct layout would put wrong numbers in the catalog) and **multi-session bag segmentation** (a file is one episode, deliberately). Parquet metadata indexing, workload execution, retry backoff, worker leases and lease-based heartbeats (heartbeat *records* exist), mid-run cancellation, GC, formal DB migrations (schema changes are still inline idempotent DDL plus an `ALTER TABLE` block), and committed baselines for the run-intelligence workloads (measured in EXP-0002; committing them needs the owner's green flag).
+- **Job lifecycle**: submission with `max_attempts` and `deadline_seconds`, atomic claim, cooperative cancel, deadline sweep, terminal-vs-retryable failure classification ([ADR 0015](decisions/0015-cooperative-job-lifecycle.md)).
+- **Ingest, both chosen formats**: `ingest_source` jobs over a sniff-based reader registry. LeRobot v2.1 and v3.0, verified end to end against real Hub datasets. MCAP as a second registry entry with no core change ([ADR 0022](decisions/0022-mcap-ingest-reader.md)). Episode identity is `(source_hash, episode_key)`, so many episodes in one shard each get a catalog row while the file is stored once.
+- **Validation**: hashed JSON profiles, a 7-rule engine, quarantine and re-validate without re-ingest ([ADR 0016](decisions/0016-json-validation-profiles.md)).
+- **Quality signals**: movement, jerk, stall ratio, length z-score, temporal integrity, verdict on the median judged dimension. Non-finite input stops the analysis instead of poisoning dataset statistics; all three readers supply a clock ([ADR 0023](decisions/0023-quality-metrics-honesty.md), which amends ADR 0018).
+- **Builds**: manifest hashed alone is the build identity, membership in `build_episodes`, graph in `lineage_edges`, reverse lineage at `GET /api/v1/episodes/{id}/builds`. NFR-004 asserted by 13 tests ([ADR 0007](decisions/0007-lineage-and-run-records.md)).
+- **Run intelligence**: runtime metrics emitted at call sites, aggregated into percentiles and time series, served at `GET /api/v1/metrics` ([ADR 0017](decisions/0017-runtime-metrics-aggregation.md)); episode catalog, quality summary, job reports and export manifests; measured one workload per process ([ADR 0019](decisions/0019-benchmark-workload-isolation.md)).
+- **Curation**: named slices that recompute membership on read, a slice impact view attributing every drop, and a read-only failures view. Vocabulary shared in `data_engine/curation.py` ([telldown plan](implementation/telldown-plan.md)).
+- **Monitoring**: deterministic notifier, eleven rules, per-scope EWMA and median-MAD control limits over a versioned 26-feature vector, completion contracts, fingerprint dedup, cooldown, evidence and severity gates, hard alert budget. No model, no LLM call, no network in the detection path ([ADR 0020](decisions/0020-deterministic-monitoring-notifier.md), [plan](implementation/automated-monitoring-plan.md)).
+- **Chaos harness, first increment**: replay seams and labeled window scoring through the unmodified tick pipeline ([EXP-0006](experiments/0006-chaos-harness-first-increment.md)). No accuracy figure yet.
+- **Operator UI**: server-rendered, works with JavaScript disabled, visible failure policy in one client runtime, HTML error pages ([ADR 0014](decisions/0014-minimal-ui-server-rendered.md), [ADR 0021](decisions/0021-frontend-instrument-pass.md), [ADR 0024](decisions/0024-observability-visual-surface.md)). `/docs` and `/redoc` removed; `/openapi.json` kept for the drift gate. Charts are pure functions from data to markup, asserted on path coordinates and empty states rather than screenshots.
+- **Benchmarks**: schema v2, deterministic statistics, provenance capture, a CLI that refuses to publish from a failed run, and a `WORKLOADS` registry including the heavy-load workloads from [EXP-0007](experiments/0007-heavy-load-and-sink-tail-read.md).
 
-See [implementation status](implementation/status.md), [failure modes](testing/failure-modes.md), and [review findings](reviews/2026-09-28-scaffolding.md).
+### Not working
+
+- Materialising a build as LeRobot v3 dataset files on disk. The manifest and lineage are real; the dataset directory is not.
+- CDR and protobuf MCAP payload decoding. JSON channels only, by decision: a guessed struct layout would put wrong numbers in the catalog.
+- Multi-session bag segmentation. One file is one episode, deliberately.
+- Parquet metadata indexing, workload execution, retry backoff, worker leases, mid-run cancellation, orphan GC, formal database migrations.
+- Committed baselines for the run-intelligence workloads. Measured in [EXP-0002](experiments/0002-run-intelligence-workloads.md); committing needs the owner's green flag ([§13](#13-baseline-runbook-owner-green-flag-required)).
+
+More detail: [implementation status](implementation/status.md), [failure modes](testing/failure-modes.md).
 
 ## 6. Known technical risks
 
-1. **Benchmark baseline is measured and committed** (2026-09-28, authorized): P50 0.6084 ms, 10 trials, 0 failures at `f7ffbeb`. See [§13](#13-baseline-runbook-owner-green-flag-required) and [EXP-0001](experiments/0001-synthetic-ingest-baseline.md). It is a regression tripwire, not a performance target: observed run-to-run spread was ~24%.
-2. **Hardware matching is exact.** A baseline only compares on a byte-identical CPU/RAM/GPU/OS/disk profile; on a different machine the harness refuses to compare. Revisit with evidence before gating CI.
-3. **Postgres path is now verified.** `just pg-up` starts an isolated cluster in gitignored `var/pgdata` on port 55432 using local trust auth, so the full suite runs with nothing skipped and the DSN holds no credential. The owner's system PostgreSQL on 5432 is untouched and its superuser password remains unknown; that instance is still unverified.
-4. **Crash consistency:** artifact publication and DB catalog writes are separate transactions; worker crash recovery, retries, leases, and orphan GC remain future work.
-5. **Clean-clone validation and the history-wide secrets scan are done** (2026-09-28). A clean clone runs `just setup`, `just ci` (95 passed) and `just bench` green; 15 commits contain no credential, `.env` was never tracked, and the only DSN in history is the `USER:PASSWORD` placeholder. No `.env` was opened. This surfaced the `--all-extras` defect: `uv run` pruned the GPU extra, so a fresh clone reported no GPU and `just bench` refused to compare.
+1. **The committed baseline is a regression tripwire, not a target.** Synthetic ingest P50 0.6084 ms, 10 trials, 0 failures at `f7ffbeb`; observed run-to-run spread about 24%. Comparison requires a byte-identical hardware profile, so the harness refuses to compare elsewhere.
+2. **Crash consistency.** Artifact publication and catalog writes are separate transactions. Worker crash recovery, leases and orphan GC are future work.
+3. **No detection-accuracy figure exists for the notifier.** It needs the full [§6](implementation/automated-monitoring-plan.md) fault-injection campaign with clean-replicate null bands (backlog B-016). No precision or recall is claimed anywhere.
+4. **The provisional 50 MB/s ingest target is not reachable by this design.** Container iteration plus JSON decode alone run at 42.6 MiB/s before the engine works at all ([EXP-0005](experiments/0005-mcap-ingest-flatten-plan.md)). Re-scoping to per-stage targets is an owner decision.
+5. **The owner's system PostgreSQL on 5432 is unverified.** `just pg-up` covers development with an isolated cluster on 55432; that instance's superuser password is unknown and was never needed.
+6. **Clean-clone validation and the history-wide secrets scan are done** (2026-09-28): a clean clone runs `just setup`, `just ci` and `just bench` green; no credential is in any of the 15 commits; `.env` was never tracked.
 
-## 7. Highest-priority next steps
+## 7. Next steps
 
-1. ~~Baseline runbook~~ — done 2026-09-28 with owner authorization ([§13](#13-baseline-runbook-owner-green-flag-required)). New workload baselines (EXP-0002 backlog rows B-003/B-012–B-015) need the same green flag before any is committed.
-2. Optionally verify the slice against the owner's own system PostgreSQL (port 5432) by putting its DSN in `.env`; the isolated `just pg-up` cluster already covers this.
-3. ~~Clean-clone validation and secrets scan~~ — done 2026-09-28. The stage criteria are now all evidenced; the owner may consider `scaffold-complete`.
-4. ~~MVP engineering order: real LeRobot reader → rule-based validation/quarantine → deterministic content-addressed build → MCAP reader.~~ **All four done 2026-09-29**; every MVP criterion in the definition of done is now checked with evidence.
-5. **Next stage is Production Baseline, and it starts with a number, not a feature.** Backlog B-019: compile the MCAP dimension layout once per topic instead of rebuilding path strings per message (EXP-0004 measured it at 51% of ingest), then re-measure and supersede EXP-0004 rather than editing it. Then the failure-mode catalog (`testing/failure-modes.md`) has no row left `planned` — the chaos harness that B-016's detection-accuracy figure depends on is the same work.
+1. Run the §6 fault-injection campaign against `just run` to produce the notifier accuracy figure, including the real-kill `WORKER_LOST` variant and clean replicates. Backlog B-016.
+2. Write down the per-stage ingest targets the owner prefers, replacing the unreachable 50 MB/s one.
+3. Optionally verify the slice against the owner's own PostgreSQL on 5432 by putting its DSN in `.env`. The isolated cluster already covers development.
+4. Consider formal catalog migrations; inline DDL plus an `ALTER TABLE` block is the current mechanism.
 
-## 8. Open architectural questions
+Done and closed: the baseline runbook (2026-09-28), clean-clone and secrets validation (2026-09-28), and the whole MVP engineering order (real LeRobot reader, rule-based validation and quarantine, content-addressed build, MCAP reader) on 2026-09-29.
 
-- **Answered 2026-09-29** for MCAP: `scripts/make_mcap_log.py` is a closed-form generator, so the fixture is versioned by the script's arguments and its SHA-256, and a network download is not in the measurement path. Still open for LeRobot at full episode size (the current fixture is the 203-frame tabular slice, not the video shards).
-- What exact catalog migrations and transaction/outbox strategy are needed to reconcile artifact writes with database state?
-- What retry/lease/cancel semantics and worker concurrency limits will be implemented first?
-- Should runtime metrics initially remain JSONL files or move to a database/exporter once actual query needs exist? Follow ADR 0008 triggers; avoid adding a telemetry service speculatively.
-- What machine/hardware profile and owner-approved run conditions define the first committed baseline?
+## 8. Open questions
 
-## 9. Benchmarking status
+- Fixture versioning for LeRobot at full episode size. The current fixture is the 203-frame tabular slice, not the video shards. For MCAP the fixture is a closed-form generator versioned by its arguments and SHA-256, so no download sits in the measurement path.
+- What catalog migration and transaction or outbox strategy reconciles artifact writes with database state?
+- What retry, lease and cancel semantics, and worker concurrency limits, land first?
+- Do runtime metrics stay JSONL files, or move to a database or exporter once real query needs exist? Follow the ADR 0008 triggers; no speculative telemetry service.
 
-Harness and schema v2 are implemented and tested; `synthetic-episode-ingest` measures a tiny synthetic episode using an in-memory catalog and the filesystem artifact store (3 warmups, 10 trials). It is **not** a database, API, MCAP, LeRobot, or production throughput benchmark. Its first baseline was measured and committed on 2026-09-28 with owner authorization ([§13](#13-baseline-runbook-owner-green-flag-required), [EXP-0001](experiments/0001-synthetic-ingest-baseline.md)); it is a regression tripwire, not a performance target. A named `WORKLOADS` registry (`--workload`) adds run-intelligence workloads — real LeRobot ingest, quality analysis, validation evaluation, metrics aggregation, API/UI latency — measured **one workload per process** ([ADR 0019](decisions/0019-benchmark-workload-isolation.md); batching in one process inflates p50 ~24× on Windows) and recorded with raw samples in [EXP-0002](experiments/0002-run-intelligence-workloads.md). No new baselines are committed without owner authorization. Backlog: [benchmark backlog](benchmarking/backlog.md); rules: [methodology](benchmarking/methodology.md); review: [scaffolding review](reviews/2026-09-28-scaffolding.md).
+## 9. Benchmarking
 
-## 10. Testing status
+- Harness and schema v2 are implemented and tested. `synthetic-episode-ingest` is a local microbenchmark on an in-memory catalog, not a throughput benchmark. Its baseline is committed; new baselines need owner authorization.
+- `WORKLOADS` registry entries are measured one per process (batching inflates p50 about 24x on Windows) and recorded with raw samples in [EXP-0002](experiments/0002-run-intelligence-workloads.md).
+- Heavy-load results are in [EXP-0007](experiments/0007-heavy-load-and-sink-tail-read.md): quality analysis is linear at about 6.0 us per frame; a 42.9 MiB hour-long MCAP ingests at about 30 us per message; 500k-record aggregation exposed a sink read that parsed all history per tick, now tail-read in chunks.
+- Rules: [methodology](benchmarking/methodology.md). Backlog: [benchmark backlog](benchmarking/backlog.md).
 
-Latest local gates (2026-09-29, `just ci`): format, lint, strict type-check over 58 modules, tests, hygiene, and OpenAPI drift all pass; **659 passed, 91.74% coverage** against the isolated Postgres cluster (22 integration tests run when `DE_DATABASE_URL` is set and skip cleanly without it), hygiene clean, lock current. A Starlette/httpx `TestClient` deprecation warning is non-blocking and deferred. Live DB verification, clean-clone validation, and the history-wide secrets scan are all done. Repeat all gates after any change.
+## 10. Testing
 
-## 11. Observability status
+- Latest gates: format, lint, strict mypy over 64 modules, tests, hygiene and OpenAPI drift all pass. 903 passing, coverage above 92%.
+- Integration tests need `DE_DATABASE_URL` and skip cleanly without it; `just pg-up` plus the README DSN runs the whole suite with nothing skipped.
+- A Starlette/httpx `TestClient` deprecation warning is non-blocking and deferred.
+- Repeat every gate after any change.
 
-JSON logs and correlation IDs flow across the current API → persisted job → worker → logs path. Host telemetry snapshots CPU/RAM/disk/network with optional GPU fields; host fields become nullable on psutil/OS errors, with an AccessDenied test in the passing suite. **Runtime metrics are emitted** at the worker and ingest call sites — `jobs_queue_depth`, `jobs_queue_time_seconds`, `jobs_run_time_seconds`, `jobs_failures_total`, `pipeline_stage_duration_seconds`, `episodes_ingested_total`, `artifacts_written_bytes_total` — written to a JSONL sink at `DE_METRICS_PATH` (default `var/metrics/runtime.jsonl`). Labels stay low-cardinality; IDs appear only in logs. Sink failures never break the pipeline. API request latency and catalog query timing are instrumented the same way, and `observability/aggregate.py` reads the sink back into percentile summaries, time-bucketed series, and worker heartbeat ages for `GET /api/v1/metrics` and `/ui/metrics` ([ADR 0017](decisions/0017-runtime-metrics-aggregation.md)). Distributed tracing remains deferred per [ADR 0008](decisions/0008-observability.md); psutil is recorded in [ADR 0013](decisions/0013-cross-platform-resource-telemetry.md).
+## 11. Observability
 
-## 12. Important decisions and rejected alternatives
+- JSON logs and correlation IDs flow API to persisted job to worker to logs. Host telemetry covers CPU, RAM, disk and network, with nullable host fields on psutil errors and an AccessDenied test in the suite.
+- Runtime metrics: `jobs_queue_depth`, `jobs_queue_time_seconds`, `jobs_run_time_seconds`, `jobs_failures_total`, `pipeline_stage_duration_seconds`, `episodes_ingested_total`, `artifacts_written_bytes_total`, plus API request latency, catalog query timing and worker heartbeats. JSONL sink at `DE_METRICS_PATH`. Labels stay low-cardinality; ids appear only in logs. Sink failures never break the pipeline.
+- `observability/aggregate.py` reads the sink back into percentile summaries, time-bucketed series and heartbeat ages for `GET /api/v1/metrics` and `/ui/metrics`.
+- Distributed tracing deferred per [ADR 0008](decisions/0008-observability.md); psutil recorded in [ADR 0013](decisions/0013-cross-platform-resource-telemetry.md).
 
-- Problem: robot episode data engine (ADR 0003); platform over model-specific optimization.
-- PostgreSQL catalog + thin custom queue (ADR 0005); content-addressed local artifacts / ecosystem data formats (ADR 0006); build-thin lineage/run records (ADR 0007).
-- Stdlib JSON logging, correlation IDs, file metric direction, defer OTel/Prometheus/Grafana until need (ADR 0008); FastAPI (ADR 0009); modular monolith + separate worker (ADR 0010); 70% coverage floor (ADR 0011); host-based development, containers optional (ADR 0012); psutil host telemetry (ADR 0013).
-- No performance approach has been measured or adopted; there are no experiment-backed optimization claims. Alternatives and triggers are recorded in the linked ADRs and [experiment registry](experiments/registry.md).
+## 12. Decisions
+
+- Problem is a robot episode data engine, not model-specific optimization ([ADR 0003](decisions/0003-problem-selection.md)).
+- PostgreSQL catalog with a thin custom queue ([ADR 0005](decisions/0005-catalog-and-job-queue.md)), content-addressed local artifacts ([ADR 0006](decisions/0006-storage-and-formats.md)), build-thin lineage and run records ([ADR 0007](decisions/0007-lineage-and-run-records.md)).
+- Stdlib JSON logging with correlation ids and a file metric direction, deferring OpenTelemetry, Prometheus and Grafana until need ([ADR 0008](decisions/0008-observability.md)).
+- FastAPI ([ADR 0009](decisions/0009-api-style.md)), modular monolith with a separate worker ([ADR 0010](decisions/0010-modular-monolith-and-workers.md)), 70% coverage floor ([ADR 0011](decisions/0011-coverage-gate.md)), host-based development ([ADR 0012](decisions/0012-host-based-development.md)).
+- Alternatives and triggers are in the linked ADRs and the [experiment registry](experiments/registry.md).
 
 ## 13. Baseline runbook (owner green flag required)
 
-**Status: executed 2026-09-28 with owner authorization.** Baseline written at commit `f7ffbeb` (clean tree); verify pass reported no regression. One defect was found and fixed in this runbook while executing it: the command originally wrote a SHA-named file, but `DEFAULT_BASELINE` in `benchmarks/harness.py` is the fixed path `synthetic-ingest-windows.json`, so a SHA-named file would never be read by bare `just bench` and step 4 would have failed. Always write the default path, or pass the same `--baseline` to both invocations.
+Executed 2026-09-28 with owner authorization. Baseline written at `f7ffbeb` on a clean tree; the verify pass reported no regression. One defect was found while executing it: the runbook wrote a SHA-named file, but `DEFAULT_BASELINE` in `benchmarks/harness.py` is the fixed path `synthetic-ingest-windows.json`, so a SHA-named file would never be read by bare `just bench`. Always write the default path, or pass the same `--baseline` to both invocations.
 
-Do not start until the owner authorizes a measured baseline. Preconditions: a committed, clean tree; the machine you
-will measure on must stay idle; nothing else heavy may run during the measurement.
+Do not start without owner authorization. Preconditions: a committed clean tree, an idle machine, nothing else heavy running.
 
 ```bash
-just ci                                  # 1. all gates green before measuring
-git status --short                       # 2. must be empty (provenance records dirty state)
-just bench --write-baseline             # 3. writes benchmarks/baselines/synthetic-ingest-windows.json (the fixed default)
-just bench                               # 4. re-run: must now compare and report no regression
+just ci                                  # 1. gates green before measuring
+git status --short                       # 2. must be empty
+just bench --write-baseline             # 3. writes the default baseline path
+just bench                               # 4. re-run: compares, must report no regression
 ```
 
 Then, before tagging:
 
-1. Inspect the written baseline and the raw result under `benchmarks/results/`. Confirm provenance is complete:
-   git commit, dirty flag, config hash, hardware, OS/Python/lockfile, seed, timestamp, workload version, background-load note.
-2. Update [EXP-0001](experiments/0001-synthetic-ingest-baseline.md) with the actual numbers, the hardware profile, and
-   honest caveats. Do not restate the number as a throughput or production claim — it is a synthetic local microbenchmark.
-3. Update [the experiment registry](experiments/registry.md) to record the measured entry.
-4. Tick the Benchmarking criterion in [the definition of done](spec/definition-of-done.md) with links to the baseline,
-   EXP-0001, and the result file. Leave Handoff unticked until the clean-clone and secrets-scan items close.
-5. Re-run `just ci`, then commit as `bench: record first measured baseline` and push.
-6. Only after the Handoff criterion is also evidenced, tag `scaffold-complete`.
+1. Inspect the written baseline and the raw result under `benchmarks/results/`. Confirm provenance: commit, dirty flag, config hash, hardware, OS/Python/lockfile, seed, timestamp, workload version, background-load note.
+2. Update [EXP-0001](experiments/0001-synthetic-ingest-baseline.md) with the numbers, the hardware profile and honest caveats. Do not restate it as a throughput or production claim.
+3. Update the [experiment registry](experiments/registry.md).
+4. Tick the Benchmarking criterion in the [definition of done](spec/definition-of-done.md) with links. Leave Handoff unticked until the clean-clone and secrets-scan items close.
+5. Re-run `just ci`, commit as `bench: record first measured baseline`, push.
+6. Tag `scaffold-complete` only after the Handoff criterion is evidenced.
 
-**Second follow-up, same day — three operator-reported defects, all with the same shape.** Each had been measured and "fixed" at least once before, and each earlier fix treated the symptom. **Sticky column headers overlapped the data they labelled** because `overflow-x: auto` forces `overflow-y` to compute to `auto`: the table plate was already a scrollport, so the header's `top` was measured from the top of the table, not the page (measured: `th.top=483` inside its own `tr.top=438`). Measuring the nav height more carefully — as the previous pass did — could only ever be a better estimate of the wrong number. The plate is now explicitly a bounded scroll region and the header pins to `0`, which deletes the nav coupling and the `ResizeObserver` with it. **The page flickered once a second** because the poller's change guard compared the response against `root.innerHTML`; the browser re-serialises the DOM, so that comparison is *never* equal, the guard never fired, and every poll rewrote the region and re-triggered the refresh cue. It now compares against the last payload applied — also cheaper, since it skips a full region serialisation per poll. **The loading panel drew over an already-loaded page** because it was in normal flow and pushed the finished page down the viewport; it is now an out-of-flow overlay, hidden as served, shown only while a navigation is genuinely in flight. A fourth defect surfaced while writing the regression test: `.de-sweep-panel { display: grid }` outranks the UA rule for the `hidden` attribute, so the panel was a full-viewport overlay on every settled page until the hide was restated at class specificity.
+## 14. Recent slices
 
-Measured after the fixes: 110 samples across 11 s of polling → **0 opacity dips, 0 navigations, constant node count**; header `th.top === tr.top` with 0 rows overlapping on every table page. Suite is at **604 passing**, 93% coverage; lint, mypy and hygiene clean; all 43 GET endpoints in the contract answer with no 5xx. The general lesson is the one worth keeping: **two of these three had a plausible fix already applied and shipped**, and neither the stylesheet nor a passing test suite would have caught either. They needed a browser and a ruler, and the measurement had to be verified before it was believed — `snap.mjs`'s "133 px header overflow" warning turned out to be the script's own arithmetic, not the page's (`overflowsBy: -1` when measured directly).
+One line each. Detail in the linked record.
+
+| Date | Slice | Record |
+|---|---|---|
+| 2026-09-28 | Scaffolding complete, review accept-with-follow-ups, first measured baseline committed | [review](reviews/2026-09-28-scaffolding.md), [EXP-0001](experiments/0001-synthetic-ingest-baseline.md) |
+| 2026-09-29 | Minimal server-rendered UI, committed OpenAPI contract with a drift gate | [ADR 0014](decisions/0014-minimal-ui-server-rendered.md) |
+| 2026-09-29 | Job lifecycle: retries, deadlines, cooperative cancel, failure classification | [ADR 0015](decisions/0015-cooperative-job-lifecycle.md) |
+| 2026-09-29 | Real LeRobot ingest, v2.1 and v3.0, against real Hub datasets | [status](implementation/status.md) |
+| 2026-09-29 | Validation profiles, rule engine, quarantine, re-validate | [ADR 0016](decisions/0016-json-validation-profiles.md) |
+| 2026-09-29 | Run intelligence: metrics aggregation, quality analytics, run inspection | [ADR 0017](decisions/0017-runtime-metrics-aggregation.md), [ADR 0018](decisions/0018-episode-quality-signals.md), [ADR 0019](decisions/0019-benchmark-workload-isolation.md) |
+| 2026-09-29 | Curated slices with recomputed membership, failures view | [plan](implementation/telldown-plan.md) |
+| 2026-09-29 | Deterministic monitoring notifier, eleven rules, alert budget | [ADR 0020](decisions/0020-deterministic-monitoring-notifier.md), [EXP-0003](experiments/0003-deterministic-notifier-latency.md) |
+| 2026-09-29 | Instrument UI pass: theme hooks, visible failure policy, HTML error pages | [ADR 0021](decisions/0021-frontend-instrument-pass.md) |
+| 2026-09-29 | MVP complete: content-addressed builds and the MCAP reader | [ADR 0022](decisions/0022-mcap-ingest-reader.md), [EXP-0004](experiments/0004-mcap-ingest-baseline.md) |
+| 2026-09-29 | End-to-end run from an empty catalog: five wiring defects found and fixed | [review](reviews/2026-09-29-mvp-end-to-end-run.md) |
+| 2026-09-30 | Metrics honesty: five defects found by adversarial review, 26 edge-case tests | [ADR 0023](decisions/0023-quality-metrics-honesty.md), [review](reviews/2026-09-30-metrics-and-visualization-assessment.md) |
+| 2026-09-30 | Observability visual surface: dimensionless charts, live schema page, lineage DAG, motion trace with recording gaps | [ADR 0024](decisions/0024-observability-visual-surface.md) |
+| 2026-09-30 | MCAP dimension layout compiled per message shape: ingest 3.5x faster, target re-scoped | [EXP-0005](experiments/0005-mcap-ingest-flatten-plan.md), [ADR 0025](decisions/0025-lerobot-v3-export-of-builds.md) |
+| 2026-09-30 | Chaos harness first increment: replay seams, labeled window scoring | [EXP-0006](experiments/0006-chaos-harness-first-increment.md) |
+| 2026-09-30 | e2e driver hardened and adopted as `scripts/verify_e2e.py`, preflight and nonzero exit | [B-016](benchmarking/backlog.md) |
+| 2026-09-30 | Heavy-load campaign, metrics sink tail-read | [EXP-0007](experiments/0007-heavy-load-and-sink-tail-read.md) |
+| 2026-09-30 | Adversarial API probing: correlation-id sanitizing, page-limit clamping (F17, F18) | [failure modes](testing/failure-modes.md) |
+| 2026-09-30 | `just stop` added after a stale server on port 8000 made `just run` look broken; port preflight now reads `DE_API_PORT` (F19) | [scripts](../scripts) |
+
+### Lessons worth keeping
+
+- "Pure core, unit-tested" is not coverage of a feature. Every defect in the end-to-end run was in the wiring around correct code, and 92% line coverage hid all five.
+- Write the probe first. Chaos-harness and adversarial-probing defects were all found by a test or script that could fail, never by reading the code.
+- A metric with units is not a metric with a scale. Plotting an L2 norm in source units put episodes at `1.0e8` beside joints at `0.02`; the chart was not misdrawn, it was showing nothing.
+- Measure before optimizing, and attribute before claiming. `_dimensions` was 51% of ingest time; the disk was 65 ms and would have been blamed by order of magnitude.
