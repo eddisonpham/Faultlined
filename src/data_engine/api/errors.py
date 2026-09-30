@@ -7,7 +7,9 @@ import uuid
 from typing import Any
 
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.exceptions import HTTPException as FastAPIHTTPException
+from fastapi.responses import HTMLResponse, JSONResponse, Response
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from data_engine.catalog.repository import (
     IdempotencyConflict,
@@ -15,6 +17,7 @@ from data_engine.catalog.repository import (
     SliceNameConflict,
 )
 from data_engine.observability.logging import correlation_id_var
+from data_engine.web import error_page, theme_or_default
 
 logger = logging.getLogger(__name__)
 
@@ -91,3 +94,83 @@ def install_error_handling(app: FastAPI) -> None:
                 "correlation_id": correlation_id_var.get(),
             },
         )
+
+    @app.exception_handler(StarletteHTTPException)
+    @app.exception_handler(FastAPIHTTPException)
+    async def http_exception_handler(request: Request, exc: StarletteHTTPException) -> Response:
+        """Render HTML for a browser navigation, JSON for an API call.
+
+        A `/ui/...` route that 404s is a mistyped URL or a stale bookmark, and
+        returning the RFC-7807 JSON body to a browser gives the operator a wall
+        of raw text with no way back. The status code, the correlation id and the
+        contract are all unchanged - only the representation differs.
+
+        Registered against both exception classes on purpose. Starlette dispatches
+        on the most specific class in the MRO, and FastAPI installs its own
+        handler for ``fastapi.HTTPException`` - which is what the router raises
+        for an unmatched path. Registering only the Starlette base leaves the
+        exact case that matters most, a mistyped UI URL, on the default handler.
+        """
+        detail = exc.detail if isinstance(exc.detail, str) else "Request failed."
+        if not _wants_html(request):
+            return JSONResponse(
+                status_code=exc.status_code,
+                headers=getattr(exc, "headers", None),
+                content={
+                    "type": "about:blank",
+                    "title": "Request failed",
+                    "status": exc.status_code,
+                    "code": "REQUEST_FAILED",
+                    "detail": detail,
+                    "correlation_id": correlation_id_var.get(),
+                },
+            )
+        html = error_page(
+            exc.status_code,
+            f"{detail} // correlation {correlation_id_var.get()}",
+            theme_or_default(request.query_params.get("theme")),
+        )
+        return HTMLResponse(html, status_code=exc.status_code)
+
+    @app.exception_handler(Exception)
+    async def unhandled_handler(request: Request, _exc: Exception) -> Response:
+        """Last resort. Log with the correlation id, then answer in the caller's language.
+
+        The 500 body deliberately carries no exception text: a stack trace or a
+        SQL fragment echoed into a browser is both a leak and useless to the
+        operator reading it. The correlation id is the handle that ties the page
+        back to the log line.
+        """
+        correlation = correlation_id_var.get()
+        logger.exception("unhandled error correlation_id=%s path=%s", correlation, request.url.path)
+        if not _wants_html(request):
+            return JSONResponse(
+                status_code=500,
+                content={
+                    "type": "about:blank",
+                    "title": "Internal error",
+                    "status": 500,
+                    "code": "INTERNAL_ERROR",
+                    "detail": "An unexpected error occurred.",
+                    "correlation_id": correlation,
+                },
+            )
+        return HTMLResponse(
+            error_page(
+                500,
+                f"The request failed unexpectedly. Quote correlation id {correlation} "
+                "in a bug report.",
+                theme_or_default(request.query_params.get("theme")),
+            ),
+            status_code=500,
+        )
+
+
+def _wants_html(request: Request) -> bool:
+    """True for a browser navigation to a UI route.
+
+    Checks the path rather than the Accept header alone: ``fetch`` sends
+    ``*/*`` by default, and an API client that forgot to set Accept must still
+    get JSON from a UI-path error.
+    """
+    return request.url.path.startswith("/ui") or "text/html" in request.headers.get("accept", "")

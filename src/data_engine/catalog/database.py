@@ -89,6 +89,27 @@ CREATE TABLE IF NOT EXISTS lineage_edges (
     PRIMARY KEY (from_type, from_ref, to_type, to_ref, relation)
 );
 
+CREATE TABLE IF NOT EXISTS builds (
+    -- The content address. Two builds of the same episodes under the same policy
+    -- and commit are the same build, so this is the primary key rather than a
+    -- surrogate id: it makes rebuild determinism a schema constraint (NFR-004)
+    -- instead of a convention the code has to remember to keep.
+    hash text PRIMARY KEY,
+    name text NOT NULL,
+    -- The manifest that was hashed. Stored verbatim so a build can be explained
+    -- without re-deriving it, and so the hash can be recomputed and compared.
+    manifest jsonb NOT NULL,
+    episode_count integer NOT NULL CHECK (episode_count >= 0),
+    -- The validation policy in force, by content address. A build citing a
+    -- policy that no longer exists would be unciteable, so this is a reference.
+    profile_hash text REFERENCES validation_profiles(hash),
+    code_commit text NOT NULL DEFAULT '',
+    job_id text,
+    created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS builds_created_idx ON builds (created_at);
+
 CREATE TABLE IF NOT EXISTS episode_slices (
     id text PRIMARY KEY,
     name text NOT NULL DEFAULT '',
@@ -193,6 +214,20 @@ ALTER TABLE monitor_incidents
   ADD COLUMN IF NOT EXISTS acknowledged_at timestamptz;
 ALTER TABLE monitor_incidents
   ADD COLUMN IF NOT EXISTS resolved_at timestamptz;
+
+-- Build membership is a join table rather than an array in the manifest: the
+-- manifest is hashed (and therefore frozen), while "which builds contain this
+-- episode" is a query that has to stay fast as build count grows (FR-008).
+CREATE TABLE IF NOT EXISTS build_episodes (
+    build_hash text NOT NULL REFERENCES builds(hash) ON DELETE CASCADE,
+    episode_id text NOT NULL REFERENCES episodes(id) ON DELETE CASCADE,
+    source_hash text NOT NULL,
+    artifact_hash text NOT NULL,
+    ordinal integer NOT NULL,
+    PRIMARY KEY (build_hash, episode_id)
+);
+
+CREATE INDEX IF NOT EXISTS build_episodes_episode_idx ON build_episodes (episode_id);
 """
 
 

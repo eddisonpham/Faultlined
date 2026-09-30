@@ -70,7 +70,80 @@ class SubmitSourceJobRequest(_JobPolicy):
     payload: SourceIngestPayload
 
 
-AnyJobRequest = SubmitJobRequest | SubmitSourceJobRequest
+class ValidatePayload(BaseModel):
+    """Which episodes to check, against which policy.
+
+    An empty `episode_ids` means "everything currently ingested" - the common
+    case after a bulk ingest, and an explicit statement rather than a default
+    that silently changes meaning if a caller forgets the field.
+
+    The policy travels as a whole document, not a name to look up. A job is a
+    self-contained, retryable record: if the profile is edited between the
+    submission and the attempt, the job must still validate against what was
+    asked for, not against whatever the name resolves to now.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    episode_ids: list[str] = Field(default_factory=list, max_length=10_000)
+    profile: dict[str, Any] = Field(default_factory=dict)
+
+
+class BuildPayload(BaseModel):
+    """A dataset build over a named selection of episodes (FR-006).
+
+    Empty `episode_ids` means "every episode that passed validation" - the
+    selection a first build almost always wants, and the one that is safe to
+    default to because a failing episode is excluded rather than silently
+    included.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=200)
+    episode_ids: list[str] = Field(default_factory=list, max_length=10_000)
+    profile: dict[str, Any] = Field(default_factory=dict)
+
+
+class SubmitValidateJobRequest(_JobPolicy):
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["validate"]
+    payload: ValidatePayload
+
+
+class SubmitBuildJobRequest(_JobPolicy):
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["build"]
+    payload: BuildPayload
+
+
+AnyJobRequest = (
+    SubmitJobRequest | SubmitSourceJobRequest | SubmitValidateJobRequest | SubmitBuildJobRequest
+)
+
+
+class BuildSummary(BaseModel):
+    hash: str
+    name: str
+    episode_count: int
+    profile_hash: str | None = None
+    code_commit: str = ""
+    job_id: str | None = None
+    created_at: Any = None
+    model_config = ConfigDict(extra="allow")
+
+
+class BuildListResponse(BaseModel):
+    items: list[BuildSummary]
+
+
+class BuildDetailResponse(BuildSummary):
+    """A build plus the manifest and membership it is reproducible from."""
+
+    manifest: dict[str, Any]
+    episodes: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class JobResponse(BaseModel):

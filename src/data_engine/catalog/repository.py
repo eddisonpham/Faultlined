@@ -673,6 +673,111 @@ class PostgresCatalog:
             dict(job), [dict(row) for row in episodes], [dict(row) for row in validations]
         )
 
+    def record_build(self, build: Any, *, job_id: str | None = None) -> dict[str, Any]:
+        """Persist a build and its membership, idempotently on the content hash.
+
+        Two builds of the same episodes are the same build, so the second write
+        is a no-op returning the same row rather than a duplicate. Re-ingesting
+        the same selection after a no-op rebuild must not grow the table.
+        """
+        with connect(self.settings) as connection:
+            row = connection.execute(
+                """INSERT INTO builds
+                       (hash, name, manifest, episode_count, profile_hash, code_commit, job_id)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s)
+                   ON CONFLICT (hash) DO UPDATE SET name = EXCLUDED.name
+                   RETURNING *""",
+                (
+                    build.hash,
+                    build.name,
+                    Jsonb(build.manifest),
+                    build.episode_count,
+                    build.profile_hash,
+                    build.code_commit,
+                    job_id,
+                ),
+            ).fetchone()
+            if row is None:
+                raise RuntimeError("build upsert returned no row")
+            for ordinal, member in enumerate(build.episodes):
+                connection.execute(
+                    """INSERT INTO build_episodes
+                           (build_hash, episode_id, source_hash, artifact_hash, ordinal)
+                       VALUES (%s, %s, %s, %s, %s)
+                       ON CONFLICT (build_hash, episode_id) DO NOTHING""",
+                    (
+                        build.hash,
+                        member["episode_id"],
+                        member["source_hash"],
+                        member["artifact_hash"],
+                        ordinal,
+                    ),
+                )
+                # Lineage edge as well as the join table: `lineage_edges` is the
+                # graph everything else already queries, and a build that exists
+                # in only one of the two would be invisible to half the
+                # traversals. One edge per member - inside the loop, not after it.
+                connection.execute(
+                    """INSERT INTO lineage_edges (from_type, from_ref, to_type, to_ref, relation)
+                       VALUES ('build', %s, 'episode', %s, 'contains')
+                       ON CONFLICT DO NOTHING""",
+                    (build.hash, member["episode_id"]),
+                )
+        return dict(row)
+
+    def get_build(self, build_id: str) -> dict[str, Any] | None:
+        with connect(self.settings) as connection:
+            row = connection.execute("SELECT * FROM builds WHERE hash = %s", (build_id,)).fetchone()
+        return dict(row) if row else None
+
+    def list_builds(self, *, limit: int = 50) -> list[dict[str, Any]]:
+        with connect(self.settings) as connection:
+            rows = connection.execute(
+                "SELECT * FROM builds ORDER BY created_at DESC LIMIT %s", (limit,)
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def build_episodes(self, build_id: str) -> list[dict[str, Any]]:
+        """The forward direction: which episodes this build contains (FR-008)."""
+        with connect(self.settings) as connection:
+            rows = connection.execute(
+                """SELECT episode_id, source_hash, artifact_hash, ordinal
+                   FROM build_episodes WHERE build_hash = %s ORDER BY ordinal""",
+                (build_id,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def builds_for_episode(self, episode_id: str) -> list[dict[str, Any]]:
+        """The reverse direction: which builds contain this episode (FR-008).
+
+        The question an operator actually asks is "I deleted this episode - what
+        did that break?", which is a question about one episode, not one build.
+        """
+        with connect(self.settings) as connection:
+            rows = connection.execute(
+                """SELECT b.hash, b.name, b.episode_count, b.created_at
+                   FROM build_episodes be
+                   JOIN builds b ON b.hash = be.build_hash
+                   WHERE be.episode_id = %s
+                   ORDER BY b.created_at DESC""",
+                (episode_id,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def get_episodes(self, episode_ids: list[str]) -> list[dict[str, Any]]:
+        """Episodes by id, for a build's selection.
+
+        Order is not preserved: the builder sorts by id, because a manifest whose
+        order depends on a database's return order is not reproducible.
+        """
+        if not episode_ids:
+            return []
+        with connect(self.settings) as connection:
+            rows = connection.execute(
+                "SELECT * FROM episodes WHERE id = ANY(%s)", (list(episode_ids),)
+            ).fetchall()
+        return [dict(row) for row in rows]
+
     def record_episode_quality(self, episode_id: str, quality: dict[str, Any]) -> dict[str, Any]:
         """Persist the motion-quality summary computed at ingest (ADR 0018).
 

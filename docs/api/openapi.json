@@ -55,6 +55,175 @@
         "title": "ArtifactSummary",
         "type": "object"
       },
+      "BuildDetailResponse": {
+        "additionalProperties": true,
+        "description": "A build plus the manifest and membership it is reproducible from.",
+        "properties": {
+          "code_commit": {
+            "default": "",
+            "title": "Code Commit",
+            "type": "string"
+          },
+          "created_at": {
+            "title": "Created At"
+          },
+          "episode_count": {
+            "title": "Episode Count",
+            "type": "integer"
+          },
+          "episodes": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Episodes",
+            "type": "array"
+          },
+          "hash": {
+            "title": "Hash",
+            "type": "string"
+          },
+          "job_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Id"
+          },
+          "manifest": {
+            "additionalProperties": true,
+            "title": "Manifest",
+            "type": "object"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "profile_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Profile Hash"
+          }
+        },
+        "required": [
+          "hash",
+          "name",
+          "episode_count",
+          "manifest"
+        ],
+        "title": "BuildDetailResponse",
+        "type": "object"
+      },
+      "BuildListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/BuildSummary"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "BuildListResponse",
+        "type": "object"
+      },
+      "BuildPayload": {
+        "additionalProperties": false,
+        "description": "A dataset build over a named selection of episodes (FR-006).\n\nEmpty `episode_ids` means \"every episode that passed validation\" - the\nselection a first build almost always wants, and the one that is safe to\ndefault to because a failing episode is excluded rather than silently\nincluded.",
+        "properties": {
+          "episode_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 10000,
+            "title": "Episode Ids",
+            "type": "array"
+          },
+          "name": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "profile": {
+            "additionalProperties": true,
+            "title": "Profile",
+            "type": "object"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "BuildPayload",
+        "type": "object"
+      },
+      "BuildSummary": {
+        "additionalProperties": true,
+        "properties": {
+          "code_commit": {
+            "default": "",
+            "title": "Code Commit",
+            "type": "string"
+          },
+          "created_at": {
+            "title": "Created At"
+          },
+          "episode_count": {
+            "title": "Episode Count",
+            "type": "integer"
+          },
+          "hash": {
+            "title": "Hash",
+            "type": "string"
+          },
+          "job_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Id"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "profile_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Profile Hash"
+          }
+        },
+        "required": [
+          "hash",
+          "name",
+          "episode_count"
+        ],
+        "title": "BuildSummary",
+        "type": "object"
+      },
       "ContractListResponse": {
         "properties": {
           "items": {
@@ -1866,6 +2035,44 @@
         "title": "StatusResponse",
         "type": "object"
       },
+      "SubmitBuildJobRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "deadline_seconds": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deadline Seconds"
+          },
+          "max_attempts": {
+            "default": 3,
+            "maximum": 10.0,
+            "minimum": 1.0,
+            "title": "Max Attempts",
+            "type": "integer"
+          },
+          "payload": {
+            "$ref": "#/components/schemas/BuildPayload"
+          },
+          "type": {
+            "const": "build",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "payload"
+        ],
+        "title": "SubmitBuildJobRequest",
+        "type": "object"
+      },
       "SubmitJobRequest": {
         "additionalProperties": false,
         "properties": {
@@ -1940,6 +2147,44 @@
           "payload"
         ],
         "title": "SubmitSourceJobRequest",
+        "type": "object"
+      },
+      "SubmitValidateJobRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "deadline_seconds": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deadline Seconds"
+          },
+          "max_attempts": {
+            "default": 3,
+            "maximum": 10.0,
+            "minimum": 1.0,
+            "title": "Max Attempts",
+            "type": "integer"
+          },
+          "payload": {
+            "$ref": "#/components/schemas/ValidatePayload"
+          },
+          "type": {
+            "const": "validate",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "payload"
+        ],
+        "title": "SubmitValidateJobRequest",
         "type": "object"
       },
       "SyntheticEpisode": {
@@ -2088,6 +2333,27 @@
         "title": "TickResponse",
         "type": "object"
       },
+      "ValidatePayload": {
+        "additionalProperties": false,
+        "description": "Which episodes to check, against which policy.\n\nAn empty `episode_ids` means \"everything currently ingested\" - the common\ncase after a bulk ingest, and an explicit statement rather than a default\nthat silently changes meaning if a caller forgets the field.\n\nThe policy travels as a whole document, not a name to look up. A job is a\nself-contained, retryable record: if the profile is edited between the\nsubmission and the attempt, the job must still validate against what was\nasked for, not against whatever the name resolves to now.",
+        "properties": {
+          "episode_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 10000,
+            "title": "Episode Ids",
+            "type": "array"
+          },
+          "profile": {
+            "additionalProperties": true,
+            "title": "Profile",
+            "type": "object"
+          }
+        },
+        "title": "ValidatePayload",
+        "type": "object"
+      },
       "ValidationError": {
         "properties": {
           "ctx": {
@@ -2186,7 +2452,7 @@
   "paths": {
     "/": {
       "get": {
-        "description": "Point a first-time visitor somewhere useful.\n\nThe platform has no web UI yet (frontend is a later stage), so a bare `/`\nwould otherwise be a blank 404 in the browser.",
+        "description": "Point a first-time visitor somewhere useful.\n\n`/` is JSON rather than a redirect because a bare 404 in the browser was\nthe original complaint; the UI is one field away and the API callers get\nthe machine-readable map they expect.",
         "operationId": "root__get",
         "responses": {
           "200": {
@@ -2260,6 +2526,85 @@
           }
         },
         "summary": "List Artifacts"
+      }
+    },
+    "/api/v1/builds": {
+      "get": {
+        "operationId": "list_builds_api_v1_builds_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuildListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Builds"
+      }
+    },
+    "/api/v1/builds/{build_hash}": {
+      "get": {
+        "operationId": "get_build_api_v1_builds__build_hash__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "build_hash",
+            "required": true,
+            "schema": {
+              "title": "Build Hash",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuildDetailResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Build"
       }
     },
     "/api/v1/contracts": {
@@ -2604,6 +2949,46 @@
           }
         },
         "summary": "Get Episode"
+      }
+    },
+    "/api/v1/episodes/{episode_id}/builds": {
+      "get": {
+        "description": "The reverse lineage direction (FR-008): what contains this episode.",
+        "operationId": "builds_for_episode_api_v1_episodes__episode_id__builds_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "episode_id",
+            "required": true,
+            "schema": {
+              "title": "Episode Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuildListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Builds For Episode"
       }
     },
     "/api/v1/episodes/{episode_id}/quality": {
@@ -3131,7 +3516,7 @@
         "summary": "List Jobs"
       },
       "post": {
-        "description": "Queue an ingest job.\n\nTwo request shapes, one endpoint: `ingest` carries an episode in the request\nbody (the synthetic contract), `ingest_source` names a dataset on disk and\nlets a reader interpret it. They are separate types rather than one optional\npayload because \"either a body or a path\" is exactly the kind of either/or that\na typo turns into a confusing 422.",
+        "description": "Queue an ingest job.\n\nFour request shapes, one endpoint: `ingest` carries an episode in the\nrequest body (the synthetic contract), `ingest_source` names a dataset on\ndisk and lets a reader interpret it, `validate` and `build` name a\nselection of episodes already in the catalog. They are separate types\nrather than one optional payload because \"either a body or a path\" is\nexactly the kind of either/or that a typo turns into a confusing 422.",
         "operationId": "submit_job_api_v1_jobs_post",
         "parameters": [
           {
@@ -3161,6 +3546,12 @@
                   },
                   {
                     "$ref": "#/components/schemas/SubmitSourceJobRequest"
+                  },
+                  {
+                    "$ref": "#/components/schemas/SubmitValidateJobRequest"
+                  },
+                  {
+                    "$ref": "#/components/schemas/SubmitBuildJobRequest"
                   }
                 ],
                 "title": "Body"
@@ -3817,6 +4208,23 @@
         "summary": "Ui Status"
       }
     },
+    "/ui/app.js": {
+      "get": {
+        "description": "The client runtime. Served as a route rather than a static mount so the\nUI stays one Python-owned directory with no extra file-serving surface.",
+        "operationId": "ui_app_js_ui_app_js_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Ui App Js"
+      }
+    },
     "/ui/artifacts": {
       "get": {
         "operationId": "ui_artifacts_ui_artifacts_get",
@@ -4320,6 +4728,21 @@
           }
         },
         "summary": "Ui Jobs"
+      },
+      "post": {
+        "description": "Queue an ingest job from the browser form.\n\nThe form is parsed by hand rather than with ``Form(...)`` because that\nwould pull in ``python-multipart`` for a single urlencoded body - a new\ndependency, on the dependency-free path ADR 0014 is built around, to save\nthree lines of ``urllib.parse``.\n\nThe payload is built and then validated through the *same* Pydantic\nmodels the JSON endpoint uses. A form is a second front door to the same\ndoor, and a second front door with its own weaker validation is how a\nUI ends up able to create jobs the API would refuse.\n\nOn a bad submission this re-renders the page with the error inline and\nthe typed values preserved, rather than redirecting: losing what someone\ntyped because of one bad field is the fastest way to make a form feel\nhostile. The redirect on success is 303, so a refresh does not queue the\nsame job twice.",
+        "operationId": "ui_submit_job_ui_jobs_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Ui Submit Job"
       }
     },
     "/ui/jobs/{job_id}": {

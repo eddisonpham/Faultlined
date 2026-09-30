@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from data_engine.builds import BuildError, DatasetBuilder
 from data_engine.catalog.repository import PostgresCatalog
 from data_engine.config import Settings
 from data_engine.ingest.readers.base import ReaderError
@@ -17,7 +18,7 @@ from data_engine.observability.logging import correlation_id_var
 from data_engine.observability.metrics import RuntimeMetrics
 from data_engine.observability.reason_codes import ReasonCode
 from data_engine.storage.artifacts import FileArtifactStore
-from data_engine.validation.profile import profile_from_dict
+from data_engine.validation.profile import profile_from_dict, profile_hash
 from data_engine.validation.service import ValidationService
 
 logger = logging.getLogger(__name__)
@@ -92,9 +93,9 @@ class IngestWorker:
         Two ingest shapes share the job pipeline on purpose: an episode in the payload
         (synthetic) and a dataset path (real formats). They differ only in where the
         bytes come from, and splitting them into separate workers would double the
-        process management for no isolation benefit. Validation is a third shape, on the
-        same reasoning, but it is chained rather than submitted directly: it re-reads the
-        source and records an immutable result against an existing episode.
+        process management for no isolation benefit. Validate and build are a third and
+        fourth shape on the same reasoning: both name a selection of episodes already
+        in the catalog rather than carrying bytes, and both are retried as one unit.
         """
         payload = job["payload"]
         if job_type == JobType.INGEST_SOURCE:
@@ -114,26 +115,132 @@ class IngestWorker:
             return self.ingest.ingest(episode, job_id=str(job["id"]))
         if job_type == JobType.VALIDATE:
             return self._validate(payload)
+        if job_type == JobType.BUILD:
+            return self._build(payload, job_id=str(job["id"]))
         raise UnsupportedJobType(f"unsupported job type: {job_type}")
 
+    def _selection(self, payload: dict[str, Any], *, field: str) -> list[str]:
+        """The episodes a job names, or every ingested episode if it names none.
+
+        One rule for validate and build, so "empty means everything" cannot mean
+        two different things in two handlers. A singular `episode_id` is also
+        accepted: it is what the single-episode validate contract has always
+        used, and rejecting it would break every existing caller to no end.
+        """
+        singular = payload.get("episode_id")
+        if isinstance(singular, str) and singular:
+            return [singular]
+        raw = payload.get(field, [])
+        if raw is None:
+            raw = []
+        if not isinstance(raw, list) or any(not isinstance(item, str) for item in raw):
+            raise InvalidJobPayload(f"payload.{field} must be a list of episode ids")
+        if raw:
+            return [str(item) for item in raw]
+        return [str(row["id"]) for row in self.catalog.list_episodes(limit=10_000)]
+
     def _validate(self, payload: dict[str, Any]) -> dict[str, Any]:
-        """Record a validation result for an episode already in the catalog (FR-002)."""
-        episode_id = payload.get("episode_id")
-        if not isinstance(episode_id, str) or not episode_id:
-            raise InvalidJobPayload("payload.episode_id must be a non-empty id")
+        """Record validation results for episodes already in the catalog (FR-002).
+
+        A selection rather than a single id: validating a bulk ingest is one
+        logical operation with one retry budget, and splitting it into a job per
+        episode buys nothing but a queue.
+        """
         profile = payload.get("profile")
-        if not isinstance(profile, dict):
+        if not isinstance(profile, dict) or not profile:
             raise InvalidJobPayload("payload.profile must be a profile document")
         document = profile_from_dict(profile)
         self.catalog.register_validation_profile(document)
-        result = self.validation.validate_stored_episode(episode_id, document)
+
+        selected = self._selection(payload, field="episode_ids")
+        outcomes: list[dict[str, Any]] = []
+        for episode_id in selected:
+            result = self.validation.validate_stored_episode(episode_id, document)
+            outcomes.append(
+                {
+                    "episode_id": episode_id,
+                    "profile_hash": result.profile_hash,
+                    "profile_name": result.profile_name,
+                    "passed": result.passed,
+                    "reason_codes": list(result.reason_codes),
+                }
+            )
+        passed = [row for row in outcomes if row["passed"]]
+        # A job that inspected nothing has not succeeded at anything; saying so
+        # is the difference between "validation passed" and "there was nothing
+        # to validate".
+        if not outcomes:
+            raise InvalidJobPayload("no episodes to validate: the catalog is empty")
         return {
-            "episode_id": episode_id,
-            "profile_hash": result.profile_hash,
-            "profile_name": result.profile_name,
-            "passed": result.passed,
-            "reason_codes": list(result.reason_codes),
+            "profile_hash": profile_hash(document),
+            "profile_name": document.name,
+            "checked": len(outcomes),
+            "passed": len(passed),
+            "failed": len(outcomes) - len(passed),
+            "episodes": outcomes,
         }
+
+    def _build(self, payload: dict[str, Any], *, job_id: str) -> dict[str, Any]:
+        """Assemble a deterministic dataset build over a selection (FR-006/007)."""
+        name = payload.get("name")
+        if not isinstance(name, str) or not name.strip():
+            raise InvalidJobPayload("payload.name must be a non-empty build name")
+
+        selected = self._selection(payload, field="episode_ids")
+        episodes = self.catalog.get_episodes(selected)
+        found = {str(row["id"]) for row in episodes}
+        missing = [episode_id for episode_id in selected if episode_id not in found]
+        if missing:
+            # Naming an episode that does not exist is a caller error, not an
+            # empty selection: silently building over the subset that resolved
+            # would produce a dataset that is quietly missing what was asked for.
+            raise InvalidJobPayload(f"unknown episode id(s): {', '.join(sorted(missing)[:5])}")
+
+        profile_document = None
+        raw_profile = payload.get("profile")
+        if isinstance(raw_profile, dict) and raw_profile:
+            profile_document = profile_from_dict(raw_profile)
+            self.catalog.register_validation_profile(profile_document)
+
+        builder = DatasetBuilder(code_commit=self._code_commit())
+        try:
+            build = builder.build(
+                episodes,
+                name=name.strip(),
+                profile=profile_document.to_dict() if profile_document else None,
+            )
+        except BuildError as exc:
+            raise InvalidJobPayload(str(exc)) from exc
+
+        self.catalog.record_build(build, job_id=job_id)
+        return {
+            "build_hash": build.hash,
+            "name": build.name,
+            "episode_count": build.episode_count,
+            "profile_hash": build.profile_hash,
+            "code_commit": build.code_commit,
+        }
+
+    def _code_commit(self) -> str:
+        """The commit that produced a build, when the checkout can name one.
+
+        Best effort by design: a build made from a tarball or an installed wheel
+        has no commit, and an empty string is an honest "unknown" where a
+        fabricated one would poison provenance.
+        """
+        try:
+            head = Path(__file__).resolve().parents[3] / ".git" / "HEAD"
+            if head.exists():
+                ref = head.read_text(encoding="utf-8").strip()
+                if ref.startswith("ref:"):
+                    pointer = head.parent / ref.split(" ", 1)[1]
+                    if pointer.exists():
+                        return pointer.read_text(encoding="utf-8").strip()[:12]
+                    return ref.split(" ", 1)[1].rsplit("/", 1)[-1][:12]
+                return ref[:12]
+        except OSError:
+            pass
+        return ""
 
     def _respect_deadline(self, job: dict[str, Any]) -> None:
         """Time the job out before running if its deadline already passed."""
@@ -227,7 +334,13 @@ class IngestWorker:
         try:
             self._respect_deadline(job)
             result = self._run_handler(job, job_type)
-            episode_id = str(result["episode_id"])
+            # Not every job produces an episode: a validate job reports over a
+            # selection and a build reports over a dataset. This used to index
+            # `result["episode_id"]` unconditionally, so any job type whose result
+            # was not shaped like an ingest result raised KeyError on success and
+            # was recorded as a failure - a job that did its whole job and was
+            # then marked broken for saying so in a different shape.
+            episode_id = str(result.get("episode_id") or "")
             completed = self.catalog.finish_job(str(job["id"]), JobState.SUCCEEDED, result=result)
             stage_seconds = time.perf_counter() - started
             self.metrics.job_run_time(

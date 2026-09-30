@@ -4,6 +4,17 @@ Style decisions: ADR [0009](../decisions/0009-api-style.md) (FastAPI, HTTP+JSON,
 OpenAPI JSON committed at `docs/api/openapi.json` and drift-checked in CI (MVP criterion). All endpoints are under
 `/api/v1` unless noted.
 
+**No interactive contract viewer.** `/docs` and `/redoc` return 404: the browser surface is the operator UI at
+`/ui`, and a generated Swagger page does not belong in an operator's navigation (ADR 0021). `/openapi.json`
+remains, because the drift check is a machine consumer. Read the committed `docs/api/openapi.json` directly, or
+run `uv run python scripts/openapi_contract.py --check`.
+
+**Error representation splits by caller, not by content** (ADR 0021). A request to a `/ui/...` path gets a
+full HTML error page carrying the status, the detail and the `correlation_id`, rendered in the operator's
+selected theme with a retry control. A request to `/api/v1/...` gets the unchanged JSON problem object. Same
+status code, same correlation id, different representation — a mistyped bookmark should not be a wall of raw
+JSON with no way back.
+
 ## Resource model
 
 | Resource | Key fields | Notes |

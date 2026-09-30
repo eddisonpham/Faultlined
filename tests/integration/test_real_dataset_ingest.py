@@ -199,7 +199,12 @@ def _validate(
     )
     finished = _run(catalog, worker, job["id"])
     assert finished["state"] == JobState.SUCCEEDED.value, finished.get("error")
-    return finished["result"]
+    # A validate job reports over its whole selection. These tests each submit
+    # exactly one episode, so unwrap here rather than making every assertion in
+    # every test reach through a shape that exists to describe a batch.
+    result = finished["result"]
+    assert result["checked"] == 1, result
+    return result["episodes"][0]
 
 
 def _results_for(catalog: PostgresCatalog, episode_id: str, profile_name: str) -> list[Any]:

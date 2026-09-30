@@ -12,11 +12,14 @@ from uuid import uuid4
 
 from fastapi import FastAPI, Header, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
+from pydantic import ValidationError
 
 from data_engine.api.errors import install_error_handling
 from data_engine.api.schemas import (
     AnyJobRequest,
     ArtifactListResponse,
+    BuildDetailResponse,
+    BuildListResponse,
     ContractListResponse,
     ContractPayload,
     ContractRequest,
@@ -30,6 +33,7 @@ from data_engine.api.schemas import (
     IncidentListResponse,
     IncidentPayload,
     IncidentSummaryResponse,
+    IngestPayload,
     JobListResponse,
     JobReportResponse,
     JobResponse,
@@ -41,8 +45,11 @@ from data_engine.api.schemas import (
     SliceListResponse,
     SliceManifestResponse,
     SliceUpdateRequest,
+    SourceIngestPayload,
     StatusResponse,
+    SubmitJobRequest,
     SubmitSourceJobRequest,
+    SyntheticEpisode,
     TickResponse,
 )
 from data_engine.catalog.database import initialize_schema
@@ -66,8 +73,8 @@ from data_engine.observability.aggregate import (
 from data_engine.observability.metrics import JsonlMetricSink, RuntimeMetrics
 from data_engine.observability.telemetry import sample_resources
 from data_engine.web import (
-    DEFAULT_THEME,
     THEMES,
+    app_script,
     artifacts_fragment,
     artifacts_page,
     episode_detail_page,
@@ -90,6 +97,7 @@ from data_engine.web import (
     slices_page,
     status_fragment,
     status_page,
+    theme_or_default,
     vendor_css,
 )
 from data_engine.web.pages import EPISODE_FLAGS, EPISODE_STATES
@@ -98,9 +106,24 @@ from data_engine.web.pages import EPISODE_FLAGS, EPISODE_STATES
 _SAFE_STYLESHEET = re.compile(r"(core|theme-[a-z0-9-]+)")
 
 
-def _theme(name: str | None) -> str:
-    """Only vendored themes are selectable; anything else falls back to the default."""
-    return name if name in THEMES else DEFAULT_THEME
+def _first_message(exc: ValidationError) -> str:
+    """The first validation failure, as a sentence a person can act on.
+
+    A raw Pydantic error is a JSON object with a type code, a field path and a
+    context dict. It is the right thing for a machine and the wrong thing for a
+    form: the field path has to be recovered, and the message dropped, before it
+    becomes anything a reader can use.
+    """
+    for error in exc.errors():
+        location = ".".join(str(part) for part in error.get("loc", ()) if part != "payload")
+        message = str(error.get("msg", "invalid value"))
+        # Pydantic prefixes constraint failures with the constraint name, which
+        # means nothing on its own.
+        for prefix in ("Value error, ", "String should match pattern "):
+            if message.startswith(prefix):
+                message = message[len(prefix) :]
+        return f"{location}: {message}" if location else message
+    return "That submission was not valid."
 
 
 def _parse_state(state: str | None) -> JobState | None:
@@ -214,6 +237,11 @@ def create_app(
         title="Faultlined",
         version="0.1.0",
         lifespan=lifespan,
+        # The browser surface is the operator UI, not a developer contract viewer.
+        # /openapi.json stays: the committed contract check still needs it, and it
+        # is a machine endpoint rather than a page. See agents/decisions/0021.
+        docs_url=None,
+        redoc_url=None,
     )
     app.state.catalog = app_catalog
     app.state.monitor = MonitorService(
@@ -238,13 +266,14 @@ def create_app(
     def root() -> dict[str, object]:
         """Point a first-time visitor somewhere useful.
 
-        The platform has no web UI yet (frontend is a later stage), so a bare `/`
-        would otherwise be a blank 404 in the browser.
+        `/` is JSON rather than a redirect because a bare 404 in the browser was
+        the original complaint; the UI is one field away and the API callers get
+        the machine-readable map they expect.
         """
         return {
             "service": "faultlined",
-            "description": "Local-first robot episode data engine. API only; no web UI yet.",
-            "docs": "/docs",
+            "description": "Local-first robot episode data engine.",
+            "ui": "/ui",
             "openapi": "/openapi.json",
             "health": "/api/v1/health",
             "endpoints": {
@@ -269,18 +298,21 @@ def create_app(
     ) -> dict[str, Any]:
         """Queue an ingest job.
 
-        Two request shapes, one endpoint: `ingest` carries an episode in the request
-        body (the synthetic contract), `ingest_source` names a dataset on disk and
-        lets a reader interpret it. They are separate types rather than one optional
-        payload because "either a body or a path" is exactly the kind of either/or that
-        a typo turns into a confusing 422.
+        Four request shapes, one endpoint: `ingest` carries an episode in the
+        request body (the synthetic contract), `ingest_source` names a dataset on
+        disk and lets a reader interpret it, `validate` and `build` name a
+        selection of episodes already in the catalog. They are separate types
+        rather than one optional payload because "either a body or a path" is
+        exactly the kind of either/or that a typo turns into a confusing 422.
         """
         correlation_id = request.state.correlation_id or str(uuid4())
         catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
-        if isinstance(body, SubmitSourceJobRequest):
-            payload = body.payload.model_dump(mode="json")
-        else:
+        if isinstance(body, SubmitJobRequest):
             payload = {"episode": body.payload.episode.model_dump(mode="json")}
+        else:
+            # Source, validate, and build payloads are already flat and
+            # self-describing; there is no episode to unwrap.
+            payload = body.payload.model_dump(mode="json")
         row, created = catalog_for_request.submit_job(
             body.type,
             payload,
@@ -392,6 +424,12 @@ def create_app(
     def ui_layout_css() -> Response:
         return Response(layout_css(), media_type="text/css; charset=utf-8")
 
+    @app.get("/ui/app.js")
+    def ui_app_js() -> Response:
+        """The client runtime. Served as a route rather than a static mount so the
+        UI stays one Python-owned directory with no extra file-serving surface."""
+        return Response(app_script(), media_type="text/javascript; charset=utf-8")
+
     @app.get("/ui/vendor/terminal-ui/{name}.css")
     def ui_vendor_css(name: str) -> Response:
         """Serve the vendored terminal stylesheet. See web/vendor/terminal-ui/NOTICE.md."""
@@ -414,7 +452,7 @@ def create_app(
         model = _status_model(catalog_for_request)
         if x_fragment:
             return HTMLResponse(status_fragment(model))
-        return HTMLResponse(status_page(model, _theme(theme)))
+        return HTMLResponse(status_page(model, theme_or_default(theme)))
 
     @app.get("/ui/jobs", response_class=HTMLResponse)
     def ui_jobs(
@@ -428,21 +466,110 @@ def create_app(
         summaries = {"items": [_job_summary(row) for row in rows]}
         if x_fragment:
             return HTMLResponse(jobs_fragment(summaries))
-        return HTMLResponse(jobs_page(summaries, state, _theme(theme)))
+        return HTMLResponse(jobs_page(summaries, state, theme_or_default(theme)))
 
     @app.get("/ui/jobs/{job_id}", response_class=HTMLResponse)
     def ui_job_detail(job_id: str, request: Request, theme: str | None = None) -> HTMLResponse:
         catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
         job = catalog_for_request.get_job(job_id)
         if job is None:
-            return HTMLResponse(
-                '<!doctype html><p class="de-empty">// no such job. '
-                '<a href="/ui/jobs">back to jobs</a></p>',
-                status_code=404,
-            )
+            # Raised, not returned: the shared handler renders the full error page
+            # in the requested theme, which a hand-rolled one-line body cannot.
+            raise HTTPException(status_code=404, detail=f"No job {job_id}.")
         produced = catalog_for_request.episodes_produced_by(job_id)
         report = catalog_for_request.job_report(job_id)
-        return HTMLResponse(job_detail_page(job, _theme(theme), produced, report))
+        return HTMLResponse(job_detail_page(job, theme_or_default(theme), produced, report))
+
+    @app.post("/ui/jobs")
+    async def ui_submit_job(request: Request) -> Response:
+        """Queue an ingest job from the browser form.
+
+        The form is parsed by hand rather than with ``Form(...)`` because that
+        would pull in ``python-multipart`` for a single urlencoded body - a new
+        dependency, on the dependency-free path ADR 0014 is built around, to save
+        three lines of ``urllib.parse``.
+
+        The payload is built and then validated through the *same* Pydantic
+        models the JSON endpoint uses. A form is a second front door to the same
+        door, and a second front door with its own weaker validation is how a
+        UI ends up able to create jobs the API would refuse.
+
+        On a bad submission this re-renders the page with the error inline and
+        the typed values preserved, rather than redirecting: losing what someone
+        typed because of one bad field is the fastest way to make a form feel
+        hostile. The redirect on success is 303, so a refresh does not queue the
+        same job twice.
+        """
+        from urllib.parse import parse_qs
+
+        raw = parse_qs((await request.body()).decode("utf-8", "replace"))
+        kind = (raw.get("kind") or ["episode"])[0].strip() or "episode"
+        source = (raw.get("source") or [""])[0].strip()
+        values = {
+            "kind": kind,
+            "task": (raw.get("task") or [""])[0].strip(),
+            "robot": (raw.get("robot") or [""])[0].strip(),
+            "frames": (raw.get("frames") or [""])[0].strip(),
+            "source": source,
+        }
+        theme = theme_or_default((raw.get("theme") or [""])[0] or None)
+
+        def fail(message: str) -> HTMLResponse:
+            model = _status_model(cast(PostgresCatalog, request.app.state.catalog))
+            model["ingest_error"] = message
+            model["ingest_values"] = values
+            return HTMLResponse(status_page(model, theme))
+
+        try:
+            body: AnyJobRequest
+            if kind == "path" or (not values["task"] and source):
+                if not source:
+                    return fail("A dataset path is required when loading from disk.")
+                body = SubmitSourceJobRequest(
+                    type="ingest_source", payload=SourceIngestPayload(source=source)
+                )
+            else:
+                if not values["task"] or not values["robot"]:
+                    return fail("A task and a robot are both required.")
+                try:
+                    frames = int(values["frames"] or "3")
+                except ValueError:
+                    return fail("Frames must be a whole number.")
+                if not 1 <= frames <= 10_000:
+                    return fail("Frames must be between 1 and 10000.")
+                # A deterministic ramp: the form is a way to get data *in*, not a
+                # sensor. Real data arrives by path or by the JSON endpoint.
+                step = 0.1
+                stamps = [round(i * step, 6) for i in range(frames)]
+                body = SubmitJobRequest(
+                    type="ingest",
+                    payload=IngestPayload(
+                        episode=SyntheticEpisode(
+                            task=values["task"],
+                            robot=values["robot"],
+                            timestamps=stamps,
+                            observations=[[round(i * 0.01, 6)] for i in range(frames)],
+                            actions=[[round(i * 0.02, 6)] for i in range(frames)],
+                        )
+                    ),
+                )
+        except ValidationError as exc:
+            return fail(_first_message(exc))
+
+        payload = (
+            body.payload.model_dump(mode="json")
+            if isinstance(body, SubmitSourceJobRequest)
+            else {"episode": body.payload.episode.model_dump(mode="json")}
+        )
+        catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
+        row, _created = catalog_for_request.submit_job(
+            body.type,
+            payload,
+            None,
+            str(getattr(request.state, "correlation_id", "") or uuid4()),
+        )
+        suffix = f"?theme={theme}" if theme in THEMES else ""
+        return RedirectResponse(f"/ui/jobs/{row['id']}{suffix}", status_code=303)
 
     @app.post("/ui/jobs/{job_id}/cancel")
     def ui_cancel_job(job_id: str, request: Request, theme: str | None = None) -> RedirectResponse:
@@ -461,6 +588,29 @@ def create_app(
         suffix = f"?theme={theme}" if theme in THEMES else ""
         return RedirectResponse(f"/ui/jobs/{job_id}{suffix}", status_code=303)
 
+    @app.get("/api/v1/builds", response_model=BuildListResponse)
+    def list_builds(request: Request, limit: int = 50) -> dict[str, Any]:
+        catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
+        items = catalog_for_request.list_builds(limit=max(1, min(limit, 200)))
+        return {"items": items}
+
+    @app.get("/api/v1/builds/{build_hash}", response_model=BuildDetailResponse)
+    def get_build(build_hash: str, request: Request) -> dict[str, Any]:
+        catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
+        row = catalog_for_request.get_build(build_hash)
+        if row is None:
+            raise HTTPException(status_code=404, detail=f"No build {build_hash}.")
+        # The manifest and the membership are returned together: a build whose
+        # manifest cannot be read back is not reproducible, which is the one
+        # property it exists to have.
+        return {**row, "episodes": catalog_for_request.build_episodes(build_hash)}
+
+    @app.get("/api/v1/episodes/{episode_id}/builds", response_model=BuildListResponse)
+    def builds_for_episode(episode_id: str, request: Request) -> dict[str, Any]:
+        """The reverse lineage direction (FR-008): what contains this episode."""
+        catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
+        return {"items": catalog_for_request.builds_for_episode(episode_id)}
+
     @app.get("/ui/artifacts", response_class=HTMLResponse)
     def ui_artifacts(
         request: Request,
@@ -471,7 +621,7 @@ def create_app(
         items = {"items": catalog_for_request.list_artifacts(limit=50)}
         if x_fragment:
             return HTMLResponse(artifacts_fragment(items))
-        return HTMLResponse(artifacts_page(items, _theme(theme)))
+        return HTMLResponse(artifacts_page(items, theme_or_default(theme)))
 
     @app.get("/ui/vendor/departure-mono/DepartureMono-Regular.woff2")
     def ui_font() -> Response:
@@ -492,7 +642,7 @@ def create_app(
         }
         if x_fragment:
             return HTMLResponse(failures_fragment(model))
-        return HTMLResponse(failures_page(model, _theme(theme)))
+        return HTMLResponse(failures_page(model, theme_or_default(theme)))
 
     @app.get("/ui/slices", response_class=HTMLResponse)
     def ui_slices(
@@ -504,7 +654,7 @@ def create_app(
         model = {"items": catalog_for_request.list_slices(limit=50)}
         if x_fragment:
             return HTMLResponse(slices_fragment(model))
-        return HTMLResponse(slices_page(model, _theme(theme)))
+        return HTMLResponse(slices_page(model, theme_or_default(theme)))
 
     @app.get("/ui/metrics", response_class=HTMLResponse)
     def ui_metrics(
@@ -518,7 +668,7 @@ def create_app(
         model = _metrics_model(configured, catalog_for_request, window_seconds)
         if x_fragment:
             return HTMLResponse(metrics_fragment(model))
-        return HTMLResponse(metrics_page(model, _theme(theme)))
+        return HTMLResponse(metrics_page(model, theme_or_default(theme)))
 
     @app.get("/ui/episodes", response_class=HTMLResponse)
     def ui_episodes(
@@ -541,7 +691,7 @@ def create_app(
         }
         if x_fragment:
             return HTMLResponse(episodes_fragment(model))
-        return HTMLResponse(episodes_page(model, state, flag, _theme(theme)))
+        return HTMLResponse(episodes_page(model, state, flag, theme_or_default(theme)))
 
     @app.get("/ui/episodes/{episode_id}", response_class=HTMLResponse)
     def ui_episode_detail(
@@ -550,14 +700,12 @@ def create_app(
         catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
         episode = catalog_for_request.get_episode(episode_id)
         if episode is None:
-            return HTMLResponse(
-                '<!doctype html><p class="de-empty">// no such episode. '
-                '<a href="/ui/episodes">back to episodes</a></p>',
-                status_code=404,
-            )
+            raise HTTPException(status_code=404, detail=f"No episode {episode_id}.")
         quality = catalog_for_request.get_episode_quality(episode_id)
         validations = catalog_for_request.get_validation_results(episode_id)
-        return HTMLResponse(episode_detail_page(episode, quality, _theme(theme), validations))
+        return HTMLResponse(
+            episode_detail_page(episode, quality, theme_or_default(theme), validations)
+        )
 
     @app.get("/ui/insights", response_class=HTMLResponse)
     def ui_insights(
@@ -570,7 +718,7 @@ def create_app(
         model = catalog_for_request.quality_summary()
         if x_fragment:
             return HTMLResponse(insights_fragment(model))
-        return HTMLResponse(insights_page(model, _theme(theme)))
+        return HTMLResponse(insights_page(model, theme_or_default(theme)))
 
     @app.get("/api/v1/episodes", response_model=EpisodeListResponse)
     def list_episodes_api(
@@ -910,7 +1058,7 @@ def create_app(
 
     @app.get("/ui/incidents", response_class=HTMLResponse)
     def incidents_page_route(request: Request, theme: str | None = None) -> HTMLResponse:
-        return HTMLResponse(incidents_page(_incidents_model(request), _theme(theme)))
+        return HTMLResponse(incidents_page(_incidents_model(request), theme_or_default(theme)))
 
     @app.get("/ui/incidents/fragment", response_class=HTMLResponse)
     def incidents_fragment_route(request: Request) -> HTMLResponse:

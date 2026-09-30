@@ -1,3 +1,4 @@
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -59,11 +60,22 @@ def test_health_route_returns_ok_without_database() -> None:
 
 @pytest.mark.contract
 def test_root_points_a_first_visitor_somewhere_useful() -> None:
-    """The platform has no web UI yet, so `/` must not be a blank 404."""
+    """`/` must not be a blank 404, and it must point at the operator UI (ADR 0021)."""
     body = _client().get("/").json()
     assert body["service"] == "faultlined"
-    assert body["docs"] == "/docs"
+    assert body["ui"] == "/ui"
+    assert "docs" not in body, "the Swagger page is gone; the contract is a file, not a page"
     assert body["endpoints"]["submit_job"] == "POST /api/v1/jobs"
+
+
+@pytest.mark.contract
+def test_swagger_ui_is_not_served() -> None:
+    """The browser surface is the operator UI. `/docs` must not reappear by default."""
+    client = _client()
+    assert client.get("/docs").status_code == 404
+    assert client.get("/redoc").status_code == 404
+    # The machine contract stays, because the drift check needs it.
+    assert client.get("/openapi.json").status_code == 200
 
 
 @pytest.mark.contract
@@ -292,6 +304,127 @@ class ListingCatalogStub(CatalogStub):
     def request_cancel(self, job_id: str) -> dict[str, Any]:
         self.canceled = job_id
         return {"id": job_id, "state": "canceled"}
+
+
+class IngestCatalogStub(ListingCatalogStub):
+    """Records what the form queued, and reports a system with nothing in it."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.submitted: list[tuple[str, dict[str, Any]]] = []
+        self.states = []
+
+    def count_jobs(self, state: Any) -> int:
+        return 0
+
+    def count_artifacts(self) -> int:
+        return 0
+
+    def count_episodes(self) -> int:
+        return 0
+
+    def submit_job(
+        self,
+        job_type: str,
+        payload: dict[str, Any],
+        key: Any,
+        correlation_id: str,
+        **kwargs: Any,
+    ) -> tuple[dict[str, Any], bool]:
+        self.submitted.append((job_type, payload))
+        return {"id": "job-new", "type": job_type, "state": "queued"}, True
+
+
+def _ingest_client() -> tuple[TestClient, IngestCatalogStub]:
+    app = create_app(Settings(_env_file=None), initialize_database=False)
+    catalog = IngestCatalogStub()
+    app.state.catalog = catalog
+    return TestClient(app), catalog
+
+
+@pytest.mark.contract
+def test_the_ingest_form_queues_a_job_from_the_browser() -> None:
+    """The form is the only way in, so it has to actually work without a client."""
+    client, catalog = _ingest_client()
+
+    response = client.post(
+        "/ui/jobs",
+        data={"kind": "episode", "task": "pick_place", "robot": "arm", "frames": "3"},
+        follow_redirects=False,
+    )
+
+    # 303, not 302: a refresh must not queue the same job a second time.
+    assert response.status_code == 303
+    assert response.headers["location"].startswith("/ui/jobs/job-new")
+    assert len(catalog.submitted) == 1
+    kind, payload = catalog.submitted[0]
+    assert kind == "ingest"
+    episode = payload["episode"]
+    # The schema's own invariant, so the form cannot build an episode the JSON
+    # endpoint would reject.
+    assert len(episode["timestamps"]) == len(episode["observations"]) == 3
+    assert len(episode["actions"]) == 3
+
+
+@pytest.mark.contract
+def test_the_ingest_form_accepts_a_dataset_path() -> None:
+    client, catalog = _ingest_client()
+
+    response = client.post(
+        "/ui/jobs",
+        data={"kind": "path", "source": "data/lerobot/demo"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    kind, payload = catalog.submitted[-1]
+    assert kind == "ingest_source"
+    assert payload["source"] == "data/lerobot/demo"
+
+
+@pytest.mark.contract
+def test_a_bad_ingest_submission_keeps_what_was_typed() -> None:
+    """Losing the input on a validation error is what makes a form feel broken."""
+    client, catalog = _ingest_client()
+
+    response = client.post(
+        "/ui/jobs",
+        data={"kind": "episode", "task": "pick", "robot": "", "frames": "3"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 200, "a bad submission must re-render, not redirect"
+    assert "task and a robot" in response.text
+    assert 'value="pick"' in response.text, "the typed value must survive"
+    assert catalog.submitted == [], "an invalid submission must not queue anything"
+
+
+@pytest.mark.contract
+def test_the_ingest_form_rejects_a_nonsense_frame_count() -> None:
+    client, catalog = _ingest_client()
+
+    for bad in ("abc", "0", "-4", "100000"):
+        response = client.post(
+            "/ui/jobs",
+            data={"kind": "episode", "task": "t", "robot": "r", "frames": bad},
+            follow_redirects=False,
+        )
+        assert response.status_code == 200, bad
+        assert "queue ingest job" in response.text, bad
+    assert catalog.submitted == []
+
+
+@pytest.mark.contract
+def test_the_ingest_form_does_not_pull_in_a_dependency() -> None:
+    """Form(...) would require python-multipart for one urlencoded body.
+
+    ADR 0014 is a no-build, no-extra-dependency frontend; a new runtime package
+    to save three lines of urllib.parse is not a trade worth making.
+    """
+    source = Path("src/data_engine/api/app.py").read_text(encoding="utf-8")
+    assert "from fastapi import" in source and "Form" not in source.split("\n")[12]
+    assert "parse_qs" in source
+    assert "multipart" not in Path("pyproject.toml").read_text(encoding="utf-8").lower()
 
 
 @pytest.mark.contract
