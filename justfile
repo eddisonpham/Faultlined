@@ -38,12 +38,24 @@ test:
 test-all:
     uv run --all-extras pytest --cov
 
+# Targeted run while iterating, without the coverage gate: just t <path> [-k expr]
+t *ARGS:
+    uv run --all-extras pytest {{ARGS}} -p no:cacheprovider --no-cov -x -q
+
 # Run benchmarks and compare against committed baselines (phase 06)
 bench *ARGS:
     uv run --all-extras python -m benchmarks.harness {{ARGS}}
 
 # Run the platform locally (API + worker in one process group)
+# Checks the port first: a second `just run` (or a forgotten background server)
+# otherwise dies with a bare WinError 10048, which reads like a bug in this
+# project rather than "something you started earlier is still listening".
+# The check is a script, not a shebang recipe: `#!/usr/bin/env bash` makes `just`
+# resolve the interpreter via `cygpath`, which is missing from a PowerShell PATH
+# that has Git's `bin` but not `usr\bin` - the same trap `windows-shell` above
+# already documents.
 run:
+    uv run --all-extras python scripts/check_port.py
     uv run --all-extras de dev
 
 # Run only the HTTP API
