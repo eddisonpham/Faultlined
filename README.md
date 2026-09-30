@@ -81,7 +81,7 @@ Prefer the terminal? The full API contract is at <http://127.0.0.1:8000/openapi.
 | `just doctor` | Check the database connection |
 | `just reset --yes` | Delete all data and start over |
 | `just test` | Run the tests |
-| `just ci` | Everything CI checks |
+| `just ci` | Every gate: lint, types, tests, hygiene, contract |
 | `just bench` | Run the benchmarks |
 | `just ui-audit` | Check the UI in a real browser (needs `just run` running) |
 | `just --list` | Show every command |

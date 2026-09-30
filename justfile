@@ -119,5 +119,6 @@ api-contract:
 ui-audit *ARGS:
     node scripts/ui_audit.mjs {{ARGS}}
 
-# Everything CI runs
+# Every gate, in one command. There is no hosted runner on this project: this
+# recipe is the gate, and running it before a commit is the whole guarantee.
 ci: lint typecheck test hygiene api-contract
