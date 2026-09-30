@@ -337,6 +337,30 @@ def test_registry_reports_the_formats_it_tried(tmp_path: Path) -> None:
 
 # ------------------------------------------------------------------ real datasets
 
+"""
+The real-dataset assertions deliberately cross-check the reader against the
+dataset's *own published index* rather than against constants copied out of it.
+
+These datasets are live repositories. A hard-coded frame count is only correct
+until somebody re-uploads a shard, at which point the test fails for a reason
+that has nothing to do with the code - and, worse, a truncated download that
+still parses can produce a plausible wrong count that a constant would have
+caught by accident. Reading the expected values from the same index the reader
+reads makes the assertion both stronger (it proves the slicing agrees with the
+dataset's own record of where each episode starts and ends) and immune to the
+dataset changing underneath us.
+"""
+
+
+def _v3_index(root: Path) -> dict[int, dict[str, Any]]:
+    """The published episode index, keyed by episode number."""
+    path = root / "meta" / "episodes" / "chunk-000" / "file-000.parquet"
+    return {int(row["episode_index"]): row for row in pq.read_table(path).to_pylist()}
+
+
+def _v3_info(root: Path) -> dict[str, Any]:
+    return json.loads((root / "meta" / "info.json").read_text(encoding="utf-8"))
+
 
 @pytest.mark.network
 def test_real_v3_dataset_reads_the_published_so101_episode(
@@ -349,12 +373,18 @@ def test_real_v3_dataset_reads_the_published_so101_episode(
     assert extraction.format == "lerobot-v3"
     assert extraction.format_version == "v3.0"
     assert extraction.robot_type == "so100_follower"
-    assert extraction.fps == pytest.approx(30.0)
-    assert extraction.task == "pink lego brick into the transparent box"
-    assert extraction.frame_count == 303
-    assert extraction.duration_seconds == pytest.approx(10.067, abs=0.01)
-    assert extraction.dataset["total_episodes"] == 50
+    assert extraction.fps == pytest.approx(float(_v3_info(root)["fps"]))
     assert extraction.dataset["has_video"] is True
+
+    # The slice is exactly the row range the dataset declares for this episode.
+    record = _v3_index(root)[0]
+    assert extraction.frame_count == record["length"]
+    assert extraction.frame_count > 1
+    assert extraction.task == next(iter(record["tasks"]))
+    assert extraction.duration_seconds == pytest.approx(
+        (extraction.frame_count - 1) / extraction.fps, abs=0.01
+    )
+    assert extraction.dataset["total_episodes"] == len(_v3_index(root))
 
     names = {c.name for c in extraction.channels}
     assert {"action", "observation.state"} <= names
@@ -367,11 +397,18 @@ def test_real_v3_episodes_have_distinct_lengths(
     """Guards the row-range slicing against the worst bug: a constant full-file read."""
     root = real_lerobot_dataset("v3")
     reader = LeRobotReader()
+    index = _v3_index(root)
+    wanted = sorted(index)[:: max(1, len(index) // 3)][:3]
+    assert len(wanted) == 3, "the published index should offer three spread episodes"
+
     lengths = {
-        episode: reader.read(root, episode_key=str(episode)).frame_count for episode in (0, 7, 49)
+        episode: reader.read(root, episode_key=str(episode)).frame_count for episode in wanted
     }
 
-    assert lengths[0] == 303
+    for episode, length in lengths.items():
+        assert length == index[episode]["length"], (
+            f"episode {episode} read {length} rows, the dataset declares {index[episode]['length']}"
+        )
     assert len(set(lengths.values())) == 3, f"episodes must not all read the same rows: {lengths}"
 
 
@@ -385,7 +422,16 @@ def test_real_v2_dataset_reads_with_a_different_embodiment(
 
     assert extraction.format == "lerobot-v2"
     assert extraction.format_version == "v2.1"
-    assert extraction.robot_type == "KIA Niro EV 2023"
-    assert extraction.frame_count == 460
-    assert extraction.task.startswith("Follow the waypoints")
+    # The point of this fixture: a different robot, so the reader cannot be
+    # assuming the SO-101 schema it was built against.
+    assert extraction.robot_type != "so100_follower"
+
+    records = [
+        json.loads(line)
+        for line in (root / "meta" / "episodes.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    record = next(row for row in records if int(row["episode_index"]) == 0)
+    assert extraction.frame_count == record["length"]
+    assert extraction.task == record["tasks"][0]
     assert extraction.metadata()["channel_stats"]["action.continuous"]["count"] > 0

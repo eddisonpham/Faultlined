@@ -16,6 +16,7 @@ still runs on a plane.
 
 from __future__ import annotations
 
+import http.client
 import os
 import time
 import urllib.error
@@ -99,8 +100,26 @@ def postgres_test_dsn() -> str:
     return make_conninfo(**{**info, "dbname": test_dbname})
 
 
+class FixtureUnavailable(RuntimeError):
+    """A real-data fixture could not be fetched intact.
+
+    A separate exception rather than a bare ``pytest.skip`` inside the fetcher, so
+    the retry logic is testable without a pytest outcome escaping through it.
+    """
+
+
 def _download(url: str, target: Path) -> None:
-    """Fetch one file, retrying transient resets. A hard failure skips, never fails."""
+    """Fetch one file, retrying transient resets. Raises if it cannot be had whole.
+
+    Truncation is the failure this guards hardest. A CDN that drops the
+    connection mid-body raises ``IncompleteRead`` - an ``http.client`` exception,
+    not an ``OSError`` - so it used to escape the retry entirely and error the
+    run. A body that arrives short *without* an error used to be worse: it was
+    written as if complete, and the failure surfaced three layers down as a
+    Parquet error or, worse, as a plausible-looking wrong row count. Both now
+    fail the attempt and retry, because a fixture that is not the fixture is
+    worse than no fixture.
+    """
     target.parent.mkdir(parents=True, exist_ok=True)
     temporary = target.with_suffix(target.suffix + ".partial")
     last: Exception | None = None
@@ -110,15 +129,25 @@ def _download(url: str, target: Path) -> None:
                 url, headers={"User-Agent": USER_AGENT, "Connection": "close"}
             )
             with urllib.request.urlopen(request, timeout=DOWNLOAD_TIMEOUT_SECONDS) as response:
-                temporary.write_bytes(response.read())
-        except (urllib.error.URLError, OSError, TimeoutError) as exc:
+                declared = response.headers.get("Content-Length")
+                try:
+                    body = response.read()
+                except http.client.IncompleteRead as exc:
+                    # The body stopped early. Reported as an OSError so every
+                    # way of arriving short - reset mid-transfer, declared length
+                    # not met - retries and reports the same reason.
+                    raise OSError(f"truncated body: {exc}") from exc
+            if declared is not None and len(body) != int(declared):
+                raise OSError(f"truncated body: {len(body)} of {declared} bytes")
+            temporary.write_bytes(body)
+        except (urllib.error.URLError, OSError, TimeoutError, http.client.HTTPException) as exc:
             last = exc
             time.sleep(DOWNLOAD_BACKOFF_SECONDS)
             continue
         temporary.replace(target)
         return
     temporary.unlink(missing_ok=True)
-    pytest.skip(f"real-data fixture unavailable ({url}): {last}")
+    raise FixtureUnavailable(f"{url}: {last}")
 
 
 @pytest.fixture(scope="session")
@@ -134,7 +163,14 @@ def real_lerobot_dataset() -> Callable[[str], Path]:
             target = root / relative
             if target.exists() and target.stat().st_size > 0:
                 continue
-            _download(HUB.format(repo=repo, path=relative), target)
+            try:
+                _download(HUB.format(repo=repo, path=relative), target)
+            except FixtureUnavailable as exc:
+                # Skipped, never failed: the Hub being unreachable or serving a
+                # truncated body is a fact about the network, not about the code
+                # under test. A red build that says "Hugging Face was rude" sends
+                # the reader to the wrong place entirely.
+                pytest.skip(f"real-data fixture unavailable ({exc})")
         return root
 
     return fetch
