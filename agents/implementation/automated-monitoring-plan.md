@@ -329,7 +329,16 @@ before the first chaos run, not discovered afterwards.
 
 The last row is the honest price of this design. Every report carries that distinction in its header.
 
-### 6.9 Reported metrics
+### 6.9 Harness first increment (2026-09-30)
+
+`monitoring/chaos.py` implements the replay half of this section: injection
+seams, labeled windows, per-window scoring, and sequence replay with the real
+baselines book ([EXP-0006](../experiments/0006-chaos-harness-first-increment.md)).
+What remains from §6 before any accuracy figure: the scripted operator action
+space (YAML), the fault-injection table run against `just run`, and
+clean-replicate null bands.
+
+### 6.10 Reported metrics
 
 | Metric | Why it matters |
 |---|---|
