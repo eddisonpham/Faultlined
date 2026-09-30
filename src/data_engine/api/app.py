@@ -387,11 +387,12 @@ def create_app(
         catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
         parsed_state = _parse_state(state)
         parsed_before = _parse_cursor(before)
+        page = max(1, min(limit, 200))
         rows = catalog_for_request.list_jobs(
-            state=parsed_state, job_type=type, limit=min(limit, 200), before=parsed_before
+            state=parsed_state, job_type=type, limit=page, before=parsed_before
         )
         items = [_job_summary(row) for row in rows]
-        next_before = rows[-1]["created_at"] if len(rows) == min(limit, 200) else None
+        next_before = rows[-1]["created_at"] if len(rows) == page else None
         return {"items": items, "next_before": next_before}
 
     @app.get("/api/v1/artifacts", response_model=ArtifactListResponse)
@@ -400,10 +401,9 @@ def create_app(
     ) -> dict[str, Any]:
         """Newest-first page of content-addressed artifacts with their referencing episodes."""
         catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
-        rows = catalog_for_request.list_artifacts(
-            limit=min(limit, 200), before=_parse_cursor(before)
-        )
-        next_before = rows[-1]["created_at"] if len(rows) == min(limit, 200) else None
+        page = max(1, min(limit, 200))
+        rows = catalog_for_request.list_artifacts(limit=page, before=_parse_cursor(before))
+        next_before = rows[-1]["created_at"] if len(rows) == page else None
         return {"items": rows, "next_before": next_before}
 
     @app.get("/api/v1/status", response_model=StatusResponse)
@@ -709,7 +709,7 @@ def create_app(
         catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
         model = {
             "summary": catalog_for_request.failure_summary(),
-            "items": catalog_for_request.failing_episodes(limit=min(limit, 200)),
+            "items": catalog_for_request.failing_episodes(limit=max(1, min(limit, 200))),
         }
         if x_fragment:
             return HTMLResponse(failures_fragment(model))

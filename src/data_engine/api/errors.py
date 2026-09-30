@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import string
 import uuid
 from typing import Any
 
@@ -21,11 +22,30 @@ from data_engine.web import error_page, theme_or_default
 
 logger = logging.getLogger(__name__)
 
+#: Characters allowed in an echoed ``X-Correlation-Id``: printable ASCII with no
+#: backslash, so a client header can never split the response's header block
+#: (CR/LF) or smuggle control bytes through what is, after all, our response.
+_CORRELATION_ID_CHARS = frozenset(string.ascii_letters + string.digits + "-_.:/+=@,; ")
+CORRELATION_ID_MAX_LENGTH = 200
+
+
+def safe_correlation_id(raw: str | None) -> str:
+    """Honor the caller's correlation id when it is safe to echo; issue one otherwise.
+
+    The id is reflected on every response, so a hostile value must be replaced
+    wholesale rather than escaped or trimmed: a mangled id is no longer the
+    caller's id, and half-keeping it would make the echo lie about which request
+    a log line belongs to.
+    """
+    if raw and len(raw) <= CORRELATION_ID_MAX_LENGTH and set(raw) <= _CORRELATION_ID_CHARS:
+        return raw
+    return str(uuid.uuid4())
+
 
 def install_error_handling(app: FastAPI) -> None:
     @app.middleware("http")
     async def correlation_middleware(request: Request, call_next: Any) -> Any:
-        correlation_id = request.headers.get("X-Correlation-Id") or str(uuid.uuid4())
+        correlation_id = safe_correlation_id(request.headers.get("X-Correlation-Id"))
         request.state.correlation_id = correlation_id
         token = correlation_id_var.set(correlation_id)
         try:

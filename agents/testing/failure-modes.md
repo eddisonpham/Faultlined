@@ -26,6 +26,8 @@ in fault-injection/load stages).
 | F14 | Build nondeterminism (NFR-004) | builds | CI test: build → clean → rebuild → identical manifest hash + directory hashes | MVP | planned |
 | F15 | Orphan blobs / stale staging dirs | storage | integration: kill build mid-materialize → `gc` removes orphans | Baseline | planned |
 | F16 | Lineage inconsistency | catalog | unit: edge write + API visibility (`tests/unit/test_catalog_repository.py::test_register_episode_persists_artifact_and_lineage`, `tests/e2e/test_ingest_flow.py::test_api_worker_artifact_and_lineage_end_to_end`); rollback/audit deferred | Baseline | partial: write + read path covered; transactional rollback/audit remains planned |
+| F17 | Hostile `X-Correlation-Id` echoed verbatim | api | contract: CRLF / control-byte / oversized header replaced by a fresh id, honest callers unaffected (`tests/contract/test_api_adversarial.py`) | Baseline | covered: the middleware sanitizes wholesale rather than trimming; found by adversarial probing 2026-09-30 |
+| F18 | Unclamped negative `limit` reaches the catalog | api, catalog | contract: recording fake asserts the clamp on jobs/artifacts/UI-failures; explicit-422 routes stay explicit (`tests/contract/test_api_adversarial.py`) | Baseline | covered: `max(1, min(limit, 200))` on the clamp-style routes; found by adversarial probing 2026-09-30 |
 
 Additional classes required by [../spec/00-original-specification.md](../spec/00-original-specification.md) §6 to be
 disaggregated here as implementation reveals them: network failure (S3-tier trigger era), duplicate *data* (same
