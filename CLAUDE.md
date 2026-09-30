@@ -62,5 +62,5 @@ Never commit large data, model weights, or `.env`.
 
 ## Current stage
 
-MVP. Scaffolding completed and tagged `scaffold-complete` on 2026-09-28; the authorized benchmark
+Production baseline (stage 3), opened 2026-09-30: chaos harness first increment (EXP-0006), heavy-load campaign + sink tail read (EXP-0007), adversarial API hardening (F17/F18). MVP completed and scaffolding tagged `scaffold-complete` on 2026-09-28; the authorized benchmark
 baseline is committed and the clean-clone run is green. See [review](agents/reviews/2026-09-28-scaffolding.md) and [handoff](agents/HANDOFF.md).

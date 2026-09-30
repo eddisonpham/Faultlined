@@ -141,6 +141,21 @@ the run, before anyone read the logs.
 **Update 2026-09-30 (stage 3b: the bottleneck, the trace, and what a slice drops).** Three
 follow-ups landed, each measured or pinned before it was called done.
 
+**Update 2026-09-30 (production-baseline opens: harness, hardening, scale).** Five slices, each committed with
+its docs: the **chaos harness first increment** (`monitoring/chaos.py`,
+[EXP-0006](experiments/0006-chaos-harness-first-increment.md)) - replay seams plus labeled window scoring
+through the unmodified tick pipeline; no accuracy figure yet, the full §6 campaign remains open. The **e2e
+driver moved and hardened** - `scripts/verify_e2e.py` (was gitignored under `var/run/`) now refuses a populated
+catalog with the exact remediation, stops cleanly instead of tracebacking, and exits nonzero so CI can drive
+it; verified live 145/0 from empty. The **heavy-load campaign**
+([EXP-0007](experiments/0007-heavy-load-and-sink-tail-read.md)): 30k-frame quality and an hour-long 42.9 MiB
+MCAP ingest are both linear; 500k-record aggregation fired B-015's revisit condition and exposed the real
+hazard - `read_metric_records` parsed the whole sink per monitor tick - now tail-read in chunks so cost is the
+window, not the history. **Adversarial API probing** found two shipped defects, fixed and cataloged (F17/F18):
+the echoed `X-Correlation-Id` accepted CRLF (header injection), and three pages passed negative `limit` to
+PostgreSQL. And `just stop` exists, because a stale server holding port 8000 is why `just run` looked broken.
+Suite: **901 passing**, coverage gate green, mypy strict clean.
+
 **B-019 is closed, and the target it was measured against is not reachable.** The dimension
 layout is now compiled once per message shape instead of rebuilding a path string per numeric
 leaf ([EXP-0005](experiments/0005-mcap-ingest-flatten-plan.md), superseding EXP-0004's baseline):
