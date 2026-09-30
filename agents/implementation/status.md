@@ -1,6 +1,6 @@
 # Implementation Status
 
-Updated 2026-09-29, at the MVP hand-off. **All 27 criteria in the MVP section of [spec/definition-of-done.md](../spec/definition-of-done.md) are now checked with evidence**, which closed two gaps that were open a week earlier: the MCAP reader ([ADR 0022](../decisions/0022-mcap-ingest-reader.md)) and the first real-format benchmark baseline ([EXP-0004](../experiments/0004-mcap-ingest-baseline.md)). The suite is at **659 passing, 91.74% coverage**, contract and hygiene clean, mypy strict-clean over 58 modules.
+Updated 2026-09-29, at the MVP hand-off. **All 27 criteria in the MVP section of [spec/definition-of-done.md](../spec/definition-of-done.md) are now checked with evidence**, which closed two gaps that were open a week earlier: the MCAP reader ([ADR 0022](../decisions/0022-mcap-ingest-reader.md)) and the first real-format benchmark baseline ([EXP-0004](../experiments/0004-mcap-ingest-baseline.md)). The suite is at **673 passing, 91.97% coverage**, contract and hygiene clean, mypy strict-clean over 58 modules.
 
 Two things this table should make obvious rather than hide. **Builds are now real** - a build's identity is the SHA-256 of its own manifest, so rebuild determinism is structural and asserted by test, not a convention. **And MVP delivered no performance claim**: MCAP ingest measures 6.21 MiB/s against a provisional 50 MB/s target, with 51% of the cost in one function of our own (EXP-0004). The next stage starts there, not from a blank sheet.
 

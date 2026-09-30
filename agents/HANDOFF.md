@@ -47,6 +47,34 @@ corrected something we believed:
 
 **What the notifier deliberately does not do yet.** No detection-accuracy figure exists: that needs the chaos harness (plan §6 — scripted operator action space plus fault injection against the real system, with clean-replicate null bands) and it is backlog B-016, so no precision or recall is claimed. Outbound email is unimplemented and disabled pending explicit owner authorization. Coverage of the real fault space is the one number that cannot be obtained, and every report says so in its header.
 
+**Update 2026-09-29 (end-to-end run).** MVP criteria being checked is not the same as the pipeline
+working, so the database was truncated to 12 empty tables, the artifacts and metrics log deleted, and
+the whole thing driven again from nothing across three input formats ([review](reviews/2026-09-29-mvp-end-to-end-run.md)).
+Three things came out of it.
+
+**Five defects had shipped, all in the wiring around correct code.** A build included the
+quarantined episode the validator had just rejected — `BuildPayload`'s own docstring promised the
+opposite and no code implemented it. The build manifest cited its policy by an address that was
+always `""`, because `ValidationProfile.content_hash` was a field nothing ever set. Six read paths
+reported an episode's length from the quality sample, so a 72 600-message MCAP log displayed as an
+816-frame episode — correct for every non-streaming reader, which is why it held. Reverse lineage
+selected four columns against a seven-field schema and returned three permanently null fields. A
+terminal failure spent three attempts and inflated the failure metric enough to trip the notifier.
+All five are fixed, each pinned by a test in `tests/unit/test_end_to_end_defects.py`, and the whole
+sequence was re-run to 42/42 assertions.
+
+**The lesson is the one worth keeping.** `DatasetBuilder` is pure and has 13 determinism tests, and
+it was never wrong. Every defect was in the selection, the serialization, or the query *around* it.
+Line coverage was 92% throughout. "Pure core, unit-tested" is not coverage of a feature, and the
+next thing this project should build is an end-to-end test that exercises the wiring over HTTP
+rather than more tests of the core.
+
+**What held.** Rebuild determinism through the live queue and a real database — identical `bld_`
+address, no second row; a different policy, a different address. The MCAP reader needed no change to
+the ingest service, validation, the catalog, the API, or the queue: one list entry, which is the
+architecture finally paying off rather than promising to. And the notifier caught a real fault during
+the run, before anyone read the logs.
+
 ## 1. Current problem definition
 
 Build a local-first robot episode data engine to ingest, validate, index/version, curate and build reproducible robot datasets (MCAP / LeRobot) with lineage for ML workloads. The platform is the product; models are workloads. The current vertical slice accepts only a small synthetic JSON episode, not real robotics data. See [problem](spec/problem.md) and [requirements](spec/requirements.md).
