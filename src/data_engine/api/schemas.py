@@ -466,6 +466,26 @@ class SliceManifestResponse(EpisodeExportResponse):
     name: str | None = None
 
 
+class SliceImpactResponse(BaseModel):
+    """What a curation slice keeps and drops versus the whole dataset, and why.
+
+    `kept` and `dropped` partition the dataset and carry the same quality
+    signals for each side, so "this slice is smoother than what it dropped" is
+    a readable claim rather than an inference. `drop_reasons` attributes each
+    dropped episode to the first predicate it failed; `reorders_only` is the
+    honest zero: `short`/`long` order the view and exclude nothing.
+    """
+
+    slice_id: str
+    name: str | None = None
+    filters: dict[str, Any]
+    reorders_only: bool = False
+    dataset: dict[str, Any]
+    kept: dict[str, Any]
+    dropped: dict[str, Any]
+    drop_reasons: list[dict[str, Any]] = []
+
+
 # ---- validation failures read view ----
 
 

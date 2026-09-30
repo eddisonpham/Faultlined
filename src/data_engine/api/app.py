@@ -42,6 +42,7 @@ from data_engine.api.schemas import (
     QualitySummaryResponse,
     SliceCreateRequest,
     SliceDetailResponse,
+    SliceImpactResponse,
     SliceListResponse,
     SliceManifestResponse,
     SliceUpdateRequest,
@@ -99,6 +100,7 @@ from data_engine.web import (
     metrics_page,
     schema_fragment,
     schema_page,
+    slice_impact_page,
     slices_fragment,
     slices_page,
     status_fragment,
@@ -725,6 +727,15 @@ def create_app(
             return HTMLResponse(slices_fragment(model))
         return HTMLResponse(slices_page(model, theme_or_default(theme)))
 
+    @app.get("/ui/slices/{slice_id}", response_class=HTMLResponse)
+    def ui_slice_detail(slice_id: str, request: Request, theme: str | None = None) -> HTMLResponse:
+        """What this slice drops versus the whole dataset, and why."""
+        catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
+        impact = catalog_for_request.slice_impact(slice_id)
+        if impact is None:
+            raise HTTPException(status_code=404, detail=f"No slice {slice_id}.")
+        return HTMLResponse(slice_impact_page(impact, theme_or_default(theme)))
+
     @app.get("/ui/metrics", response_class=HTMLResponse)
     def ui_metrics(
         request: Request,
@@ -886,6 +897,15 @@ def create_app(
         if manifest is None:
             raise KeyError(slice_id)
         return manifest
+
+    @app.get("/api/v1/slices/{slice_id}/impact", response_model=SliceImpactResponse)
+    def slice_impact(slice_id: str, request: Request) -> dict[str, Any]:
+        """What the slice drops versus the whole dataset, and why (read-only)."""
+        catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
+        impact = catalog_for_request.slice_impact(slice_id)
+        if impact is None:
+            raise KeyError(slice_id)
+        return impact
 
     @app.patch("/api/v1/slices/{slice_id}", response_model=SliceDetailResponse)
     def update_slice(slice_id: str, body: SliceUpdateRequest, request: Request) -> dict[str, Any]:

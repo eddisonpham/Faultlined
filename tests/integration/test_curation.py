@@ -209,3 +209,61 @@ def test_the_motion_trace_round_trips_through_real_sql(catalog: PostgresCatalog)
     stored = catalog.get_episode_quality(str(episode["id"]))
     assert stored is not None
     assert stored["motion_trace"] == trace
+
+
+@pytest.mark.integration
+def test_slice_impact_names_what_it_drops_and_why(catalog: PostgresCatalog) -> None:
+    """Kept/dropped partition the dataset, and every drop names its reason.
+
+    Counts are asserted as deltas because the test database is shared: the
+    before/after difference of my own three episodes is exact no matter what
+    other tests wrote.
+    """
+    saved = catalog.register_slice(
+        name=f"impact-jerky-{uuid.uuid4().hex[:8]}",
+        filter_config={"state": "valid", "flag": "jerky"},
+    )
+    slice_id = str(saved["id"])
+    before = catalog.slice_impact(slice_id)
+    assert before is not None
+
+    _seed(catalog, verdict="jerky", frames=300, passed=True)  # kept
+    _seed(catalog, verdict="smooth", frames=300, passed=True)  # drops: verdict=smooth
+    _seed(catalog, verdict="jerky", frames=300, passed=False)  # drops: state=quarantined
+
+    impact = catalog.slice_impact(slice_id)
+    assert impact is not None
+    assert impact["filters"] == {"state": "valid", "flag": "jerky"}
+    assert not impact["reorders_only"]
+    assert impact["kept"]["count"] - before["kept"]["count"] == 1
+    assert impact["dropped"]["count"] - before["dropped"]["count"] == 2
+    # kept and dropped partition the dataset; no episode is unaccounted for.
+    assert impact["dataset"]["episodes"] == impact["kept"]["count"] + impact["dropped"]["count"]
+
+    def reasons(table: dict[str, Any]) -> dict[str, int]:
+        return {row["reason"]: row["count"] for row in table["drop_reasons"]}
+
+    after, start = reasons(impact), reasons(before)
+    # State is attributed before flag: the quarantined jerky episode fails state first.
+    assert after.get("state=quarantined", 0) - start.get("state=quarantined", 0) == 1
+    assert after.get("verdict=smooth", 0) - start.get("verdict=smooth", 0) == 1
+    assert sum(after.values()) == impact["dropped"]["count"]
+
+    # The kept side is smoother than what it dropped: the whole point of the filter.
+    kept_jerk = impact["kept"]["median_jerk_score"]
+    dropped_jerk = impact["dropped"]["median_jerk_score"]
+    assert kept_jerk is not None and dropped_jerk is not None
+    assert kept_jerk >= dropped_jerk
+
+
+@pytest.mark.integration
+def test_an_ordering_slice_drops_nothing_and_says_so(catalog: PostgresCatalog) -> None:
+    saved = catalog.register_slice(
+        name=f"impact-long-{uuid.uuid4().hex[:8]}", filter_config={"flag": "long"}
+    )
+    impact = catalog.slice_impact(str(saved["id"]))
+    assert impact is not None
+    assert impact["reorders_only"]
+    assert impact["drop_reasons"] == []
+    assert impact["dropped"]["count"] == 0
+    assert impact["kept"]["count"] == impact["dataset"]["episodes"]

@@ -90,6 +90,32 @@ def _zscore(value: float | None, stats: dict[str, Any] | None) -> float:
     return (float(value) - float(mean)) / float(std)
 
 
+def _drop_reason_sql(state: str | None, flag: str | None) -> tuple[str, list[Any]]:
+    """First-failed-predicate attribution as one SQL CASE, state before flag.
+
+    The labels are data-derived (`state=quarantined`, `verdict=smooth`) rather
+    than fixed buckets, because "why did this drop" is answered by the episode's
+    own values, not by the filter's vocabulary. `unscored` is its own reason: an
+    episode nobody measured is not the same as an episode that measured badly.
+    """
+    branches: list[str] = []
+    params: list[Any] = []
+    if state:
+        branches.append("WHEN e.state <> %s THEN 'state=' || e.state")
+        params.append(state)
+    if flag == "jerky":
+        branches.append(
+            "WHEN q.verdict IS DISTINCT FROM 'jerky' THEN "
+            "CASE WHEN q.verdict IS NULL THEN 'unscored' ELSE 'verdict=' || q.verdict END"
+        )
+    elif flag == "stalled":
+        branches.append(
+            "WHEN q.stall_ratio IS NULL OR q.stall_ratio < 0.5 THEN "
+            "CASE WHEN q.stall_ratio IS NULL THEN 'unscored' ELSE 'stall_ratio<0.5' END"
+        )
+    return "CASE " + " ".join(branches) + " ELSE 'unattributed' END", params
+
+
 def _assemble_quality_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
     """Fold per-episode quality rows into distributions and outlier lists.
 
@@ -1223,6 +1249,87 @@ class PostgresCatalog:
                     (slice_id, row["id"]),
                 )
         return rows
+
+    def slice_impact(self, slice_id: str) -> dict[str, Any] | None:
+        """What the slice keeps and drops versus the whole dataset, and why.
+
+        The kept/dropped split is the *same predicate* `episode_predicates` builds
+        for the manifest - one vocabulary, one truth - so this view cannot
+        disagree with the manifest it explains. Drop reasons attribute each
+        excluded episode to the first predicate it fails (state before flag);
+        `short`/`long` are orderings, not filters, and the result says so instead
+        of manufacturing drops. All aggregation is in SQL: a view that fetched
+        every episode to compute a median would be O(dataset) on a detail page.
+        """
+        slice_ = self.get_slice(slice_id)
+        if slice_ is None:
+            return None
+        config = dict(slice_.get("filter_config") or {})
+        state = config.get("state")
+        flag = config.get("flag")
+        if state is not None and state not in EPISODE_STATES:
+            return None
+        if flag is not None and flag not in EPISODE_FLAGS:
+            return None
+        where, params, _ = episode_predicates(state, flag, prefix="e.")
+        match = " AND ".join(where) if where else "TRUE"
+        frames = EPISODE_FRAMES_SQL.format(prefix="e.")
+
+        def side(clause: str, side_params: list[Any]) -> dict[str, Any]:
+            with connect(self.settings) as connection:
+                row = connection.execute(
+                    f"""SELECT count(*) AS total,
+                               count(q.jerk_score) AS scored,
+                               percentile_cont(0.5) WITHIN GROUP
+                                   (ORDER BY q.jerk_score) AS median_jerk,
+                               percentile_cont(0.5) WITHIN GROUP
+                                   (ORDER BY q.stall_ratio) AS median_stall,
+                               percentile_cont(0.5) WITHIN GROUP
+                                   (ORDER BY {frames}) AS median_frames,
+                               count(*) FILTER (WHERE q.integrity = 'gapped') AS gapped
+                        FROM episodes e LEFT JOIN episode_quality q ON q.episode_id = e.id
+                        WHERE {clause}""",
+                    side_params,
+                ).fetchone()
+            assert row is not None
+            return {
+                "count": cast(int, row["total"]),
+                "scored": cast(int, row["scored"]),
+                "median_jerk_score": _optional_float(row["median_jerk"]),
+                "median_stall_ratio": _optional_float(row["median_stall"]),
+                "median_frames": _optional_float(row["median_frames"]),
+                "gapped": cast(int, row["gapped"]),
+            }
+
+        kept = side(match, params)
+        dropped = side(f"NOT ({match})", params)
+        reasons: list[dict[str, Any]] = []
+        if where:
+            reason_sql, reason_params = _drop_reason_sql(state, flag)
+            with connect(self.settings) as connection:
+                rows = connection.execute(
+                    f"""SELECT {reason_sql} AS reason, count(*) AS total
+                        FROM episodes e LEFT JOIN episode_quality q ON q.episode_id = e.id
+                        WHERE NOT ({match})
+                        GROUP BY 1 ORDER BY total DESC, reason""",
+                    [*reason_params, *params],
+                ).fetchall()
+            reasons = [
+                {"reason": str(row["reason"]), "count": cast(int, row["total"])} for row in rows
+            ]
+        return {
+            "slice_id": slice_id,
+            "name": slice_.get("name"),
+            "filters": {"state": state, "flag": flag},
+            "reorders_only": not where,
+            "dataset": {
+                "episodes": kept["count"] + dropped["count"],
+                "scored": kept["scored"] + dropped["scored"],
+            },
+            "kept": kept,
+            "dropped": dropped,
+            "drop_reasons": reasons,
+        }
 
     # ---- validation failures read view ----
 

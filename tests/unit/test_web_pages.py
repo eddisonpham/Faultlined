@@ -16,6 +16,7 @@ from data_engine.web.pages import (
     _meter,
     _metrics_body,
     _scatter_svg,
+    _slices_body,
     _sparkline,
     _state_badge,
     _strip,
@@ -31,6 +32,7 @@ from data_engine.web.pages import (
     job_detail_page,
     jobs_page,
     metrics_page,
+    slice_impact_page,
     status_page,
 )
 
@@ -867,3 +869,50 @@ def test_the_motion_trace_renders_a_literal_hole() -> None:
     html = episode_detail_page(episode, continuous, DEFAULT_THEME)
     assert html.count('<polyline class="de-trace"') == 1
     assert "continuous recording" in html
+
+
+@pytest.mark.unit
+def test_the_impact_page_says_what_a_slice_drops_and_why() -> None:
+    impact = {
+        "slice_id": "s-1",
+        "name": "smooth-survivors",
+        "filters": {"state": "valid", "flag": "jerky"},
+        "reorders_only": False,
+        "dataset": {"episodes": 10, "scored": 9},
+        "kept": {
+            "count": 3,
+            "scored": 3,
+            "median_jerk_score": 0.4,
+            "median_stall_ratio": 0.1,
+            "median_frames": 300.0,
+            "gapped": 0,
+        },
+        "dropped": {
+            "count": 7,
+            "scored": 6,
+            "median_jerk_score": 0.02,
+            "median_stall_ratio": 0.6,
+            "median_frames": 120.0,
+            "gapped": 2,
+        },
+        "drop_reasons": [
+            {"reason": "state=quarantined", "count": 4},
+            {"reason": "verdict=smooth", "count": 3},
+        ],
+    }
+    html = slice_impact_page(impact, DEFAULT_THEME)
+    assert "What it drops" in html
+    assert "state=quarantined" in html
+    assert "verdict=smooth" in html
+    assert "median jerk score" in html
+    assert "Kept versus dropped" in html
+
+    reorder = dict(impact, reorders_only=True, drop_reasons=[])
+    html = slice_impact_page(reorder, DEFAULT_THEME)
+    assert "it excludes nothing" in html
+
+
+@pytest.mark.unit
+def test_the_slices_list_links_each_slice_to_its_impact() -> None:
+    body = _slices_body({"items": [{"id": "s-9", "name": "mine", "member_count": 2}]})
+    assert "/ui/slices/s-9" in body

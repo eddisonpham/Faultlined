@@ -1976,6 +1976,69 @@
         "title": "SliceDetailResponse",
         "type": "object"
       },
+      "SliceImpactResponse": {
+        "description": "What a curation slice keeps and drops versus the whole dataset, and why.\n\n`kept` and `dropped` partition the dataset and carry the same quality\nsignals for each side, so \"this slice is smoother than what it dropped\" is\na readable claim rather than an inference. `drop_reasons` attributes each\ndropped episode to the first predicate it failed; `reorders_only` is the\nhonest zero: `short`/`long` order the view and exclude nothing.",
+        "properties": {
+          "dataset": {
+            "additionalProperties": true,
+            "title": "Dataset",
+            "type": "object"
+          },
+          "drop_reasons": {
+            "default": [],
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Drop Reasons",
+            "type": "array"
+          },
+          "dropped": {
+            "additionalProperties": true,
+            "title": "Dropped",
+            "type": "object"
+          },
+          "filters": {
+            "additionalProperties": true,
+            "title": "Filters",
+            "type": "object"
+          },
+          "kept": {
+            "additionalProperties": true,
+            "title": "Kept",
+            "type": "object"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "reorders_only": {
+            "default": false,
+            "title": "Reorders Only",
+            "type": "boolean"
+          },
+          "slice_id": {
+            "title": "Slice Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "slice_id",
+          "filters",
+          "dataset",
+          "kept",
+          "dropped"
+        ],
+        "title": "SliceImpactResponse",
+        "type": "object"
+      },
       "SliceListResponse": {
         "properties": {
           "items": {
@@ -4243,6 +4306,46 @@
         "summary": "Update Slice"
       }
     },
+    "/api/v1/slices/{slice_id}/impact": {
+      "get": {
+        "description": "What the slice drops versus the whole dataset, and why (read-only).",
+        "operationId": "slice_impact_api_v1_slices__slice_id__impact_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slice_id",
+            "required": true,
+            "schema": {
+              "title": "Slice Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SliceImpactResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Slice Impact"
+      }
+    },
     "/api/v1/slices/{slice_id}/manifest": {
       "get": {
         "description": "The curated manifest for a saved slice: identity, state, quality.",
@@ -5399,6 +5502,62 @@
           }
         },
         "summary": "Ui Slices"
+      }
+    },
+    "/ui/slices/{slice_id}": {
+      "get": {
+        "description": "What this slice drops versus the whole dataset, and why.",
+        "operationId": "ui_slice_detail_ui_slices__slice_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slice_id",
+            "required": true,
+            "schema": {
+              "title": "Slice Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "theme",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Theme"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ui Slice Detail"
       }
     },
     "/ui/vendor/departure-mono/DepartureMono-Regular.woff2": {

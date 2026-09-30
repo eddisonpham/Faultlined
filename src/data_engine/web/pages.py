@@ -1520,7 +1520,8 @@ def _slices_body(model: dict[str, Any]) -> str:
         return _empty("no saved slices", "save a filter from Episodes to create one")
     rows = "".join(
         "<tr>"
-        f"<td><code>{escape(str(s.get('name')))}</code></td>"
+        f'<td><a href="/ui/slices/{escape(str(s.get("id")))}"><code>'
+        f"{escape(str(s.get('name')))}</code></a></td>"
         f'<td class="num">{int(s.get("member_count", 0))}</td>'
         f"<td>{escape(str(s.get('notes') or '-'))}</td>"
         f"<td><code>{escape(str((s.get('filter_config') or {}).get('state') or 'any'))}"
@@ -1541,6 +1542,107 @@ def _slices_body(model: dict[str, Any]) -> str:
         "<th>Filter</th><th>Updated</th><th>Manifest</th>",
         rows,
     )
+
+
+def slice_impact_page(impact: dict[str, Any], theme: str) -> str:
+    """What this slice drops versus the whole dataset, and why.
+
+    The why is grounded in the quality signals the filter actually tests -
+    verdict, stall ratio, state - and each side carries its own medians, so
+    "this slice is smoother than what it dropped" is readable off the page
+    instead of inferred from a member count.
+    """
+    filters = impact.get("filters") or {}
+    kept = impact.get("kept") or {}
+    dropped = impact.get("dropped") or {}
+    dataset = impact.get("dataset") or {}
+    total = int(dataset.get("episodes") or 0)
+    kept_n = int(kept.get("count") or 0)
+    dropped_n = int(dropped.get("count") or 0)
+    share = kept_n / total if total else 0.0
+
+    facts = [
+        ("slice", escape(str(impact.get("name") or impact.get("slice_id")))),
+        (
+            "filter",
+            f"<code>{escape(str(filters.get('state') or 'any'))}"
+            f" / {escape(str(filters.get('flag') or 'any'))}</code>",
+        ),
+    ]
+    readouts = _readouts(
+        [
+            ("dataset", str(total), "episodes"),
+            ("kept", f'<span class="text-success">{kept_n}</span>', f"{share * 100:.0f}%"),
+            (
+                "dropped",
+                f'<span class="text-warning">{dropped_n}</span>',
+                f"{(1 - share) * 100:.0f}%",
+            ),
+            ("scored kept", str(int(kept.get("scored") or 0)), "of " + str(kept_n)),
+            ("scored dropped", str(int(dropped.get("scored") or 0)), "of " + str(dropped_n)),
+        ]
+    )
+    meter = _section("Keep rate", _meter(_bounded(share), 32), f"{kept_n} of {total}")
+
+    reasons = impact.get("drop_reasons") or []
+    if impact.get("reorders_only"):
+        why = _empty(
+            "this filter reorders the view; it excludes nothing",
+            "short/long are orderings, so nothing is dropped and nothing can be",
+        )
+    elif not reasons:
+        why = _empty("nothing was dropped", "every episode in the catalog is a member")
+    else:
+        rows = "".join(
+            "<tr>"
+            f"<td><code>{escape(str(r.get('reason')))}</code></td>"
+            f'<td class="num">{int(r.get("count") or 0)}</td>'
+            "<td>"
+            + _meter(_bounded((int(r.get("count") or 0)) / dropped_n if dropped_n else 0.0), 12)
+            + "</td>"
+            "</tr>"
+            for r in reasons
+        )
+        why = _table(
+            "Why episodes dropped",
+            '<th>Reason</th><th class="num">Episodes</th><th>Share</th>',
+            rows,
+        )
+
+    def cell(side: dict[str, Any], key: str) -> str:
+        value = side.get(key)
+        return "-" if value is None else _score(value)
+
+    comparison = _table(
+        "Kept versus dropped, on the quality signals the filter tests",
+        "<th>Signal</th><th>Kept</th><th>Dropped</th>",
+        "".join(
+            f"<tr><td>{label}</td><td>{cell(kept, key)}</td><td>{cell(dropped, key)}</td></tr>"
+            for label, key in (
+                ("median jerk score", "median_jerk_score"),
+                ("median stall ratio", "median_stall_ratio"),
+                ("median frames", "median_frames"),
+                ("gapped recordings", "gapped"),
+                ("scored episodes", "scored"),
+            )
+        ),
+    )
+    body = (
+        '<dl class="de-kv">'
+        + "".join(f"<dt>{k}</dt><dd>{v}</dd>" for k, v in facts)
+        + "</dl>"
+        + readouts
+        + meter
+        + _section("What it drops", why, "grounded in the filter's own predicates")
+        + _section("What that costs", comparison, "kept vs dropped")
+        + _section(
+            "Manifest",
+            f'<a href="/api/v1/slices/{escape(str(impact.get("slice_id")))}/manifest" download>'
+            '// download manifest</a> &nbsp; <a href="/ui/slices">// all slices</a>',
+            "build input",
+        )
+    )
+    return _page("Slice " + str(impact.get("name") or "")[:24], "/ui/slices", body, theme)
 
 
 # ---------------------------------------------------------------- episodes

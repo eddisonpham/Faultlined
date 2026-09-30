@@ -114,6 +114,42 @@ class CurationCatalogStub:
     def delete_slice(self, slice_id: str) -> bool:
         return self.slices.pop(slice_id, None) is not None
 
+    def slice_impact(self, slice_id: str) -> dict[str, Any] | None:
+        row = self.slices.get(slice_id)
+        if row is None:
+            return None
+        config = row["filter_config"]
+        reorders = config.get("flag") in ("short", "long")
+        return {
+            "slice_id": slice_id,
+            "name": row["name"],
+            "filters": {"state": config.get("state"), "flag": config.get("flag")},
+            "reorders_only": reorders,
+            "dataset": {"episodes": 5, "scored": 5},
+            "kept": {
+                "count": 5 if reorders else 1,
+                "scored": 5 if reorders else 1,
+                "median_jerk_score": 0.01,
+                "median_stall_ratio": 0.05,
+                "median_frames": 300.0,
+                "gapped": 0,
+            },
+            "dropped": {
+                "count": 0 if reorders else 4,
+                "scored": 0 if reorders else 4,
+                "median_jerk_score": None if reorders else 0.09,
+                "median_stall_ratio": None if reorders else 0.8,
+                "median_frames": None if reorders else 12.0,
+                "gapped": 0 if reorders else 1,
+            },
+            "drop_reasons": []
+            if reorders
+            else [
+                {"reason": "state=quarantined", "count": 3},
+                {"reason": "verdict=smooth", "count": 1},
+            ],
+        }
+
     def slice_manifest(
         self, slice_id: str, *, limit: int = 100, before: Any = None
     ) -> dict[str, Any] | None:
@@ -267,6 +303,33 @@ def test_slice_manifest_reuses_the_export_shape_with_identity() -> None:
 
 
 @pytest.mark.contract
+def test_slice_impact_partitions_the_dataset_and_names_the_drops() -> None:
+    catalog = CurationCatalogStub()
+    client = _client(catalog)
+    slice_id = client.post(
+        "/api/v1/slices",
+        json={"name": "survivors", "filter_config": {"state": "valid", "flag": ""}},
+    ).json()["id"]
+
+    body = client.get(f"/api/v1/slices/{slice_id}/impact").json()
+    assert body["slice_id"] == slice_id
+    assert body["filters"] == {"state": "valid", "flag": ""}
+    assert not body["reorders_only"]
+    assert body["kept"]["count"] + body["dropped"]["count"] == body["dataset"]["episodes"]
+    reasons = {row["reason"] for row in body["drop_reasons"]}
+    assert reasons == {"state=quarantined", "verdict=smooth"}
+
+    client.post("/api/v1/slices", json={"name": "long-ones", "filter_config": {"flag": "long"}})
+    long_id = next(row for row in catalog.list_slices() if row["name"] == "long-ones")["id"]
+    reorder = client.get(f"/api/v1/slices/{long_id}/impact").json()
+    assert reorder["reorders_only"]
+    assert reorder["drop_reasons"] == []
+    assert reorder["dropped"]["count"] == 0
+
+    assert client.get("/api/v1/slices/unknown/impact").status_code == 404
+
+
+@pytest.mark.contract
 def test_slice_listing_bounds_its_page() -> None:
     client = _client()
     assert client.get("/api/v1/slices?limit=0").status_code == 422
@@ -293,6 +356,13 @@ def test_curation_pages_render_and_poll_by_fragment() -> None:
     assert slices.status_code == 200
     assert "page-slice" in slices.text
     assert "/api/v1/slices/" in slices.text
+
+    slice_id = catalog.list_slices()[0]["id"]
+    detail = client.get(f"/ui/slices/{slice_id}")
+    assert detail.status_code == 200
+    assert "What it drops" in detail.text
+    assert "state=quarantined" in detail.text
+    assert client.get("/ui/slices/unknown").status_code == 404
 
     for path in ("/ui/failures", "/ui/slices"):
         fragment = client.get(path, headers={"X-Fragment": "1"})
