@@ -105,8 +105,15 @@ def write_log(
     robot_type: str = "so101_follower",
     task: str = "pick_place",
     compression: CompressionType = CompressionType.ZSTD,
+    attachment_mib: float = 0.0,
 ) -> dict[str, object]:
-    """Write one bag and return a description of what is in it."""
+    """Write one bag and return a description of what is in it.
+
+    `attachment_mib` adds one binary attachment, which is how a real camera log
+    spends most of its bytes. The benchmark needs both shapes: a metadata-only log
+    is the worst case for a reader that decodes JSON, and an attachment-heavy one
+    is what a real episode looks like.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     ids: dict[str, int] = {}
     counts: dict[str, int] = {}
@@ -114,6 +121,15 @@ def write_log(
     try:
         writer.start(profile="", library="faultlined-make-mcap-log")
         writer.add_metadata("session", {"robot_type": robot_type, "task": task})
+        if attachment_mib > 0:
+            size = int(attachment_mib * 1024 * 1024)
+            writer.add_attachment(
+                create_time=start_nanos,
+                log_time=start_nanos,
+                name="camera/color/compressed",
+                media_type="application/octet-stream",
+                data=bytes(size),
+            )
         for topic, (_, schema_name, encoding) in TOPICS.items():
             schema_id = writer.register_schema(
                 schema_name, encoding, json.dumps({"topic": topic}).encode("utf-8")
@@ -143,6 +159,7 @@ def write_log(
         "robot_type": robot_type,
         "task": task,
         "message_counts": counts,
+        "attachment_mib": attachment_mib,
     }
 
 
@@ -151,6 +168,12 @@ def main() -> None:
     parser.add_argument("path", type=Path)
     parser.add_argument("--seconds", type=float, default=20.0)
     parser.add_argument("--compression", choices=("zstd", "lz4", "none"), default="zstd")
+    parser.add_argument(
+        "--attachment-mib",
+        type=float,
+        default=0.0,
+        help="add one binary attachment of this size, as a camera log would carry",
+    )
     args = parser.parse_args()
     requested = {
         "zstd": CompressionType.ZSTD,
@@ -158,7 +181,12 @@ def main() -> None:
         "none": CompressionType.NONE,
     }[args.compression]
     try:
-        summary = write_log(args.path, seconds=args.seconds, compression=requested)
+        summary = write_log(
+            args.path,
+            seconds=args.seconds,
+            compression=requested,
+            attachment_mib=args.attachment_mib,
+        )
     except Exception as exc:
         raise SystemExit(
             f"could not write {args.path} with {args.compression} compression: {exc}\n"

@@ -1,8 +1,26 @@
 # Faultlined
 
-A local-first robotics ML data platform: ingest MCAP / LeRobot episodes, validate and index them, then build reproducible,
-versioned LeRobot datasets with end-to-end lineage. Models are workloads the platform executes — not the product.
+A local-first robotics ML data platform: ingest robot episodes, validate them, and build **reproducible,
+content-addressed datasets** with end-to-end lineage. Models are workloads the platform executes — not the product.
 See [agents/spec/problem.md](agents/spec/problem.md) and [agents/architecture/overview.md](agents/architecture/overview.md).
+
+**What works today, stated plainly.** **Both raw formats the storage design chose are readable**:
+LeRobot (v2.1 and v3.0) and MCAP. What is real end to end: ingest → validate → **build**, where a
+build's identity is the hash of its own manifest, so the same selection under the same policy and
+commit always produces the same dataset address — determinism is structural, not a convention.
+
+Three limits worth knowing before you rely on it, all visible on the episode itself rather than
+buried in a caveat:
+
+- Materialising a build as LeRobot dataset files on disk is **not** implemented; the manifest and its
+  lineage are.
+- The MCAP reader interprets `json`-encoded payloads only. CDR and protobuf channels are counted,
+  timed and named, but contribute no numbers — a guessed struct layout would put wrong values in the
+  catalog.
+- **There is no performance claim.** MCAP ingest measures **6.21 MiB/s** against a provisional
+  50 MB/s target ([EXP-0004](agents/experiments/0004-mcap-ingest-baseline.md)). The container itself
+  reads at 92 MiB/s; 51% of the cost is one function of ours, so this is a known and located gap
+  rather than a mystery.
 
 ## Requirements
 
@@ -52,13 +70,19 @@ Postgres instance are marked and need `DE_DATABASE_URL` set in your local `.env`
 DSN above, the whole suite runs with nothing skipped. Use `just pg-status` to check the cluster and `just pg-down` to
 stop it.
 
-The current repository stage is **scaffolding (not yet accepted)**. A synthetic JSON API/worker/artifact vertical slice and benchmark/telemetry foundations exist; scope and limitations are recorded in [the handoff](agents/HANDOFF.md). `just run` requires a configured PostgreSQL database. `just bench` runs a synthetic local workload and compares it against the committed baseline; see [EXP-0001](agents/experiments/0001-synthetic-ingest-baseline.md) for what that number does and does not mean. Host-based development with optional containers is recorded in [ADR 0012](agents/decisions/0012-host-based-development.md).
+The current repository stage is **MVP complete** — all 27 criteria in [the definition of done](agents/spec/definition-of-done.md) are checked with evidence, and the production-baseline stage is next. `just run` requires a configured PostgreSQL database. `just bench` runs every workload and compares the synthetic one against its committed baseline; `just bench --workload mcap-ingest` measures real-format ingest against [EXP-0004](agents/experiments/0004-mcap-ingest-baseline.md). Scope and limitations are recorded in [the handoff](agents/HANDOFF.md). Host-based development with optional containers is recorded in [ADR 0012](agents/decisions/0012-host-based-development.md).
 
 ## Try it
 
-`just run` starts the API on `http://127.0.0.1:8000` and a worker beside it. Open `http://127.0.0.1:8000/ui` for the Status, Jobs, and Artifacts pages
-(server-rendered, polling every 3-5 s), or `http://127.0.0.1:8000/docs` for the interactive API docs. In another
-terminal:
+`just run` starts the API on `http://127.0.0.1:8000` and a worker beside it. Open `http://127.0.0.1:8000/ui` for the operator UI — Status, Jobs, Episodes, Incidents, Metrics (server-rendered, polling every 3-5 s).
+
+**To put data in:** open `http://127.0.0.1:8000/ui`. On a system that has never run a job, the
+Status page leads with an **Ingest data** panel — name a task and robot, or point at a LeRobot
+dataset directory or an MCAP file, and press *queue ingest job*. It is a plain form, so it works with JavaScript
+disabled, and the job page it redirects to shows the queue, the result, and the episode it
+registered. The panel disappears once there is anything to look at.
+
+Ingest can also be submitted from the command line, which is what the automated tests use:
 
 ```bash
 # health check
@@ -86,7 +110,9 @@ without the dev worker claiming the jobs the suite submitted.
 
 Written artifacts land under `var/artifacts/blobs/`, and runtime metrics are appended to
 `var/metrics/runtime.jsonl` (queue depth, queue time, run time, stage duration, ingest counters).
-Interactive API docs are at `http://127.0.0.1:8000/docs`.
+The machine-readable contract is at `http://127.0.0.1:8000/openapi.json`; there is deliberately no
+rendered API browser at `/docs` (ADR 0021 — the browser surface is the operator UI, and a generated
+contract viewer does not belong in an operator's primary navigation).
 
 ## Task commands
 

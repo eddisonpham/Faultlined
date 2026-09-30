@@ -1,6 +1,6 @@
 # Experiment Registry
 
-EXP-0001 holds the first reviewed result and committed baseline. EXP-0002 records the first run-intelligence workload measurements. EXP-0003 records the deterministic notifier's first latency measurements. Neither EXP-0002 nor EXP-0003 wrote a baseline. A harness unit test is still not an experiment record. See [benchmark backlog](../benchmarking/backlog.md) and [methodology](../benchmarking/methodology.md).
+EXP-0001 holds the first reviewed result and committed baseline. EXP-0002 records the first run-intelligence workload measurements. EXP-0003 records the deterministic notifier's first latency measurements. EXP-0004 records the first real-format ingest baseline (MCAP). EXP-0002 and EXP-0003 wrote no baseline. A harness unit test is still not an experiment record. See [benchmark backlog](../benchmarking/backlog.md) and [methodology](../benchmarking/methodology.md).
 
 ## Current production configuration
 | Setting | Value | Why (EXP / ADR) |
@@ -12,6 +12,7 @@ EXP-0001 holds the first reviewed result and committed baseline. EXP-0002 record
 |---|---|---|---|
 | EXP-0001 | Synthetic episode ingest microbenchmark baseline | P50 0.6084 ms over 10 trials, 0 failures, clean tree at `f7ffbeb`; verification pass −23.5%, no regression. Synthetic 199-byte payload only — not a throughput or production claim | [EXP-0001](0001-synthetic-ingest-baseline.md) |
 | EXP-0002 | Run-intelligence workloads (B-003, B-012..B-015) | Isolated P50s: synthetic-ingest 0.539 ms (no regression vs EXP-0001), lerobot-ingest-v3 17.6 ms (203f real), quality 2.58 ms@303f / 23.1 ms@3000f, validation-eval 0.151 ms, metrics-aggregation 43.8 ms, api-metrics 47.6 ms, ui-insights 6.9 ms. Key finding: batch in-process runs inflate micro benchmarks ~24× (ADR 0019) | [EXP-0002](0002-run-intelligence-workloads.md) |
+| EXP-0004 | MCAP ingest throughput (B-002), first real-format baseline | **6.21 MiB/s P50** (3.247 s) over a 20.1 MiB, 10-minute bag with a 16 MiB camera attachment; 0/5 failures. **8× short of the provisional 50 MB/s target, and the cost is ours**: container iteration alone runs at 92 MiB/s, JSON decode at 58 MiB/s, and the `_dimensions` path-string rebuild is 51% of total ingest. Establishes the JSON-heavy path as the slow one - a `ros2msg` bag would skip that stage entirely | [EXP-0004](0004-mcap-ingest-baseline.md) |
 | EXP-0003 | Deterministic notifier latency (B-016, B-017) | `monitor-evaluate` P50 0.2 ms / P95 0.3 ms over 50 trials with every baseline scope warm; `api-incidents-catalog` P50 7.4 ms / P95 9.8 ms (n=10), in line with the other catalog reads. Conclusion: compute is not the constraint, the alert budget is. No detection-accuracy figure yet — that needs the chaos harness | [EXP-0003](0003-deterministic-notifier-latency.md) |
 
 ## Rejected approaches
@@ -24,7 +25,7 @@ EXP-0001 holds the first reviewed result and committed baseline. EXP-0002 record
 ## Future / deferred ideas
 | Idea | Why deferred | Revisit when |
 |---|---|---|
-| Real MCAP / LeRobot benchmark | Readers and fixed versioned fixtures do not exist | MVP ingest supports a public/small reproducible dataset subset |
+| Real LeRobot benchmark at scale | The LeRobot reader and fixture exist and `lerobot-ingest-v3` is measured (EXP-0002), but only a 203-frame tabular slice; no image/video shard benchmark | A full-episode real LeRobot ingest workload is scheduled |
 | Queueing, end-to-end, failure recovery, scaling, startup, and efficiency metrics | Queue/failure metrics are emitted but nothing aggregates them into a benchmark result; lifecycle and production components are incomplete | B-004 aggregation is implemented and the job lifecycle exists |
 | OpenTelemetry tracing | Correlation IDs and one local API/worker topology are sufficient for this slice | At least three independently communicating services or a trace-driven incident; supersede ADR 0008 |
 | Prometheus exposition / dashboard | No scraper and no operational UI exist | A real scrape/alert or dashboard use case exists |

@@ -1,0 +1,44 @@
+{
+  "benchmark": {
+    "name": "mcap-ingest",
+    "version": "1.0.0"
+  },
+  "config": {
+    "bytes": 21125545,
+    "database": "in-memory benchmark catalog; production filesystem artifact store",
+    "path": "var\\real-data\\so101_pick_place.mcap",
+    "source_sha256": "8973d57bc16e93477358d3507331af5230b17605e181b9449d6a16b76e984b3e",
+    "throughput_mib_per_second_p50": 6.205,
+    "trials": 5,
+    "warmups": 1
+  },
+  "hardware_profile": {
+    "cpu": "Intel64 Family 6 Model 198 Stepping 2, GenuineIntel",
+    "disk": "C:\\",
+    "gpu": {
+      "driver": "available",
+      "memory_total_bytes": 8546942976,
+      "model": "NVIDIA GPU (NVML)"
+    },
+    "logical_cpus": 24,
+    "os": "Windows-11-10.0.26200-SP0",
+    "ram_bytes": 33752997888
+  },
+  "schema_version": 1,
+  "source_run_id": "a5723e9b-23d8-4a6c-90e3-27b5e65f2753",
+  "summary": {
+    "ci95_mean_seconds": [
+      2.2643518600030803,
+      3.2921411999966947
+    ],
+    "failure_count": 0,
+    "mean_seconds": 2.9311994199990297,
+    "n": 5,
+    "p50_seconds": 3.2468986000167206,
+    "p95_seconds": 3.318516900006216,
+    "p99_seconds": 3.318516900006216,
+    "stddev_seconds": 0.740456044535214,
+    "warmup_count": 1,
+    "warmup_failure_count": 0
+  }
+}
