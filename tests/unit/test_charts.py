@@ -288,3 +288,37 @@ def test_a_caption_is_escaped_and_its_link_is_not() -> None:
 @pytest.mark.unit
 def test_a_chart_with_neither_caption_nor_link_emits_no_note() -> None:
     assert "de-chart-note" not in line_chart([(0, 1.0), (1, 2.0)], label="x")
+
+
+# ------------------------------------------------------------ tick anchoring
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("x", "anchor"),
+    [(0.0, "start"), (10.0, "start"), (200.0, "middle"), (600.0, "middle"), (710.0, "end")],
+)
+def test_a_tick_label_hangs_from_the_end_nearest_the_frame(x: float, anchor: str) -> None:
+    from data_engine.web.charts import PAD_LEFT, PAD_RIGHT, _anchor
+
+    assert _anchor(x, PAD_LEFT, 720 - PAD_RIGHT) == anchor
+
+
+@pytest.mark.unit
+def test_the_first_and_last_x_labels_do_not_hang_past_the_frame() -> None:
+    """A centred label at the right edge loses its last characters.
+
+    Found by a real-browser audit, not by reading the source: every metrics
+    plot was clipping "04:22" to "04:". The label has to hang from the end
+    nearest the frame, or the plot's right margin has to be widened to fit
+    half a timestamp.
+    """
+    svg = line_chart(
+        [(i, float(i)) for i in range(10)],
+        x_ticks=[(52.0, "04:20"), (381.0, "04:21"), (710.0, "04:22")],
+    )
+    assert 'text-anchor="start">04:20<' in svg
+    assert 'text-anchor="end">04:22<' in svg
+    assert 'text-anchor="middle">04:21<' in svg
+    # The last label is now inside the 720-wide viewBox rather than past it.
+    assert "04:22" in svg

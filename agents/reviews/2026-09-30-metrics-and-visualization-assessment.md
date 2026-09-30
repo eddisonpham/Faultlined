@@ -184,6 +184,14 @@ human looked at the screen. The human found more.
 |---|---|---|---|---|
 | 14 | major | `/ui/incidents` polled its own URL and ignored `X-Fragment`, so after the first tick the poller nested the entire page - second nav bar included - inside the panel (human-found) | the route honours `X-Fragment`; the orphaned `/ui/incidents/fragment` route is deleted; `tests/contract/test_ui_polling.py` asserts every polled page's own poll target answers bare | **fixed** |
 | 15 | minor | the vendored phosphor `text-shadow` halo on readouts and headings reads as cheap decoration (human-found) | overridden off in `faultlined.css` rule 2, scoped to `text-shadow` alone; the neon colours are untouched and a test pins that scope | **fixed** |
+| 16 | minor | the last x-tick label of every metrics plot was clipped by the viewBox edge (`04:22` rendered as `04:`) | tick labels anchor to the end nearest the frame; geometry-pinned tests | **fixed** |
+
+Findings 14 and 15 came from the human eye, 16 from the scripted browser audit. Two
+audit categories were triaged as false positives and left alone by design: wide tables
+sit in keyboard-focusable `overflow-x: auto` wrappers, and the 9px caption text is a
+deliberate instrument aesthetic present on every page. No console errors, no contrast
+failures on the added elements, and the neon palette is unchanged across all four
+themes after the halo removal.
 
 ## 8. What the next stage actually delivered
 

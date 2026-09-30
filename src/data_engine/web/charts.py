@@ -55,6 +55,15 @@ PAD_BOTTOM = 22
 FONT = 10.0
 
 
+def _anchor(x: float, left: float, right: float) -> str:
+    """Which end a tick label should hang from, given where it sits."""
+    if x <= left + 1.0:
+        return "start"
+    if x >= right - 1.0:
+        return "end"
+    return "middle"
+
+
 def _plural(count: int, noun: str) -> str:
     """`1 bucket` / `4 buckets`. Screen readers read these labels aloud."""
     return f"{count} {noun}" if count == 1 else f"{count} {noun}s"
@@ -248,9 +257,15 @@ def line_chart(
         for run in runs
         for x, y in run
     )
+    # Anchored by position, not uniformly centred. A centred label at the right
+    # edge hangs half its width past the viewBox and is clipped: "04:22" lost
+    # its last two characters on every metrics plot. The first label anchors
+    # start and the last anchors end, so the run of text stays inside the frame
+    # without widening the plot's right margin to accommodate it.
+    left, right = PAD_LEFT, width - PAD_RIGHT
     x_axis = "".join(
         f'<text class="de-tick" x="{x:.1f}" y="{bottom + 14:.1f}" '
-        f'text-anchor="middle">{escape(text)}</text>'
+        f'text-anchor="{_anchor(x, left, right)}">{escape(text)}</text>'
         for x, text in x_ticks
     )
 
