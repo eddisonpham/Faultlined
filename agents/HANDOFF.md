@@ -138,6 +138,40 @@ the ingest service, validation, the catalog, the API, or the queue: one list ent
 architecture finally paying off rather than promising to. And the notifier caught a real fault during
 the run, before anyone read the logs.
 
+**Update 2026-09-30 (stage 3b: the bottleneck, the trace, and what a slice drops).** Three
+follow-ups landed, each measured or pinned before it was called done.
+
+**B-019 is closed, and the target it was measured against is not reachable.** The dimension
+layout is now compiled once per message shape instead of rebuilding a path string per numeric
+leaf ([EXP-0005](experiments/0005-mcap-ingest-flatten-plan.md), superseding EXP-0004's baseline):
+the engine's own ingest stage fell 3.5x (+1.65 s to +0.47 s on the B-002 fixture) and whole-ingest
+P50 from 6.21 to 10.8-18.3 MiB/s across three runs, with byte-identical output pinned by a
+full-extraction snapshot and fast-path-vs-dict-path equivalence tests over a 13-message hazard
+sequence. The honest verdict is in the record: container iteration plus JSON decode alone run at
+42.6 MiB/s before the engine works at all, so the provisional 50 MB/s target cannot be met by this
+design and needs re-scoping (owner decision: per-stage targets, or a decode-avoiding reader).
+
+**The motion trace renders gaps as holes** ([ADR 0024](decisions/0024-observability-visual-surface.md)
+decisions 8-9). Every episode now carries a bounded per-episode trace - the `jerk_score` the
+verdict already averages, over time - as runs of `(seconds since start, score)` capped at 240
+points. A transition spanning a dropout is two poses, not motion, so it is not drawn: the hole
+between runs *is* the recording gap, at its measured width. That required fixing the chart
+primitive itself, which mapped x by index and rendered a 30-second hole as wide as a 100 ms blip.
+
+**A curation slice now says what it drops versus the whole dataset, and why** (`/ui/slices/{id}`,
+`GET /api/v1/slices/{id}/impact`): kept and dropped partition the dataset with quality medians on
+both sides, every drop is attributed to the first predicate it fails (`state=quarantined`,
+`verdict=smooth`, `unscored`), and an ordering filter (`short`/`long`) says "it excludes nothing"
+rather than manufacturing a zero. The kept/dropped split resolves through the same
+`episode_predicates` the manifest uses, so the two cannot disagree.
+
+The human eye found more than the audits again: the poller nested the whole page inside
+`/ui/incidents` after its first refresh (the route ignored `X-Fragment`; the contract test had
+proven the *wrong* URL worked), and the phosphor glow read as cheap decoration and is now off -
+neon colours intact. Writing the trace round-trip test found `get_episode_quality` raising
+TypeError on any episode whose metadata lacks a frame count. Suite: 814 passing, 91.9% coverage,
+144/144 end-to-end assertions from an empty catalog, browser-audited at two widths.
+
 ## 1. Current problem definition
 
 Build a local-first robot episode data engine to ingest, validate, index/version, curate and build reproducible robot datasets (MCAP / LeRobot) with lineage for ML workloads. The platform is the product; models are workloads. The current vertical slice accepts only a small synthetic JSON episode, not real robotics data. See [problem](spec/problem.md) and [requirements](spec/requirements.md).
