@@ -53,6 +53,7 @@ from data_engine.api.schemas import (
     TickResponse,
 )
 from data_engine.catalog.database import initialize_schema
+from data_engine.catalog.introspect import describe
 from data_engine.catalog.repository import InvalidTransition, PostgresCatalog
 from data_engine.config import Settings, load_settings
 from data_engine.curation import REASON_CODES
@@ -93,6 +94,8 @@ from data_engine.web import (
     layout_css,
     metrics_fragment,
     metrics_page,
+    schema_fragment,
+    schema_page,
     slices_fragment,
     slices_page,
     status_fragment,
@@ -626,6 +629,31 @@ def create_app(
         if x_fragment:
             return HTMLResponse(artifacts_fragment(items))
         return HTMLResponse(artifacts_page(items, theme_or_default(theme)))
+
+    @app.get("/ui/schema")
+    def ui_schema(
+        request: Request,
+        theme: str | None = None,
+        x_fragment: str | None = Header(default=None),
+        table: str | None = None,
+    ) -> HTMLResponse:
+        """The catalog, read live. A drawing of it would eventually be a lie."""
+        catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
+        model = describe(catalog_for_request.settings)
+        if x_fragment:
+            return HTMLResponse(schema_fragment(model, table or ""))
+        return HTMLResponse(schema_page(model, theme_or_default(theme), table or ""))
+
+    @app.get("/ui/schema/{table}")
+    def ui_schema_table(
+        request: Request,
+        table: str,
+        theme: str | None = None,
+    ) -> HTMLResponse:
+        """One table's columns, with the same page around it."""
+        catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
+        model = describe(catalog_for_request.settings)
+        return HTMLResponse(schema_page(model, theme_or_default(theme), table))
 
     @app.get("/ui/vendor/departure-mono/DepartureMono-Regular.woff2")
     def ui_font() -> Response:

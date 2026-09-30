@@ -1455,3 +1455,35 @@ pre.de-json {
 .de-plot-dots { height: auto; }
 .de-plot-dots .de-point { cursor: pointer; }
 .de-dot-link { fill: none; }
+
+/* ---- schema graph (ADR 0024) ---------------------------------------------- */
+
+.de-graph { min-height: 18rem; }
+
+.de-graph .de-edge {
+  fill: none;
+  stroke: var(--de-line);
+  stroke-width: 1.25;
+  vector-effect: non-scaling-stroke;
+}
+.de-graph .de-edge:hover { stroke: var(--fine-use-accent, #0c0); }
+
+.de-graph .de-node rect {
+  fill: color-mix(in srgb, var(--de-fg) 4%, transparent);
+  stroke: var(--de-line);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+.de-graph .de-node-link:hover .de-node rect {
+  stroke: var(--fine-use-accent, #0c0);
+}
+.de-graph .de-node-name {
+  fill: var(--de-fg);
+  font-family: var(--de-mono);
+  font-size: 11px;
+}
+.de-graph .de-node-count {
+  fill: var(--de-dim);
+  font-family: var(--de-mono);
+  font-size: 9px;
+}

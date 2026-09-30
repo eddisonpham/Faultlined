@@ -31,6 +31,7 @@ from data_engine.web.pages import (
     theme_or_default,
     vendor_css,
 )
+from data_engine.web.schema import schema_fragment, schema_page
 
 __all__ = [
     "DEFAULT_THEME",
@@ -56,6 +57,8 @@ __all__ = [
     "layout_css",
     "metrics_fragment",
     "metrics_page",
+    "schema_fragment",
+    "schema_page",
     "slices_fragment",
     "slices_page",
     "status_fragment",

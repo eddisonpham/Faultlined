@@ -50,6 +50,7 @@ NAV_LINKS = (
     ("/ui/insights", "Insights", "7"),
     ("/ui/metrics", "Metrics", "8"),
     ("/ui/artifacts", "Artifacts", "9"),
+    ("/ui/schema", "Schema", "0"),
 )
 
 FONT_URL = "/ui/vendor/departure-mono/DepartureMono-Regular.woff2"
@@ -274,6 +275,7 @@ _SUBTITLES = {
     "/ui/insights": "dataset distribution // outliers are removal candidates",
     "/ui/metrics": "runtime telemetry // where the time goes",
     "/ui/artifacts": "content addressed // hash is the identity",
+    "/ui/schema": "live catalog // read from the database, not a drawing",
 }
 
 
