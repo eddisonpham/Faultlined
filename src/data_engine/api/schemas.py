@@ -358,6 +358,9 @@ class EpisodeQualityResponse(BaseModel):
     worst_verdict: str = "unknown"
     worst_dim: str | None = None
     judged_dims: int = 0
+    motion_trace: list[list[list[float]]] = []
+    """Runs of `[seconds since start, motion score]` points. A break between
+    runs is a recording gap; the chart draws it as a hole, never as motion."""
 
 
 class QualitySummaryResponse(BaseModel):

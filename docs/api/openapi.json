@@ -518,6 +518,20 @@
             ],
             "title": "Max Gap Seconds"
           },
+          "motion_trace": {
+            "default": [],
+            "items": {
+              "items": {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              "type": "array"
+            },
+            "title": "Motion Trace",
+            "type": "array"
+          },
           "movement_score": {
             "title": "Movement Score",
             "type": "number"

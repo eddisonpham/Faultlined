@@ -7,6 +7,7 @@ import math
 import pytest
 
 from data_engine.analysis.quality import (
+    TRACE_POINTS,
     DimQuality,
     _verdicts,
     analyze,
@@ -242,3 +243,61 @@ def test_length_histogram_bins_do_not_overflow() -> None:
     # Identical lengths: width falls back to 1 and everything lands in one bin.
     assert sum(bin["count"] for bin in summary["length"]["histogram"]) == 2
     assert summary["length"]["std"] == 0.0 or math.isclose(summary["length"]["std"], 0.0)
+
+
+# ---------------------------------------------------------------- motion trace
+#
+# The trace is the jerk score over time: the same quantity `jerk_score`
+# averages, plotted so a gapped recording renders as a literal hole instead of
+# a line drawn across a dropout.
+
+
+def test_the_motion_trace_is_the_jerk_score_over_time() -> None:
+    quality = analyze({"j0": [0.0, 1.0, 2.0, 3.0]}, timestamps=[0.0, 1.0, 2.0, 3.0])
+    (run,) = quality.motion_trace
+    # |delta|/range = 1/3 for every transition; points land at the observed frame.
+    assert run == ((1.0, 1.0 / 3.0), (2.0, 1.0 / 3.0), (3.0, 1.0 / 3.0))
+    assert quality.jerk_score == pytest.approx(1.0 / 3.0)
+
+
+def test_a_gapped_recording_renders_a_hole_not_motion() -> None:
+    # Five seconds between frames 2 and 3 at a 1 Hz median: past the 5x factor.
+    timestamps = [0.0, 1.0, 2.0, 30.0, 31.0, 32.0]
+    quality = analyze({"j0": [0.0, 1.0, 2.0, 3.0, 4.0, 5.0]}, timestamps=timestamps)
+    assert len(quality.motion_trace) == 2
+    first, second = quality.motion_trace
+    assert [t for t, _ in first] == [1.0, 2.0]
+    assert [t for t, _ in second] == [31.0, 32.0]
+    # The transition across the dropout is not drawn in either run.
+    assert all(t < 30.0 for t, _ in first)
+    assert all(t >= 30.0 for t, _ in second)
+    assert quality.integrity == "gapped"
+
+
+def test_the_trace_is_bounded_and_keeps_its_hole_edges() -> None:
+    n = TRACE_POINTS * 10
+    values = [float(i % 7) for i in range(n)]
+    timestamps = [i * 0.02 for i in range(n)]
+    quality = analyze({"j0": values}, timestamps=timestamps)
+    total = sum(len(run) for run in quality.motion_trace)
+    assert total <= TRACE_POINTS
+    assert quality.motion_trace[0][0][0] == pytest.approx(0.02)
+    assert quality.motion_trace[-1][-1][0] == pytest.approx((n - 1) * 0.02)
+
+
+def test_no_trustworthy_clock_means_no_trace() -> None:
+    assert analyze({"j0": [0.0, 1.0, 2.0]}).motion_trace == ()
+    broken = analyze({"j0": [0.0, 1.0, 2.0]}, timestamps=[2.0, 1.0, 0.0])
+    assert broken.motion_trace == ()
+
+
+def test_the_trace_rides_through_to_dict() -> None:
+    quality = analyze({"j0": [0.0, 1.0, 2.0]}, timestamps=[0.0, 1.0, 2.0])
+    as_dict = quality.to_dict()["motion_trace"]
+    assert as_dict == [[[1.0, 0.5], [2.0, 0.5]]]
+
+
+def test_an_episode_without_a_length_makes_no_length_claim() -> None:
+    """Registering an episode never required a frame count; reading it did."""
+    assert _zscore(None, {"mean": 100.0, "std": 10.0}) == 0.0
+    assert _zscore(110.0, {"mean": 100.0, "std": 10.0}) == pytest.approx(1.0)

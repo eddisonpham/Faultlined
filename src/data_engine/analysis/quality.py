@@ -72,6 +72,11 @@ MIN_FRAMES = 2
 #: every legitimate interval and hide itself.
 GAP_INTERVAL_FACTOR = 5.0
 
+#: How many points the per-episode motion trace may hold, across all its runs.
+#: This is a picture of an episode, not a copy of it: 240 points fills the
+#: 720-wide chart at a point every 3 px with room for the holes.
+TRACE_POINTS = 240
+
 #: Verdict bands on the *median* judged dimension's normalized delta-sigma.
 #:
 #: The original bands were the worst dimension, on the reasoning that a robot with
@@ -141,6 +146,12 @@ class EpisodeQuality:
     judged_dims: int = 0
     """How many dimensions actually judged motion (active, non-discrete, non-gripper)."""
 
+    motion_trace: tuple[tuple[tuple[float, float], ...], ...] = ()
+    """The motion score over time, as runs of `(seconds since start, score)`.
+
+    A break between runs is a recording gap, drawn as a hole rather than as
+    motion across a dropout. Bounded by `TRACE_POINTS` across all runs."""
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "frame_count": self.frame_count,
@@ -156,6 +167,7 @@ class EpisodeQuality:
             "worst_dim": self.worst_dim,
             "judged_dims": self.judged_dims,
             "dims": [dim.to_dict() for dim in self.dims],
+            "motion_trace": [[[t, v] for t, v in run] for run in self.motion_trace],
         }
 
 
@@ -277,6 +289,7 @@ def analyze(
         worst_verdict=worst_verdict,
         worst_dim=worst_dim,
         judged_dims=judged,
+        motion_trace=_trace(timestamps, deltas, ranges, active, threshold),
     )
 
 
@@ -347,6 +360,84 @@ def _dim_quality(
         norm_delta_std=math.sqrt(variance),
         mean_abs_delta_norm=sum(norm) / len(norm),
     )
+
+
+def _trace(
+    timestamps: Sequence[float] | None,
+    deltas: Mapping[str, Sequence[float]],
+    ranges: Mapping[str, float],
+    active: Sequence[DimQuality],
+    threshold: float,
+) -> tuple[tuple[tuple[float, float], ...], ...]:
+    """The motion score over time: one point per transition, holes at dropouts.
+
+    Each point is the judging dimensions' mean `|delta| / range` for that
+    transition - the very quantity `jerk_score` averages, so the chart and the
+    score cannot disagree about what motion is - placed at the frame the motion
+    was observed and expressed in seconds since the episode's first frame.
+
+    A transition that spans a dropout is not motion: `|delta|` across a 30 s
+    hole is two poses, not a velocity. Such transitions are not drawn, so the
+    hole between runs *is* the recording gap, rendered as what it was.
+
+    No trace without a trustworthy clock (`threshold <= 0` covers no timestamps,
+    a backwards clock, and a zero-width interval scale): the x axis would be
+    fiction. `active` dimensions judge the score; an episode with none (all
+    grippers, all discrete) falls back to every dimension so the picture still
+    exists and says so by being flat where motion was inert.
+    """
+    if timestamps is None or threshold <= 0.0:
+        return ()
+    names = [dim.name for dim in active] or sorted(ranges)
+    if not names:
+        return ()
+    start = float(timestamps[0])
+    runs: list[list[tuple[float, float]]] = [[]]
+    for i in range(len(timestamps) - 1):
+        if float(timestamps[i + 1]) - float(timestamps[i]) > threshold:
+            if runs[-1]:
+                runs.append([])
+            continue
+        value = sum(abs(deltas[name][i]) / ranges[name] for name in names) / len(names)
+        runs[-1].append((float(timestamps[i + 1]) - start, value))
+    filled = [run for run in runs if run]
+    return tuple(tuple(run) for run in _thin(filled, TRACE_POINTS))
+
+
+def _thin(runs: list[list[tuple[float, float]]], cap: int) -> list[list[tuple[float, float]]]:
+    """Downsample runs to `cap` points total, keeping every run's endpoints.
+
+    Endpoints are what draw the holes, so thinning must never move them. When
+    even two points per run does not fit, the shortest runs go entirely: losing
+    a small run widens a hole the recording already had, while merging runs
+    would draw a line across a gap that never was.
+    """
+    keeps = [len(run) for run in runs]
+    while sum(keeps) > cap:
+        fattest = max(range(len(keeps)), key=lambda i: keeps[i])
+        if keeps[fattest] <= 2:
+            break
+        keeps[fattest] -= 1
+    if sum(keeps) > cap:
+        order = sorted(range(len(runs)), key=lambda i: (len(runs[i]), i), reverse=True)
+        kept = set()
+        total = 0
+        for i in order:
+            if total + keeps[i] <= cap:
+                kept.add(i)
+                total += keeps[i]
+        runs = [runs[i] for i in sorted(kept)]
+        keeps = [keeps[i] for i in sorted(kept)]
+    thinned: list[list[tuple[float, float]]] = []
+    for run, keep in zip(runs, keeps, strict=True):
+        if keep >= len(run):
+            thinned.append(run)
+        elif keep <= 2:
+            thinned.append([run[0], run[-1]])
+        else:
+            stride = (len(run) - 1) / (keep - 1)
+            thinned.append([run[round(step * stride)] for step in range(keep)])
+    return thinned
 
 
 def _verdicts(dims: Sequence[DimQuality]) -> tuple[str, str, str | None, int]:

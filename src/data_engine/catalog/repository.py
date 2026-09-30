@@ -79,10 +79,13 @@ def _optional_float(value: Any) -> float | None:
         return None
 
 
-def _zscore(value: float, stats: dict[str, Any] | None) -> float:
+def _zscore(value: float | None, stats: dict[str, Any] | None) -> float:
+    # `value is None` is real: an episode can be registered without a frame
+    # count in its metadata, and the quality read for it used to raise
+    # TypeError mid-page. No length, no claim about length.
     mean = (stats or {}).get("mean")
     std = (stats or {}).get("std")
-    if mean is None or not std:
+    if value is None or mean is None or not std:
         return 0.0
     return (float(value) - float(mean)) / float(std)
 
@@ -834,8 +837,9 @@ class PostgresCatalog:
                 """INSERT INTO episode_quality
                        (episode_id, frame_count, movement_score, jerk_score,
                         stall_ratio, verdict, dims, nonfinite, max_gap_seconds,
-                        gap_ratio, integrity, worst_verdict, worst_dim, judged_dims)
-                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        gap_ratio, integrity, worst_verdict, worst_dim, judged_dims,
+                        motion_trace)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                    ON CONFLICT (episode_id) DO UPDATE
                        SET frame_count = EXCLUDED.frame_count,
                            movement_score = EXCLUDED.movement_score,
@@ -850,6 +854,7 @@ class PostgresCatalog:
                            worst_verdict = EXCLUDED.worst_verdict,
                            worst_dim = EXCLUDED.worst_dim,
                            judged_dims = EXCLUDED.judged_dims,
+                           motion_trace = EXCLUDED.motion_trace,
                            computed_at = now()
                    RETURNING episode_id""",
                 (
@@ -867,6 +872,7 @@ class PostgresCatalog:
                     str(quality.get("worst_verdict") or "unknown"),
                     quality.get("worst_dim"),
                     int(quality.get("judged_dims") or 0),
+                    Jsonb(quality.get("motion_trace") or []),
                 ),
             ).fetchone()
         if row is None:
@@ -886,6 +892,7 @@ class PostgresCatalog:
                           q.stall_ratio, q.verdict, q.dims, q.computed_at,
                           q.nonfinite, q.max_gap_seconds, q.gap_ratio,
                           q.integrity, q.worst_verdict, q.worst_dim, q.judged_dims,
+                          q.motion_trace,
                           (e.metadata->>'frame_count')::bigint AS frame_count
                    FROM episode_quality q JOIN episodes e ON e.id = q.episode_id
                    WHERE q.episode_id = %s""",

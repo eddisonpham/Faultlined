@@ -164,18 +164,32 @@ def polyline_points(
     A `None` value is a gap in the recording, not a zero. Rendering it as a
     connected line would draw motion across a dropout - the exact false
     statement ADR 0023 was written to stop this product from making.
+
+    x is a *value* mapped over the drawn domain, not an index: a thirty-second
+    hole has to occupy thirty seconds of axis or the picture lies about time in
+    exactly the way the `None` break exists to prevent. Uniformly indexed input
+    (the metrics buckets) maps pixel-for-pixel as it always did, so this is a
+    correction for unevenly spaced series, not a change to evenly spaced ones.
+    A degenerate domain (one drawn point) pins to `x0`, where the ticks of a
+    one-sample window already point.
     """
     runs: list[list[tuple[float, float]]] = []
     current: list[tuple[float, float]] = []
     span = x1 - x0 or 1.0
-    last = max(len(samples) - 1, 1)
+    drawn = [
+        float(x_value)
+        for x_value, y_value in samples
+        if y_value is not None and math.isfinite(y_value)
+    ]
+    lo, hi = (min(drawn), max(drawn)) if drawn else (0.0, 1.0)
     for x_value, y_value in samples:
         if y_value is None or not math.isfinite(y_value):
             if current:
                 runs.append(current)
                 current = []
             continue
-        x = x0 + (x_value / last) * span
+        share = (float(x_value) - lo) / (hi - lo) if hi > lo else 0.0
+        x = x0 + share * span
         current.append((x, scale.pixel(y_value, bottom, top)))
     if current:
         runs.append(current)

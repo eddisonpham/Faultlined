@@ -322,3 +322,54 @@ def test_the_first_and_last_x_labels_do_not_hang_past_the_frame() -> None:
     assert 'text-anchor="middle">04:21<' in svg
     # The last label is now inside the 720-wide viewBox rather than past it.
     assert "04:22" in svg
+
+
+# --------------------------------------------------- x mapped by value
+#
+# The motion trace is unevenly spaced in time, and a hole has to keep its
+# measured width or the picture lies about the recording. Indexed input (the
+# metrics buckets) must map pixel-for-pixel as before.
+
+
+def test_x_is_mapped_by_value_not_by_index() -> None:
+    from data_engine.web.charts import choose_scale, polyline_points
+
+    runs = polyline_points(
+        [(0.0, 0.5), (50.0, 0.5), (100.0, 0.5)],
+        choose_scale([0.5]),
+        x0=0.0,
+        x1=100.0,
+        top=0.0,
+        bottom=0.0,
+    )
+    assert [x for x, _ in runs[0]] == [0.0, 50.0, 100.0]
+
+
+def test_a_hole_keeps_its_measured_width() -> None:
+    from data_engine.web.charts import choose_scale, polyline_points
+
+    samples = [
+        (0.0, 0.5),
+        (1.0, 0.5),
+        (31.0, None),  # the break marker; its x is ignored
+        (31.0, 0.5),
+        (32.0, 0.5),
+    ]
+    runs = polyline_points(samples, choose_scale([0.5]), x0=0.0, x1=32.0, top=0.0, bottom=0.0)
+    assert len(runs) == 2
+    # Thirty seconds of dropout occupy thirty seconds of the 0..32 axis.
+    assert runs[1][0][0] - runs[0][-1][0] == pytest.approx(30.0)
+
+
+def test_indexed_input_maps_pixel_for_pixel_as_it_always_did() -> None:
+    from data_engine.web.charts import choose_scale, polyline_points
+
+    runs = polyline_points(
+        list(enumerate([1.0, 2.0, 3.0])),
+        choose_scale([1.0, 3.0]),
+        x0=10.0,
+        x1=110.0,
+        top=0.0,
+        bottom=0.0,
+    )
+    assert [x for x, _ in runs[0]] == [10.0, 60.0, 110.0]

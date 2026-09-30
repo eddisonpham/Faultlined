@@ -94,6 +94,22 @@ in a line — the way every monitoring tool an operator has ever used shows a dr
    the same page as the episode list. A dataset assembled from gappy recordings is a dataset with
    holes, and nothing in the pipeline notices because nothing counts.
 
+8. **The motion trace (decision 6) is `jerk` per transition, and a transition that spans a
+   dropout is not drawn** (added 2026-09-30, during implementation). The plotted value is the
+   judging dimensions' mean `|delta| / range` per frame - the very quantity `jerk_score`
+   averages, so chart and score cannot disagree about what motion is. `|delta|` across a 30 s
+   hole is two poses, not a velocity, so that transition becomes the hole itself: runs break at
+   dropouts and the line is drawn as separate segments with the gap's measured width. The trace
+   is stored as runs of `(seconds since start, score)`, capped at `TRACE_POINTS` (240) with
+   endpoints preserved, and it exists only when the clock is trustworthy - a backwards or
+   absent clock yields no trace rather than a fiction.
+9. **Chart x is mapped by value, not by index** (added 2026-09-30). `polyline_points` placed
+   points at `x / (count - 1)`, which is right for evenly bucketed series and wrong for real
+   time: a 30 s hole occupied the same width as a 100 ms blip. Points now map over the drawn
+   domain, which is pixel-identical for indexed input (the metrics buckets) and honest for the
+   trace. This is a correction to the primitive, not a new one, and the indexed tests pin the
+   old pixels to prove nothing else moved.
+
 ## Consequences
 
 - No new dependency, no CDN, no bundler, no build step. The entire visual layer is stdlib string

@@ -837,3 +837,33 @@ def test_incidents_page_polls_its_own_fragment() -> None:
     html = incidents_page(_model(), DEFAULT_THEME)
     assert 'data-poll="/ui/incidents"' in html
     assert "setInterval" not in html, "the poller lives in app.js, not inlined per page"
+
+
+@pytest.mark.unit
+def test_the_motion_trace_renders_a_literal_hole() -> None:
+    """Two runs must draw as two lines: the gap is a gap, not a steep line."""
+    episode = {
+        "id": "ep-hole",
+        "episode_key": "episode_0",
+        "format": "lerobot-v3",
+        "state": "ingested",
+        "metadata": {"frame_count": 6},
+    }
+    quality = {
+        "verdict": "smooth",
+        "movement_score": 0.04,
+        "jerk_score": 0.01,
+        "stall_ratio": 0.1,
+        "length_zscore": 0.0,
+        "frame_count": 6,
+        "dims": [],
+        "motion_trace": [[[1.0, 0.2], [2.0, 0.3]], [[31.0, 0.4], [32.0, 0.5]]],
+    }
+    html = episode_detail_page(episode, quality, DEFAULT_THEME)
+    assert html.count('<polyline class="de-trace"') == 2
+    assert "recording dropouts, not stillness" in html
+
+    continuous = dict(quality, motion_trace=[[[1.0, 0.2], [2.0, 0.3]]])
+    html = episode_detail_page(episode, continuous, DEFAULT_THEME)
+    assert html.count('<polyline class="de-trace"') == 1
+    assert "continuous recording" in html

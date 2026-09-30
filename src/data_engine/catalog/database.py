@@ -83,6 +83,7 @@ CREATE TABLE IF NOT EXISTS episode_quality (
     worst_verdict text NOT NULL DEFAULT 'unknown',
     worst_dim text,
     judged_dims integer NOT NULL DEFAULT 0,
+    motion_trace jsonb NOT NULL DEFAULT '[]',
     computed_at timestamptz NOT NULL DEFAULT now()
 );
 
@@ -214,6 +215,7 @@ ALTER TABLE episode_quality ADD COLUMN IF NOT EXISTS integrity text NOT NULL DEF
 ALTER TABLE episode_quality ADD COLUMN IF NOT EXISTS worst_verdict text NOT NULL DEFAULT 'unknown';
 ALTER TABLE episode_quality ADD COLUMN IF NOT EXISTS worst_dim text;
 ALTER TABLE episode_quality ADD COLUMN IF NOT EXISTS judged_dims integer NOT NULL DEFAULT 0;
+ALTER TABLE episode_quality ADD COLUMN IF NOT EXISTS motion_trace jsonb NOT NULL DEFAULT '[]';
 
 ALTER TABLE episode_slices ADD COLUMN IF NOT EXISTS name text NOT NULL DEFAULT '';
 ALTER TABLE episode_slices ADD COLUMN IF NOT EXISTS notes text NOT NULL DEFAULT '';

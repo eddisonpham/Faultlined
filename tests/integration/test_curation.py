@@ -187,3 +187,25 @@ def test_a_slice_with_an_unknown_filter_state_has_no_manifest(
     )
     # An unreadable filter must not silently widen the slice to "everything".
     assert catalog.slice_manifest(str(saved["id"])) is None
+
+
+@pytest.mark.integration
+def test_the_motion_trace_round_trips_through_real_sql(catalog: PostgresCatalog) -> None:
+    """The trace is stored verbatim: runs of [seconds, score], holes intact."""
+    episode = _seed(catalog, verdict="smooth", frames=6, passed=True)
+    trace = [[[1.0, 0.2], [2.0, 0.3]], [[31.0, 0.4], [32.0, 0.5]]]
+    catalog.record_episode_quality(
+        str(episode["id"]),
+        {
+            "frame_count": 6,
+            "movement_score": 0.04,
+            "jerk_score": 0.01,
+            "stall_ratio": 0.1,
+            "verdict": "smooth",
+            "dims": [],
+            "motion_trace": trace,
+        },
+    )
+    stored = catalog.get_episode_quality(str(episode["id"]))
+    assert stored is not None
+    assert stored["motion_trace"] == trace

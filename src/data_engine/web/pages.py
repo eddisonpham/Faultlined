@@ -1791,7 +1791,51 @@ def _quality_section(quality: dict[str, Any] | None) -> str:
             '<th>sigma(d)/range</th><th class="num">mean|d|/range</th>',
             rows,
         )
-    return _section("Motion quality", readouts + table, "ADR 0018")
+    return _section("Motion quality", readouts + _motion_trace(quality) + table, "ADR 0018")
+
+
+def _motion_trace(quality: dict[str, Any]) -> str:
+    """The motion score over time, with recording gaps drawn as holes.
+
+    Runs come from `analyze` already bounded and already split at dropouts; the
+    only work here is to put a `None` break between them so `line_chart` draws
+    separate segments. Nothing reconnects across a hole, and the hole keeps its
+    measured width because x is mapped by value, not by index.
+    """
+    runs = quality.get("motion_trace") or []
+    points = [(float(t), float(v)) for run in runs for t, v in run]
+    if not points:
+        return ""
+    samples: list[tuple[float, float | None]] = []
+    for run in runs:
+        if samples and run:
+            samples.append((float(run[0][0]), None))
+        samples.extend((float(t), float(v)) for t, v in run)
+    lo = min(t for t, _ in points)
+    hi = max(t for t, _ in points)
+    usable = _PLOT_WIDTH - PAD_LEFT - PAD_RIGHT
+
+    def tick(t: float) -> float:
+        share = (t - lo) / (hi - lo) if hi > lo else 0.0
+        return PAD_LEFT + share * usable
+
+    ticks = [(tick(lo), f"{lo:.0f} s"), (tick(hi), f"{hi:.0f} s")]
+    if hi - lo > 4:
+        ticks.insert(1, (tick((lo + hi) / 2), f"{(lo + hi) / 2:.0f} s"))
+    caption = f"{len(points)} points in {len(runs)} run(s)"
+    gaps = len(runs) - 1
+    if gaps:
+        noun = "gap" if gaps == 1 else "gaps"
+        caption += f"; the {gaps} {noun} between runs are recording dropouts, not stillness"
+    else:
+        caption += "; continuous recording"
+    return line_chart(
+        samples,
+        label="motion over time",
+        unit="mean |d|/range",
+        x_ticks=ticks,
+        caption=caption,
+    )
 
 
 # ---------------------------------------------------------------- insights
