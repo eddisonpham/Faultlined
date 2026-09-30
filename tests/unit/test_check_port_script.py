@@ -42,9 +42,9 @@ def test_an_occupied_port_is_reported_with_a_way_out(
     holder.listen(1)
     try:
         assert _PORT._is_free(port) is False
-        monkeypatch.setattr(_PORT.os, "environ", {"DE_PORT": str(port)})
-        monkeypatch.setattr(_PORT, "_holder_windows", lambda _port: "4242")
-        monkeypatch.setattr(_PORT, "_holder_posix", lambda _port: "4242")
+        monkeypatch.setenv("DE_PORT", str(port))
+        monkeypatch.setattr(_PORT, "listening_pid", lambda _port: "4242")
+        monkeypatch.setattr(_PORT, "process_image", lambda _pid: "python.exe")
         assert _PORT.main() == 1
     finally:
         holder.close()
@@ -67,9 +67,8 @@ def test_an_unidentifiable_holder_still_gives_a_command(
     holder.bind((_PORT.HOST, port))
     holder.listen(1)
     try:
-        monkeypatch.setattr(_PORT.os, "environ", {"DE_PORT": str(port)})
-        monkeypatch.setattr(_PORT, "_holder_windows", lambda _port: None)
-        monkeypatch.setattr(_PORT, "_holder_posix", lambda _port: None)
+        monkeypatch.setenv("DE_PORT", str(port))
+        monkeypatch.setattr(_PORT, "listening_pid", lambda _port: None)
         assert _PORT.main() == 1
     finally:
         holder.close()
@@ -83,6 +82,6 @@ def test_a_malformed_port_does_not_crash_the_recipe(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """DE_PORT is operator input; a typo must not traceback out of `just run`."""
-    monkeypatch.setattr(_PORT.os, "environ", {"DE_PORT": "not-a-number"})
-    assert _PORT._port() == 8000
+    monkeypatch.setenv("DE_PORT", "not-a-number")
+    assert _PORT.port_from_env() == 8000
     capsys.readouterr()

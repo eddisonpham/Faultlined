@@ -56,6 +56,15 @@ def main() -> int:
     if pid:
         stop = f"taskkill //PID {pid} //F" if sys.platform == "win32" else f"kill {pid}"
         print(f"  or:        {stop}", file=sys.stderr)
+    else:
+        # Still actionable without a PID: a reader who cannot find the process
+        # needs the command, not just the diagnosis.
+        find = (
+            f"netstat -ano | findstr :{port}"
+            if sys.platform == "win32"
+            else f"lsof -i tcp:{port} -sTCP:LISTEN"
+        )
+        print(f"  find it:   {find}", file=sys.stderr)
     print("", file=sys.stderr)
     print(f"To run on a different port:  DE_PORT={port + 1} just run", file=sys.stderr)
     return 1
