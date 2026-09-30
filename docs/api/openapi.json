@@ -4430,6 +4430,125 @@
         "summary": "Ui Artifacts"
       }
     },
+    "/ui/builds": {
+      "get": {
+        "description": "Content-addressed builds. The address is the content.",
+        "operationId": "ui_builds_ui_builds_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "theme",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Theme"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-fragment",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Fragment"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ui Builds"
+      }
+    },
+    "/ui/builds/{build_hash}": {
+      "get": {
+        "description": "One build, drawn as the graph lineage actually is.",
+        "operationId": "ui_build_detail_ui_builds__build_hash__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "build_hash",
+            "required": true,
+            "schema": {
+              "title": "Build Hash",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "theme",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Theme"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ui Build Detail"
+      }
+    },
     "/ui/episodes": {
       "get": {
         "description": "Episode index with curation flags (jerky / stalled / short / long).",

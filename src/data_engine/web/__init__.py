@@ -1,5 +1,6 @@
 """Server-rendered UI package for the MVP slice (ADR 0014)."""
 
+from data_engine.web.lineage import builds_fragment, builds_page, lineage_page
 from data_engine.web.pages import (
     DEFAULT_THEME,
     THEMES,
@@ -39,6 +40,8 @@ __all__ = [
     "app_script",
     "artifacts_fragment",
     "artifacts_page",
+    "builds_fragment",
+    "builds_page",
     "episode_detail_page",
     "episodes_fragment",
     "episodes_page",
@@ -55,6 +58,7 @@ __all__ = [
     "jobs_fragment",
     "jobs_page",
     "layout_css",
+    "lineage_page",
     "metrics_fragment",
     "metrics_page",
     "schema_fragment",

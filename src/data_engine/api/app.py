@@ -78,6 +78,8 @@ from data_engine.web import (
     app_script,
     artifacts_fragment,
     artifacts_page,
+    builds_fragment,
+    builds_page,
     episode_detail_page,
     episodes_fragment,
     episodes_page,
@@ -92,6 +94,7 @@ from data_engine.web import (
     jobs_fragment,
     jobs_page,
     layout_css,
+    lineage_page,
     metrics_fragment,
     metrics_page,
     schema_fragment,
@@ -629,6 +632,40 @@ def create_app(
         if x_fragment:
             return HTMLResponse(artifacts_fragment(items))
         return HTMLResponse(artifacts_page(items, theme_or_default(theme)))
+
+    @app.get("/ui/builds", response_class=HTMLResponse)
+    def ui_builds(
+        request: Request,
+        theme: str | None = None,
+        x_fragment: str | None = Header(default=None),
+    ) -> HTMLResponse:
+        """Content-addressed builds. The address is the content."""
+        catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
+        model = {"items": catalog_for_request.list_builds(limit=50)}
+        if x_fragment:
+            return HTMLResponse(builds_fragment(model))
+        return HTMLResponse(builds_page(model, theme_or_default(theme)))
+
+    @app.get("/ui/builds/{build_hash}", response_class=HTMLResponse)
+    def ui_build_detail(
+        request: Request,
+        build_hash: str,
+        theme: str | None = None,
+    ) -> HTMLResponse:
+        """One build, drawn as the graph lineage actually is."""
+        catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
+        row = catalog_for_request.get_build(build_hash)
+        if row is None:
+            return HTMLResponse(lineage_page({}, theme_or_default(theme)))
+        # The same two reads the API endpoint makes, in the same order: a build
+        # whose manifest cannot be read back is not reproducible, and the page
+        # has to say so rather than draw an empty graph that looks complete.
+        return HTMLResponse(
+            lineage_page(
+                {**row, "episodes": catalog_for_request.build_episodes(build_hash)},
+                theme_or_default(theme),
+            )
+        )
 
     @app.get("/ui/schema")
     def ui_schema(
