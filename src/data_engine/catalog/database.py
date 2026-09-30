@@ -260,11 +260,16 @@ def connect(settings: Settings | None = None) -> Iterator[Connection[dict[str, o
         configured.database_url.get_secret_value(),
         row_factory=dict_row,
         connect_timeout=CONNECT_TIMEOUT_SECONDS,
+        options=f"-c statement_timeout={STATEMENT_TIMEOUT_MILLISECONDS}",
     ) as connection:
         yield connection
 
 
 CONNECT_TIMEOUT_SECONDS = 5
+# A runaway query must fail instead of pinning a pooled connection until the API
+# exhausts its worker threads. Every statement here is a catalog read or a
+# small executemany, so anything past this is a lock or plan problem worth surfacing.
+STATEMENT_TIMEOUT_MILLISECONDS = 15_000
 
 
 def initialize_schema(settings: Settings | None = None) -> None:

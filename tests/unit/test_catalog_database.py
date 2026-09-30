@@ -88,4 +88,5 @@ def test_connect_bounds_the_connect_phase() -> None:
         pass
 
     assert captured["connect_timeout"] == database.CONNECT_TIMEOUT_SECONDS
+    assert captured["options"] == f"-c statement_timeout={database.STATEMENT_TIMEOUT_MILLISECONDS}"
     assert captured["dsn"] == "postgresql://user@127.0.0.1:5432/db"
