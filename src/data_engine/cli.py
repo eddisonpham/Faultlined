@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import logging
 import multiprocessing
+import time
 from collections.abc import Sequence
 from typing import Any
 
@@ -13,9 +14,13 @@ import uvicorn
 from data_engine.api.app import create_app
 from data_engine.catalog.database import initialize_schema
 from data_engine.config import load_settings
+from data_engine.jobs.state import REAP_INTERVAL_SECONDS
 from data_engine.jobs.worker import IngestWorker
 from data_engine.observability.logging import configure_logging
 from data_engine.observability.metrics import JsonlMetricSink, RuntimeMetrics
+
+#: How long to wait after a failed database call before trying the queue again.
+DB_ERROR_BACKOFF_SECONDS = 5.0
 
 
 def build_metrics(settings: Any) -> RuntimeMetrics:
@@ -37,13 +42,50 @@ def _parent_alive() -> bool:
 def _worker_loop(stop: Any, poll_seconds: float = 0.25) -> None:
     settings = load_settings()
     worker = IngestWorker(settings, metrics=build_metrics(settings))
+    log = logging.getLogger(__name__)
+    # The reapers used to exist but nothing called them, so F6 deadlines were never
+    # enforced on a job that was already running and a dead worker's job was stranded.
+    next_reap = time.monotonic()
     while not stop.is_set():
         if not _parent_alive():
-            logging.getLogger(__name__).warning("parent process gone; worker exiting")
+            log.warning("parent process gone; worker exiting")
             return
-        result = worker.process_one()
+        if time.monotonic() >= next_reap:
+            _reap(worker, log)
+            next_reap = time.monotonic() + REAP_INTERVAL_SECONDS
+        try:
+            result = worker.process_one()
+        except Exception:
+            # A database blip must not end the worker's life. `claim_job` runs before
+            # the job try/except in `process_one`, so a lost connection used to
+            # propagate out of this loop and take the process down, leaving the queue
+            # unprocessed until someone restarted it. Back off and keep going.
+            log.exception("worker iteration failed; continuing")
+            stop.wait(max(poll_seconds, DB_ERROR_BACKOFF_SECONDS))
+            continue
         if result is None:
             stop.wait(poll_seconds)
+
+
+def _reap(worker: IngestWorker, log: Any) -> None:
+    """Sweep expired deadlines and jobs abandoned by a dead worker."""
+    try:
+        timed_out = worker.catalog.reap_expired_deadlines()
+        reclaimed = worker.catalog.reap_orphaned_jobs()
+    except Exception:
+        # Reaping is opportunistic maintenance. If the database is unreachable the
+        # next sweep will catch up, so this must not end the loop.
+        log.exception("reaper sweep failed; continuing")
+        return
+    if timed_out or reclaimed:
+        log.warning(
+            "reaper swept the queue",
+            extra={
+                "event": "jobs_reaped",
+                "timed_out": timed_out,
+                "reclaimed_from_dead_worker": reclaimed,
+            },
+        )
 
 
 def main(argv: Sequence[str] | None = None) -> None:

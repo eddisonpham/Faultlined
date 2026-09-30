@@ -73,6 +73,33 @@ One transition was missing from the state machine as a result. `requeue_for_retr
 budget is spent, and `RETRYING` had no edge out, so a job caught in that window was a dead end. The
 contract gains `retrying -> failed`. The architecture diagram only ever drew the happy path.
 
+## Addendum (2026-09-30): recovery without a lease
+
+The consequences below flagged two gaps: `reap_expired_deadlines` had no caller, and the
+`worker_id` / `lease_expires_at` columns were a stub. Both are now closed, and the second took a
+different shape than the columns implied.
+
+The reaper is called from `_worker_loop` on a 30 s interval, alongside `reap_orphaned_jobs`, and
+both are opportunistic: a sweep that fails is logged and the loop continues. The loop also catches
+around `process_one` itself, because `claim_job` runs before the per-job `try`/`except` and a lost
+connection used to propagate out and take the process down.
+
+Recovery uses a **presumed-death timeout**, not the lease columns. A lease only works if the worker
+renews it, but the handler is synchronous — the worker thread is inside `process_one` for the whole
+job — so a lease could only be written at claim time and would collapse into the same constant with
+extra machinery. A real lease needs a heartbeat from a second thread, which is not worth it for a
+single local worker. `reap_orphaned_jobs` therefore moves a `running` job whose `started_at` is older
+than 15 minutes back to `queued` via `retrying`, or to `failed` when no attempt remains.
+
+The window is deliberately generous because the failure modes are not symmetric. A false reclaim
+duplicates work, which the content-addressed artifact and build-hash design mostly absorbs — the
+second run converges rather than corrupting. A window that is too tight would reclaim healthy
+long-running ingests. The residual risk is a single job that legitimately runs past 15 minutes and is
+reclaimed while still alive; that is recorded as a known limit rather than solved.
+
+Superseding note: the stub line about `worker_id` / `lease_expires_at` is now inaccurate. The columns
+remain unused, and the presumed-death timeout is the implemented mechanism.
+
 ## Consequences
 
 - (+) A job cannot be retried forever, and cannot silently disappear when a worker dies mid-attempt.
@@ -81,11 +108,13 @@ contract gains `retrying -> failed`. The architecture diagram only ever drew the
   checkpoints inside stage handlers, which is stage-3 work.
 - (−) A job requeued by retry is indistinguishable from a freshly submitted one in the queue, so
   `created_at` no longer reflects when work *started*. Job duration is computed from `started_at`.
-- (−) `reap_expired_deadlines` is currently called by tests only; wiring it to a periodic sweep in
-  `de dev` is part of the worker-loop work.
-- Worker leases (`worker_id`, `lease_expires_at`) have columns but no behaviour yet. They are recorded
-  as a stub rather than half-implemented, and `heartbeat`-style metrics stay unimplemented for the
-  same reason.
+- (−) `reap_expired_deadlines` is called from the worker loop on a 30 s interval, so a deadline is
+  enforced within that window rather than exactly at the deadline.
+- (−) A job that legitimately runs longer than the 15-minute presumed-death window can be reclaimed
+  while its worker is still alive. The duplicate converges thanks to content addressing, but the two
+  runs overlap. A heartbeat-backed lease would remove this at the cost of a second thread.
+- Worker leases (`worker_id`, `lease_expires_at`) have columns but no behaviour. The presumed-death
+  timeout supersedes the plan recorded here; see the 2026-09-30 addendum.
 
 ## Docs updated
 

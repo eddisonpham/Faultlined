@@ -26,6 +26,7 @@ from data_engine.jobs.state import (
     ACTIVE_STATES,
     ALLOWED_TRANSITIONS,
     DEFAULT_MAX_ATTEMPTS,
+    ORPHANED_JOB_SECONDS,
     JobState,
 )
 from data_engine.observability.metrics import RuntimeMetrics
@@ -569,6 +570,66 @@ class PostgresCatalog:
                 (JobState.TIMED_OUT.value, [s.value for s in ACTIVE_STATES]),
             ).fetchall()
         return len(rows)
+
+    def reap_orphaned_jobs(self, presumed_dead_seconds: float = ORPHANED_JOB_SECONDS) -> int:
+        """Recycle jobs whose worker died mid-run; returns how many were reclaimed.
+
+        A worker that is killed - container restart, OOM, `just stop` - never runs its
+        own failure path, so the job stays `running` forever: `claim_job` only selects
+        `queued`, and `reap_expired_deadlines` only touches jobs that asked for a
+        deadline. Nothing else recovers it, and a submission without `deadline_seconds`
+        is stranded silently. This is the crash-recovery counterpart to the retry path.
+
+        The window is a presumed-death timeout rather than a lease. A real lease needs
+        the worker to renew it, but the handler is synchronous, so a lease could only be
+        set at claim time and would degenerate into the same constant. The window is
+        deliberately generous: a false reclaim costs a duplicate run, which the
+        content-addressed artifact and build-hash design converges on anyway, while a
+        window that is too tight would reclaim healthy long-running work.
+        """
+        with connect(self.settings) as connection:
+            # Two statements, not one CTE: a data-modifying CTE runs concurrently with
+            # the main query and cannot see its own effects on the target table, so the
+            # second half would never observe the rows the first half just updated.
+            recycled = connection.execute(
+                """UPDATE jobs
+                   SET state = %s, started_at = NULL, finished_at = NULL,
+                       error = jsonb_build_object(
+                           'type', 'WorkerLost',
+                           'message', 'worker presumed dead; job requeued')
+                   WHERE state = %s
+                     AND started_at < now() - make_interval(secs => %s)
+                     AND attempts < max_attempts
+                   RETURNING id""",
+                (
+                    JobState.RETRYING.value,
+                    JobState.RUNNING.value,
+                    presumed_dead_seconds,
+                ),
+            ).fetchall()
+            if recycled:
+                connection.execute(
+                    "UPDATE jobs SET state = %s WHERE id = ANY(%s)",
+                    (JobState.QUEUED.value, [row["id"] for row in recycled]),
+                )
+            # An orphan with no retry budget left can never be claimed again, so it
+            # would sit in `running` forever - the exact stuck state this reaps.
+            connection.execute(
+                """UPDATE jobs
+                   SET state = %s, finished_at = now(),
+                       error = jsonb_build_object(
+                           'type', 'WorkerLost',
+                           'message', 'worker presumed dead; no attempts remaining')
+                   WHERE state = %s
+                     AND started_at < now() - make_interval(secs => %s)
+                     AND attempts >= max_attempts""",
+                (
+                    JobState.FAILED.value,
+                    JobState.RUNNING.value,
+                    presumed_dead_seconds,
+                ),
+            )
+        return len(recycled)
 
     def register_episode(
         self,

@@ -9,6 +9,14 @@ from typing import Any
 
 DEFAULT_MAX_ATTEMPTS = 3
 
+#: How long a `running` job may go without progress before the reaper presumes its
+#: worker died and reclaims it. Far longer than any healthy job, because a false
+#: reclaim duplicates work and a late one only delays recovery.
+ORPHANED_JOB_SECONDS = 900.0
+
+#: How often the worker sweeps for expired deadlines and dead workers.
+REAP_INTERVAL_SECONDS = 30.0
+
 
 class JobState(StrEnum):
     QUEUED = "queued"
