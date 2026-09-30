@@ -174,6 +174,16 @@ no CDN and no third-party JavaScript, per ADR 0014.
 | 12 | major | The clock's stride-halving manufactured a 501 s gap in a clean log | trim the oldest half + exact whole-log max | **fixed** |
 | 13 | minor | `referenced_by` attached to the wrong side of each foreign key | attach to the referenced table | **fixed** |
 
+## 9. After delivery: the browser and the human eye
+
+A source-reading pass misses whole classes of defect, so this round verified the new
+pages in a real browser (Playwright: geometry, clipping, contrast, console) and then a
+human looked at the screen. The human found more.
+
+| # | severity | finding | remedy | status |
+|---|---|---|---|---|
+| 14 | major | `/ui/incidents` polled its own URL and ignored `X-Fragment`, so after the first tick the poller nested the entire page - second nav bar included - inside the panel (human-found) | the route honours `X-Fragment`; the orphaned `/ui/incidents/fragment` route is deleted; `tests/contract/test_ui_polling.py` asserts every polled page's own poll target answers bare | **fixed** |
+
 ## 8. What the next stage actually delivered
 
 Findings 7–13 are closed. The order was not arbitrary: **the metric was fixed before it was

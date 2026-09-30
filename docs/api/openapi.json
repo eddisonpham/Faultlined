@@ -4789,6 +4789,7 @@
     },
     "/ui/incidents": {
       "get": {
+        "description": "Honours `X-Fragment`, like every other polled page.\n\nThis route used to ignore the header and always return a whole document,\nwhile the page's own `data-poll` pointed at this URL. The poller then\ninjected the entire page - nav bar and all - inside the panel it was\nmeant to replace, and the operator got a page inside a page. The\nseparate `/ui/incidents/fragment` route that made the fragment reachable\nexisted and was tested, but nothing ever polled it, which is why the bug\nsurvived a test that asserted the fragment was bare.",
         "operationId": "incidents_page_route_ui_incidents_get",
         "parameters": [
           {
@@ -4805,6 +4806,22 @@
                 }
               ],
               "title": "Theme"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-fragment",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Fragment"
             }
           }
         ],
@@ -4831,24 +4848,6 @@
           }
         },
         "summary": "Incidents Page Route"
-      }
-    },
-    "/ui/incidents/fragment": {
-      "get": {
-        "operationId": "incidents_fragment_route_ui_incidents_fragment_get",
-        "responses": {
-          "200": {
-            "content": {
-              "text/html": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "summary": "Incidents Fragment Route"
       }
     },
     "/ui/insights": {

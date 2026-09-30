@@ -302,9 +302,18 @@ def test_the_incidents_page_renders_the_queue() -> None:
 
 @pytest.mark.contract
 def test_the_incidents_fragment_is_bare() -> None:
-    fragment = _client().get("/ui/incidents/fragment").text
+    """The fragment the poller asks for, asked for the way the poller asks.
+
+    This used to fetch `/ui/incidents/fragment` - a separate route that worked
+    and that nothing polled, while the page itself pointed its `data-poll` at
+    `/ui/incidents`, which returned a whole document. The bug lived in the gap
+    between "the fragment route works" and "the page uses the fragment route",
+    which is what `tests/contract/test_ui_polling.py` now closes for every page.
+    """
+    fragment = _client().get("/ui/incidents", headers={"X-Fragment": "1"}).text
     assert "CONTRACT_BREACH" in fragment
     assert "<!doctype html>" not in fragment
+    assert "<nav" not in fragment
 
 
 @pytest.mark.contract

@@ -1126,11 +1126,24 @@ def create_app(
         }
 
     @app.get("/ui/incidents", response_class=HTMLResponse)
-    def incidents_page_route(request: Request, theme: str | None = None) -> HTMLResponse:
-        return HTMLResponse(incidents_page(_incidents_model(request), theme_or_default(theme)))
+    def incidents_page_route(
+        request: Request,
+        theme: str | None = None,
+        x_fragment: str | None = Header(default=None),
+    ) -> HTMLResponse:
+        """Honours `X-Fragment`, like every other polled page.
 
-    @app.get("/ui/incidents/fragment", response_class=HTMLResponse)
-    def incidents_fragment_route(request: Request) -> HTMLResponse:
-        return HTMLResponse(incidents_fragment(_incidents_model(request)))
+        This route used to ignore the header and always return a whole document,
+        while the page's own `data-poll` pointed at this URL. The poller then
+        injected the entire page - nav bar and all - inside the panel it was
+        meant to replace, and the operator got a page inside a page. The
+        separate `/ui/incidents/fragment` route that made the fragment reachable
+        existed and was tested, but nothing ever polled it, which is why the bug
+        survived a test that asserted the fragment was bare.
+        """
+        model = _incidents_model(request)
+        if x_fragment:
+            return HTMLResponse(incidents_fragment(model))
+        return HTMLResponse(incidents_page(model, theme_or_default(theme)))
 
     return app
