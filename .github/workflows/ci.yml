@@ -17,7 +17,20 @@ jobs:
       - run: uv run ruff check .
       - run: uv run ruff format --check .
       - run: uv run mypy
-      - run: uv run pytest -m "not slow and not gpu" --cov --cov-report=term-missing
+      - name: Run tests
+        run: |
+          uv run pytest -m "not slow and not gpu" --cov --cov-report=term-missing \
+            --tb=line -rf | tee test-output.txt
+      # Name the failing tests as workflow annotations. They show on the commit
+      # and in the checks API without opening the log, which is the difference
+      # between a red build you can act on and one you have to go and read.
+      - name: Name the failing tests
+        if: failure()
+        run: |
+          grep -E '^(FAILED|ERROR)' test-output.txt | head -20 | while IFS= read -r line; do
+            echo "::error title=pytest::${line//'%'/'%25'}"
+          done
+          echo "::error title=pytest tail::$(tail -25 test-output.txt | tr '\n' '%0A' | sed 's/%/%25/g' | cut -c1-900)"
       - run: python scripts/check_repo_hygiene.py
       - run: uv run python scripts/openapi_contract.py --check
   optional-slow-gpu:
