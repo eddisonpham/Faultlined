@@ -112,5 +112,12 @@ api-contract-write:
 api-contract:
     uv run --all-extras python scripts/openapi_contract.py --check
 
+# Measure the rendered UI in a real browser (computed styles and geometry).
+# Needs Node 22+ and Chrome/Chromium, and a server already running (`just run`).
+# Not part of `ci`: it needs a browser and a live server, so it is a deliberate
+# check rather than something that runs on every save.
+ui-audit *ARGS:
+    node scripts/ui_audit.mjs {{ARGS}}
+
 # Everything CI runs
 ci: lint typecheck test hygiene api-contract

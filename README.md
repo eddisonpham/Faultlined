@@ -83,6 +83,7 @@ Prefer the terminal? The full API contract is at <http://127.0.0.1:8000/openapi.
 | `just test` | Run the tests |
 | `just ci` | Everything CI checks |
 | `just bench` | Run the benchmarks |
+| `just ui-audit` | Check the UI in a real browser (needs `just run` running) |
 | `just --list` | Show every command |
 
 ## If something goes wrong
@@ -134,6 +135,7 @@ Everything under `var/` is generated. Delete it any time.
 ## For contributors
 
 - Run `just ci` before every commit.
+- Run `just ui-audit` after changing the UI. It measures the rendered pages in a real browser.
 - Keep coverage above 70%.
 - Use conventional commit messages.
 - Change docs in the same commit as the code.
