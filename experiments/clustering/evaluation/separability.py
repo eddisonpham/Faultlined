@@ -143,6 +143,101 @@ def separability(
     return {view: _separability_for(view, chosen, vectors_by_text) for view in ("action", "object")}
 
 
+@dataclass(frozen=True, slots=True)
+class Ceiling:
+    """The best any method on these features could do, measured not assumed.
+
+    Separability above answers whether a *single threshold on raw similarity*
+    works. It cannot say whether the information is absent from the features or
+    merely not exposed by distance. A leave-one-out 1-nearest-neighbour on the
+    gold labels does: it is the most generous thing the representation can do,
+    because it is allowed to see the answer.
+
+    If the supervised ceiling is also low, the labels or the representation are
+    at fault and no encoder will fix it. If the ceiling is high while the
+    threshold score is low, the information is there and a *learned* method -
+    which is what the action/object projection would be - could get at it.
+    """
+
+    view: str
+    supervised_balanced_accuracy: float
+    labelled_pairs: int
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "view": self.view,
+            "supervised_balanced_accuracy": self.supervised_balanced_accuracy,
+            "labelled_pairs": self.labelled_pairs,
+        }
+
+
+def supervised_ceiling(
+    vectors_by_text: dict[str, np.ndarray],
+    pairs: Sequence[GoldPair],
+    view: str,
+) -> Ceiling:
+    """Leave-one-out 1-NN balanced accuracy on the gold labels.
+
+    Each pair contributes its two strings as two items carrying the pair's label.
+    Predicting an item means the most similar *other* item should carry the same
+    label. This is not a method anyone would ship - it needs the labels - but it
+    is the honest ceiling for what these vectors encode.
+    """
+    attribute = f"same_{view}"
+    items: list[np.ndarray] = []
+    labels: list[int] = []
+    for pair in pairs:
+        verdict = getattr(pair, attribute)
+        if verdict is None:
+            continue
+        # Two strings per pair and they share one label, so the label is appended
+        # twice. Appending it once made `labels` half the length of `items` and
+        # the nearest-neighbour lookup indexed out of bounds.
+        items.append(vectors_by_text[pair.a])
+        items.append(vectors_by_text[pair.b])
+        labels.extend([1 if verdict else 0, 1 if verdict else 0])
+    if not items:
+        raise ValueError(f"view {view!r} has no decided pairs")
+    if len(items) != len(labels):
+        raise ValueError(f"{len(items)} items but {len(labels)} labels")
+
+    matrix = np.stack(items)
+    truth = np.array(labels)
+    similarity = matrix @ matrix.T
+    # Own row is the only one to exclude; everything else is fair game.
+    np.fill_diagonal(similarity, -np.inf)
+
+    positives = truth == 1
+    negatives = ~positives
+    correct = np.zeros(len(truth), dtype=bool)
+    for index in range(len(truth)):
+        correct[index] = truth[int(np.argmax(similarity[index]))] == truth[index]
+
+    true_positive = float(correct[positives].sum())
+    true_negative = float(correct[negatives].sum())
+    balanced = 0.5 * (
+        (true_positive / int(positives.sum()) if positives.any() else 0.0)
+        + (true_negative / int(negatives.sum()) if negatives.any() else 0.0)
+    )
+    return Ceiling(
+        view=view,
+        supervised_balanced_accuracy=float(balanced),
+        labelled_pairs=len(truth),
+    )
+
+
+def ceilings(
+    vectors_by_text: dict[str, np.ndarray],
+    pairs: Sequence[GoldPair] | None = None,
+) -> dict[str, Ceiling]:
+    from experiments.clustering.evaluation import gold
+
+    chosen = tuple(pairs) if pairs is not None else gold.GOLD_PAIRS
+    return {
+        view: supervised_ceiling(vectors_by_text, chosen, view) for view in ("action", "object")
+    }
+
+
 def matrix_for(vectors_by_text: dict[str, np.ndarray], texts: Sequence[str]) -> np.ndarray:
     """Stack vectors in a caller-chosen order, for reuse by other steps."""
     return np.stack([vectors_by_text[text] for text in texts])

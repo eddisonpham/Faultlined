@@ -1,12 +1,34 @@
 {
+  "ceilings": {
+    "action": {
+      "labelled_pairs": 74,
+      "supervised_balanced_accuracy": 0.7484848484848485,
+      "view": "action"
+    },
+    "object": {
+      "labelled_pairs": 92,
+      "supervised_balanced_accuracy": 0.565625,
+      "view": "object"
+    }
+  },
   "embedding": {
     "backend": "m2v-32m",
+    "contextual": false,
     "dim": 512,
     "fingerprint": "minishlab/potion-base-32M@3b393362969361b7834b263489ad4acf",
     "model": "minishlab/potion-base-32M@3b393362969361b7834b263489ad4acf",
     "semantic": true
   },
   "experiment": "separability",
+  "verification": {
+    "checks": [
+      "shape and finiteness",
+      "determinism",
+      "orders identical above unrelated"
+    ],
+    "failures": [],
+    "ok": true
+  },
   "views": {
     "action": {
       "best_accuracy": 0.6833333333333333,

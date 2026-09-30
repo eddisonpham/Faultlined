@@ -122,19 +122,31 @@ def cmd_separability(args: argparse.Namespace) -> int:
     from experiments.clustering.evaluation import separability as sep
 
     encoder = embeddings.get(args.embedding)
+    check = embeddings.verify(encoder)
+    if not check.ok:
+        print(f"refusing to report a result for {encoder.name}: verification failed")
+        for failure in check.failures:
+            print(f"  - {failure}")
+        return 1
+
     texts = sorted(gold.vocab())
     vectors = embeddings.encode_all(encoder, texts)
     by_text = sep.all_vectors(vectors, texts)
     report = sep.separability(by_text)
+    ceilings = sep.ceilings(by_text)
 
     payload = {
         "experiment": "separability",
         "embedding": embeddings.describe(encoder),
+        "verification": check.as_dict(),
         "views": {name: value.as_dict() for name, value in report.items()},
+        "ceilings": {name: value.as_dict() for name, value in ceilings.items()},
     }
     path = _write(f"separability-{encoder.name}", payload)
 
-    print(f"embedding {encoder.name} dim={encoder.dim}  strings={len(texts)}")
+    kind = "contextual" if embeddings.is_contextual(encoder) else "static"
+    print(f"embedding {encoder.name} ({kind}) dim={encoder.dim}  strings={len(texts)}")
+    print(f"verified: {'ok' if check.ok else 'FAILED'} {list(check.checks)}")
     print(
         f"{'view':7s} {'pos n':>5s} {'neg n':>5s} {'pos_min':>8s} {'pos_mean':>9s} "
         f"{'neg_max':>8s} {'neg_mean':>9s} {'thresh':>7s} {'bacc':>6s} {'merge':>6s} {'split':>6s}"
@@ -148,12 +160,18 @@ def cmd_separability(args: argparse.Namespace) -> int:
             f"{value.false_merges:6d} {value.false_splits:6d}"
         )
     for value in report.values():
+        ceiling = ceilings[value.view]
         verdict = (
             f"clean below {value.clean_threshold:.3f}"
             if value.clean_threshold is not None
             else "classes interleave: no threshold separates them"
         )
         print(f"  {value.view}: {verdict}")
+        print(
+            f"    supervised ceiling (LOO 1-NN on the labels): "
+            f"{ceiling.supervised_balanced_accuracy:.3f} "
+            f"over {ceiling.labelled_pairs} labelled items"
+        )
     print(f"\nwrote {path.relative_to(Path.cwd())}")
     return 0
 

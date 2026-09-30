@@ -1,0 +1,62 @@
+{
+  "ceilings": {
+    "action": {
+      "labelled_pairs": 74,
+      "supervised_balanced_accuracy": 0.7704545454545455,
+      "view": "action"
+    },
+    "object": {
+      "labelled_pairs": 92,
+      "supervised_balanced_accuracy": 0.596875,
+      "view": "object"
+    }
+  },
+  "embedding": {
+    "backend": "minilm",
+    "contextual": true,
+    "dim": 384,
+    "fingerprint": "sentence-transformers/all-MiniLM-L6-v2@f6e5fecba63e90a48b80106e69368f1b",
+    "model": "sentence-transformers/all-MiniLM-L6-v2@f6e5fecba63e90a48b80106e69368f1b",
+    "semantic": true
+  },
+  "experiment": "separability",
+  "verification": {
+    "checks": [
+      "shape and finiteness",
+      "determinism",
+      "orders identical above unrelated"
+    ],
+    "failures": [],
+    "ok": true
+  },
+  "views": {
+    "action": {
+      "best_accuracy": 0.6439393939393939,
+      "best_threshold": 0.4831315279006958,
+      "clean_threshold": null,
+      "false_merges": 10,
+      "false_splits": 1,
+      "negative_max": 0.9046560525894165,
+      "negative_mean": 0.6488907694816589,
+      "negatives": 15,
+      "positive_mean": 0.7441223046996377,
+      "positive_min": 0.4030459523200989,
+      "positives": 22,
+      "view": "action"
+    },
+    "object": {
+      "best_accuracy": 0.8833333333333333,
+      "best_threshold": 0.8359277248382568,
+      "clean_threshold": null,
+      "false_merges": 0,
+      "false_splits": 7,
+      "negative_max": 0.826987624168396,
+      "negative_mean": 0.5433570966124535,
+      "negatives": 16,
+      "positive_mean": 0.8699561138947804,
+      "positive_min": 0.7047854661941528,
+      "positives": 30,
+      "view": "object"
+    }
+  }
+}

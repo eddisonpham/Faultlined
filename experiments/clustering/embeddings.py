@@ -111,6 +111,74 @@ class NullEncoder:
         return f"null-v1-dim{self.dim}-seed{self.seed}"
 
 
+class SentenceTransformerEncoder:
+    """A contextual encoder: MiniLM, run on CPU through `sentence-transformers`.
+
+    This is the one backend that is a neural forward pass rather than an average
+    of token vectors, and that distinction is the whole point. A static encoder
+    scores "pick up the red cube" and "push the red cube" at 0.836 because they
+    share four of five tokens, and the gold action label turns on exactly that
+    difference. A contextual encoder can represent *which* verb was used rather
+    than *which words were present*.
+
+    CPU-only on purpose. The captured box has an 8 GB GPU, but NFR-007 requires
+    the GPU-absent path, so a result obtained on the CPU is the one that counts
+    as evidence for the engine. Torch is pinned to the CPU wheel for the same
+    reason: the CUDA build is several gigabytes and would make the experiments
+    unreproducible on a machine without a GPU.
+    """
+
+    def __init__(self, model_id: str, name: str) -> None:
+        from sentence_transformers import SentenceTransformer  # lazy: heavy optional
+
+        self._name = name
+        self._model_id = model_id
+        self._model = SentenceTransformer(model_id, device="cpu")
+        # `get_embedding_dimension` is the current name; the old one still works
+        # but emits a FutureWarning that would drown out the results output.
+        # Typed as `int | None` upstream, and every shipped model sets it.
+        dimension = self._model.get_embedding_dimension()
+        if dimension is None:
+            raise ValueError(f"{model_id} reported no embedding dimension")
+        self._dim = int(dimension)
+
+    @property
+    def name(self) -> str:
+        return self._name
+
+    @property
+    def dim(self) -> int:
+        return self._dim
+
+    def encode(self, texts: Sequence[str]) -> np.ndarray:
+        if not texts:
+            return np.zeros((0, self._dim), dtype=DTYPE)
+        # The model normalises internally, but normalising here as well keeps the
+        # unit-norm contract a property of this module rather than a hope about
+        # one backend's defaults.
+        vectors = self._model.encode(
+            list(texts), convert_to_numpy=True, normalize_embeddings=False, show_progress_bar=False
+        )
+        return _l2_normalise(np.asarray(vectors, dtype=np.float32))
+
+    def fingerprint(self) -> str:
+        """Hash the actual weight tensors, not the model name.
+
+        Same reason as the static backend: a hub model can be re-published under
+        the same name, and a recorded result has to be checkable against the
+        weights that produced it.
+        """
+        digest = hashlib.blake2b(digest_size=16)
+        digest.update(self._model_id.encode("utf-8"))
+        state = self._model.state_dict()
+        for key in sorted(state):
+            tensor = state[key]
+            digest.update(key.encode("utf-8"))
+            digest.update(str(tuple(tensor.shape)).encode("utf-8"))
+            digest.update(np.ascontiguousarray(tensor.detach().cpu().numpy()).tobytes())
+        return f"{self._model_id}@{digest.hexdigest()}"
+
+
 class Model2VecEncoder:
     """A static distilled encoder loaded through `model2vec`.
 
@@ -180,12 +248,17 @@ def _build_m2v_32m() -> Encoder:
     return Model2VecEncoder("minishlab/potion-base-32M", "m2v-32m")
 
 
+def _build_minilm() -> Encoder:
+    return SentenceTransformerEncoder("sentence-transformers/all-MiniLM-L6-v2", "minilm")
+
+
 #: Ordered so the cheap, dependency-free backend is always first and results are
 #: comparable before any heavier backend is installed.
 BACKENDS: tuple[Backend, ...] = (
     Backend("null", lambda: NullEncoder(), "none"),
     Backend("m2v-8m", _build_m2v_8m, "model2vec"),
     Backend("m2v-32m", _build_m2v_32m, "model2vec"),
+    Backend("minilm", _build_minilm, "sentence-transformers"),
 )
 
 
@@ -230,6 +303,75 @@ def is_semantic(encoder: Encoder) -> bool:
     return not isinstance(encoder, NullEncoder)
 
 
+def is_contextual(encoder: Encoder) -> bool:
+    """True for a neural forward pass, False for a static or null encoder.
+
+    Reported alongside results because "static average" and "contextual encoder"
+    are different claims, and a result that does not say which it is cannot be
+    compared to one that does.
+    """
+    return isinstance(encoder, SentenceTransformerEncoder)
+
+
+#: Used by `verify`. Two texts that are the same string, and two that share no
+#: meaning at all. A working sentence encoder must separate these two cases; an
+#: encoder with broken pooling, a wrong model, or a silently constant output
+#: cannot, and would otherwise produce a confident and meaningless benchmark.
+_PROBE_SAME = ("pick up the red cube", "pick up the red cube")
+_PROBE_DIFFERENT = ("pick up the red cube", "database index rebuild")
+
+
+@dataclass(frozen=True, slots=True)
+class Verification:
+    """Whether an encoder can be trusted with a benchmark at all."""
+
+    ok: bool
+    checks: tuple[str, ...]
+    failures: tuple[str, ...]
+
+    def as_dict(self) -> dict[str, object]:
+        return {"ok": self.ok, "checks": list(self.checks), "failures": list(self.failures)}
+
+
+def verify(encoder: Encoder) -> Verification:
+    """Cheap sanity checks, run before an encoder's result is recorded.
+
+    Not a quality measurement - the separability experiment is. This only asks
+    whether the plumbing is right, which matters because a mis-wired contextual
+    encoder still returns confident-looking vectors: wrong mean pooling produces
+    numbers, not an error, and a benchmark built on them would be quietly false.
+    """
+    failures: list[str] = []
+    checks: list[str] = []
+
+    probe = list(_PROBE_SAME) + list(_PROBE_DIFFERENT)
+    matrix = encode_all(encoder, probe)
+    checks.append("shape and finiteness")
+
+    if np.linalg.norm(matrix[0] - matrix[1]) > 1e-5:
+        failures.append("identical strings produced different vectors")
+    if np.linalg.norm(matrix[2] - matrix[3]) < 1e-5:
+        failures.append("unrelated strings produced identical vectors")
+
+    repeat = encode_all(encoder, probe)
+    checks.append("determinism")
+    if not np.allclose(matrix, repeat, atol=1e-6):
+        failures.append("encoding is not deterministic across calls")
+
+    same = cosine(matrix[0], matrix[1])
+    different = cosine(matrix[2], matrix[3])
+    checks.append("orders identical above unrelated")
+    if same < 0.999:
+        failures.append(f"identical strings scored {same:.4f}, expected ~1.0")
+    if different >= same:
+        failures.append(
+            f"unrelated strings scored {different:.4f}, at or above the "
+            f"identical-pair score {same:.4f}"
+        )
+
+    return Verification(ok=not failures, checks=tuple(checks), failures=tuple(failures))
+
+
 def describe(encoder: Encoder) -> dict[str, object]:
     """Provenance for a result record."""
     return {
@@ -237,5 +379,6 @@ def describe(encoder: Encoder) -> dict[str, object]:
         "dim": encoder.dim,
         "fingerprint": encoder.fingerprint(),
         "semantic": is_semantic(encoder),
+        "contextual": is_contextual(encoder),
         "model": None if isinstance(encoder, NullEncoder) else encoder.fingerprint(),
     }

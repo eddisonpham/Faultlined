@@ -1,12 +1,34 @@
 {
+  "ceilings": {
+    "action": {
+      "labelled_pairs": 74,
+      "supervised_balanced_accuracy": 0.6598484848484849,
+      "view": "action"
+    },
+    "object": {
+      "labelled_pairs": 92,
+      "supervised_balanced_accuracy": 0.5635416666666666,
+      "view": "object"
+    }
+  },
   "embedding": {
     "backend": "null",
+    "contextual": false,
     "dim": 64,
     "fingerprint": "null-v1-dim64-seed0",
     "model": null,
     "semantic": false
   },
   "experiment": "separability",
+  "verification": {
+    "checks": [
+      "shape and finiteness",
+      "determinism",
+      "orders identical above unrelated"
+    ],
+    "failures": [],
+    "ok": true
+  },
   "views": {
     "action": {
       "best_accuracy": 0.75,
