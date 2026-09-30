@@ -12,7 +12,7 @@ artifacts, and failures pages (a 500 against real PostgreSQL).
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, ClassVar
 
 import pytest
 from fastapi.testclient import TestClient
@@ -25,7 +25,8 @@ class RecordingCatalog:
     """Enough catalog for the read routes, recording what it was handed.
 
     Pagination assertions need the *limit value that survived the API layer*,
-    so the fake is the witness: it records the clamp, not the request.
+    so the fake is the witness: it records what the route passed down, not what
+    the caller asked for.
     """
 
     def __init__(self) -> None:
@@ -62,6 +63,32 @@ class RecordingCatalog:
 
     def failure_summary(self) -> dict[str, Any] | None:
         return None
+
+    def list_slices(self, *, limit: int = 50, before: Any = None) -> list[dict[str, Any]]:
+        self.limits["slices"] = limit
+        return []
+
+    def list_builds(self, *, limit: int = 50) -> list[dict[str, Any]]:
+        self.limits["builds"] = limit
+        return []
+
+    def list_contracts(
+        self, *, outcome: str | None = None, limit: int = 50, before: Any = None
+    ) -> list[dict[str, Any]]:
+        self.limits["contracts"] = limit
+        return []
+
+    def list_incidents(
+        self,
+        *,
+        severity: str | None = None,
+        status: str | None = None,
+        label: str | None = None,
+        limit: int = 50,
+        before: Any = None,
+    ) -> list[dict[str, Any]]:
+        self.limits["incidents"] = limit
+        return []
 
     def get_job(self, job_id: str) -> dict[str, Any] | None:
         return None
@@ -111,43 +138,56 @@ class TestCorrelationHeader:
         assert "\x1b" not in response.headers["x-correlation-id"]
 
 
-class TestPaginationClamps:
-    @pytest.mark.parametrize("route", ["/api/v1/jobs", "/api/v1/artifacts"])
-    def test_negative_limit_is_clamped_to_one_not_passed_through(self, route: str) -> None:
-        catalog = RecordingCatalog()
-        response = _client(catalog).get(route, params={"limit": -5})
-        assert response.status_code == 200
-        assert catalog.limits[route.rsplit("/", 1)[-1]] == 1
+class TestPaginationBounds:
+    # One policy for every list route: an out-of-range limit is a 422, never a
+    # silent correction. The routes previously disagreed - some validated 1..500
+    # in the body while others clamped to 200 - so the same query parameter meant
+    # two different things depending on the endpoint, and a client could not tell
+    # a truncated page from a complete one. The bound now lives in the signature,
+    # which is also what OpenAPI documents.
+    ROUTES: ClassVar[list[str]] = [
+        "/api/v1/jobs",
+        "/api/v1/artifacts",
+        "/api/v1/episodes",
+        "/api/v1/failures/episodes",
+        "/api/v1/slices",
+        "/api/v1/incidents",
+        "/api/v1/contracts",
+        "/api/v1/builds",
+        "/ui/failures",
+    ]
 
-    @pytest.mark.parametrize("route", ["/api/v1/jobs", "/api/v1/artifacts"])
-    def test_oversized_limit_is_clamped_to_two_hundred(self, route: str) -> None:
-        catalog = RecordingCatalog()
-        response = _client(catalog).get(route, params={"limit": 10**9})
-        assert response.status_code == 200
-        assert catalog.limits[route.rsplit("/", 1)[-1]] == 200
+    @pytest.mark.parametrize("route", ROUTES)
+    @pytest.mark.parametrize("limit", [-5, 0, 501, 10**9])
+    def test_out_of_range_limit_is_a_422(self, route: str, limit: int) -> None:
+        response = _client().get(route, params={"limit": limit})
+        assert response.status_code == 422, f"{route} accepted limit={limit}"
 
-    def test_failing_episodes_api_validates_its_bounds_explicitly(self) -> None:
-        # Like the episodes route, the failures page answers an out-of-range
-        # limit with a 422 rather than silently correcting the caller.
-        response = _client().get("/api/v1/failures/episodes", params={"limit": -1})
+    @pytest.mark.parametrize("route", ROUTES)
+    def test_the_boundary_values_are_accepted(self, route: str) -> None:
+        assert _client().get(route, params={"limit": 1}).status_code == 200
+        assert _client().get(route, params={"limit": 500}).status_code == 200
+
+    def test_an_oversized_limit_never_reaches_the_catalog(self) -> None:
+        """The point of the bound: a huge page must not become a huge query."""
+        catalog = RecordingCatalog()
+        response = _client(catalog).get("/api/v1/jobs", params={"limit": 10**9})
         assert response.status_code == 422
+        assert catalog.limits.get("jobs") is None
 
-    def test_the_failures_ui_page_clamps_instead_of_passing_a_negative_through(self) -> None:
-        # The UI route takes ``limit`` from a query string too but does not
-        # validate; it must clamp, because its caller is a browser, not a
-        # client that reads 422s.
+    def test_an_in_range_limit_is_passed_through_unchanged(self) -> None:
         catalog = RecordingCatalog()
-        response = _client(catalog).get("/ui/failures", params={"limit": -5})
+        response = _client(catalog).get("/api/v1/jobs", params={"limit": 7})
         assert response.status_code == 200
-        assert catalog.limits["failing_episodes"] == 1
+        assert catalog.limits["jobs"] == 7
 
-    def test_episode_catalog_still_validates_its_bounds_explicitly(self) -> None:
-        # The episodes route validates 1..500 with a 422 instead of clamping;
-        # the contract is deliberate (explicit bounds beat silent correction)
-        # and the adversarial expectation is a 422 problem, never a 500.
-        response = _client().get("/api/v1/episodes", params={"limit": -5})
-        assert response.status_code == 422
-        assert response.json()["title"]
+    def test_the_bound_is_documented_in_openapi(self) -> None:
+        """A bound only clients can discover by trial is not a contract."""
+        schema = _client().get("/openapi.json").json()
+        limit = schema["paths"]["/api/v1/jobs"]["get"]["parameters"]
+        bound = next(p for p in limit if p["name"] == "limit")["schema"]
+        assert bound["minimum"] == 1
+        assert bound["maximum"] == 500
 
 
 class TestEnumAndPathAbuse:

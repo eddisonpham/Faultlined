@@ -7,10 +7,10 @@ import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime, timedelta
-from typing import Any, cast
+from typing import Annotated, Any, cast
 from uuid import uuid4
 
-from fastapi import FastAPI, Header, HTTPException, Request, Response
+from fastapi import FastAPI, Header, HTTPException, Query, Request, Response
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
 from pydantic import ValidationError
 
@@ -132,6 +132,14 @@ def _first_message(exc: ValidationError) -> str:
                 message = message[len(prefix) :]
         return f"{location}: {message}" if location else message
     return "That submission was not valid."
+
+
+#: Page bound shared by every list endpoint. Declared in the signature rather than
+#: checked in each body so FastAPI rejects an out-of-range value itself and OpenAPI
+#: documents the range. The routes previously disagreed - some hand-rolled a 1..500
+#: check, others silently clamped to 200 - so the same parameter meant two different
+#: things depending on which endpoint a client called.
+Limit = Annotated[int, Query(ge=1, le=500)]
 
 
 def _parse_state(state: str | None) -> JobState | None:
@@ -376,7 +384,7 @@ def create_app(
         request: Request,
         state: str | None = None,
         type: str | None = None,
-        limit: int = 50,
+        limit: Limit = 50,
         before: str | None = None,
     ) -> dict[str, Any]:
         """Newest-first page of jobs for the Jobs UI.
@@ -387,23 +395,21 @@ def create_app(
         catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
         parsed_state = _parse_state(state)
         parsed_before = _parse_cursor(before)
-        page = max(1, min(limit, 200))
         rows = catalog_for_request.list_jobs(
-            state=parsed_state, job_type=type, limit=page, before=parsed_before
+            state=parsed_state, job_type=type, limit=limit, before=parsed_before
         )
         items = [_job_summary(row) for row in rows]
-        next_before = rows[-1]["created_at"] if len(rows) == page else None
+        next_before = rows[-1]["created_at"] if len(rows) == limit else None
         return {"items": items, "next_before": next_before}
 
     @app.get("/api/v1/artifacts", response_model=ArtifactListResponse)
     def list_artifacts(
-        request: Request, limit: int = 50, before: str | None = None
+        request: Request, limit: Limit = 50, before: str | None = None
     ) -> dict[str, Any]:
         """Newest-first page of content-addressed artifacts with their referencing episodes."""
         catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
-        page = max(1, min(limit, 200))
-        rows = catalog_for_request.list_artifacts(limit=page, before=_parse_cursor(before))
-        next_before = rows[-1]["created_at"] if len(rows) == page else None
+        rows = catalog_for_request.list_artifacts(limit=limit, before=_parse_cursor(before))
+        next_before = rows[-1]["created_at"] if len(rows) == limit else None
         return {"items": rows, "next_before": next_before}
 
     @app.get("/api/v1/status", response_model=StatusResponse)
@@ -601,9 +607,9 @@ def create_app(
         return RedirectResponse(f"/ui/jobs/{job_id}{suffix}", status_code=303)
 
     @app.get("/api/v1/builds", response_model=BuildListResponse)
-    def list_builds(request: Request, limit: int = 50) -> dict[str, Any]:
+    def list_builds(request: Request, limit: Limit = 50) -> dict[str, Any]:
         catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
-        items = catalog_for_request.list_builds(limit=max(1, min(limit, 200)))
+        items = catalog_for_request.list_builds(limit=limit)
         return {"items": items}
 
     @app.get("/api/v1/builds/{build_hash}", response_model=BuildDetailResponse)
@@ -703,13 +709,13 @@ def create_app(
     def ui_failures(
         request: Request,
         theme: str | None = None,
-        limit: int = 50,
+        limit: Limit = 50,
         x_fragment: str | None = Header(default=None),
     ) -> HTMLResponse:
         catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
         model = {
             "summary": catalog_for_request.failure_summary(),
-            "items": catalog_for_request.failing_episodes(limit=max(1, min(limit, 200))),
+            "items": catalog_for_request.failing_episodes(limit=limit),
         }
         if x_fragment:
             return HTMLResponse(failures_fragment(model))
@@ -805,15 +811,13 @@ def create_app(
         request: Request,
         state: str | None = None,
         flag: str | None = None,
-        limit: int = 50,
+        limit: Limit = 50,
     ) -> dict[str, Any]:
         """Scriptable episode catalog with the same curation views as the UI."""
         if state is not None and state not in EPISODE_STATES:
             raise HTTPException(status_code=422, detail=f"unknown episode state: {state}")
         if flag is not None and flag not in EPISODE_FLAGS:
             raise HTTPException(status_code=422, detail=f"unknown flag: {flag}")
-        if limit < 1 or limit > 500:
-            raise HTTPException(status_code=422, detail="limit must be between 1 and 500")
         catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
         return {
             "items": catalog_for_request.list_episodes(
@@ -839,13 +843,11 @@ def create_app(
     @app.get("/api/v1/failures/episodes", response_model=FailingEpisodesResponse)
     def failures_episodes(
         request: Request,
-        limit: int = 50,
+        limit: Limit = 50,
         before: str | None = None,
         reason_code: str | None = None,
     ) -> dict[str, Any]:
         """Quarantined episodes with the reason codes that put them there."""
-        if limit < 1 or limit > 500:
-            raise HTTPException(status_code=422, detail="limit must be between 1 and 500")
         if reason_code is not None and reason_code not in REASON_CODES:
             raise HTTPException(status_code=422, detail=f"unknown reason_code: {reason_code}")
         catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
@@ -874,9 +876,9 @@ def create_app(
         return detail
 
     @app.get("/api/v1/slices", response_model=SliceListResponse)
-    def list_slices(request: Request, limit: int = 50, before: str | None = None) -> dict[str, Any]:
-        if limit < 1 or limit > 500:
-            raise HTTPException(status_code=422, detail="limit must be between 1 and 500")
+    def list_slices(
+        request: Request, limit: Limit = 50, before: str | None = None
+    ) -> dict[str, Any]:
         catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
         rows = catalog_for_request.list_slices(limit=limit, before=_parse_cursor(before))
         return {"items": rows}
@@ -929,7 +931,7 @@ def create_app(
         request: Request,
         state: str | None = None,
         flag: str | None = None,
-        limit: int = 100,
+        limit: Limit = 100,
     ) -> dict[str, Any]:
         """Curated manifest for curation and dataset builds.
 
@@ -941,8 +943,6 @@ def create_app(
             raise HTTPException(status_code=422, detail=f"unknown episode state: {state}")
         if flag is not None and flag not in EPISODE_FLAGS:
             raise HTTPException(status_code=422, detail=f"unknown flag: {flag}")
-        if limit < 1 or limit > 500:
-            raise HTTPException(status_code=422, detail="limit must be between 1 and 500")
         catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
         items = catalog_for_request.list_episodes(
             limit=limit, state=state or None, flag=flag or None
@@ -999,12 +999,10 @@ def create_app(
         severity: str | None = None,
         status: str | None = None,
         label: str | None = None,
-        limit: int = 50,
+        limit: Limit = 50,
         before: str | None = None,
     ) -> dict[str, Any]:
         """The incident queue, newest first. Read-only."""
-        if limit < 1 or limit > 500:
-            raise HTTPException(status_code=422, detail="limit must be between 1 and 500")
         if severity is not None and severity not in {item.value for item in Severity}:
             raise HTTPException(status_code=422, detail=f"unknown severity: {severity}")
         if label is not None:
@@ -1113,10 +1111,8 @@ def create_app(
 
     @app.get("/api/v1/contracts", response_model=ContractListResponse)
     def list_contracts(
-        request: Request, outcome: str | None = None, limit: int = 50, before: str | None = None
+        request: Request, outcome: str | None = None, limit: Limit = 50, before: str | None = None
     ) -> dict[str, Any]:
-        if limit < 1 or limit > 500:
-            raise HTTPException(status_code=422, detail="limit must be between 1 and 500")
         catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
         return {
             "items": catalog_for_request.list_contracts(
