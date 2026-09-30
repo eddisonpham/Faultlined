@@ -278,3 +278,51 @@ def test_a_ragged_synthetic_episode_is_rejected_at_the_contract() -> None:
             observations=[[1.0, 2.0], [3.0, 4.0]],
             actions=[[0.0], [0.0, 1.0]],
         )
+
+
+# ------------------------------------------------- bounded windows and the clock
+
+
+@pytest.mark.unit
+def test_a_clock_wider_than_the_retained_window_still_reports_its_whole_log_maximum() -> None:
+    """The streaming reader keeps a bounded window; the log it came from is not bounded.
+
+    `max_interval_seconds` is how it says "the largest interval I ever saw" without
+    holding the clock. It may raise the maximum and the integrity verdict, and it
+    may not touch the ratio.
+    """
+    window = [j / 50.0 for j in range(200)]
+    # A two-hour freeze that happened before the retained window begins.
+    quality = analyze(
+        _sine(200),
+        timestamps=window,
+        max_interval_seconds=7200.0,
+    )
+    assert quality.max_gap_seconds == 7200.0
+    assert quality.integrity == "gapped"
+    assert quality.gap_ratio == 0.0, "a window's ratio is not the log's ratio"
+
+
+@pytest.mark.unit
+def test_a_whole_log_maximum_within_the_threshold_leaves_the_verdict_alone() -> None:
+    """A slightly larger interval than the window saw is still a healthy stream."""
+    quality = analyze(
+        _sine(200),
+        timestamps=[j / 50.0 for j in range(200)],
+        max_interval_seconds=0.021,
+    )
+    assert quality.integrity == "ok"
+    # The override wins the maximum whenever it is larger; it is a floor, not a
+    # replacement, so it can only ever find a worse gap than the window did.
+    assert quality.max_gap_seconds == pytest.approx(0.021, rel=1e-6)
+
+
+@pytest.mark.unit
+def test_a_non_finite_whole_log_maximum_is_refused_rather_than_believed() -> None:
+    quality = analyze(
+        _sine(200),
+        timestamps=[j / 50.0 for j in range(200)],
+        max_interval_seconds=float("inf"),
+    )
+    assert quality.integrity == "ok"
+    assert math.isfinite(quality.max_gap_seconds)

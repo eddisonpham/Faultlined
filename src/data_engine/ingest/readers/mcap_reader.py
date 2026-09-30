@@ -107,6 +107,7 @@ class _Topic:
         "squares",
         "topic",
         "total",
+        "widest",
         "windows",
     )
 
@@ -125,12 +126,24 @@ class _Topic:
         self.last = 0
         self.reference: tuple[str, ...] = ()
         self.windows: dict[str, _Window] = {}
+        self.widest = 0.0
+        """Exact largest interval between consecutive accepted samples, whole log."""
         self.clock: list[float] = []
         """Log times of the messages that fed the quality window, decimated with it.
 
         Grown in lockstep with `windows` - one entry appended per accepted message,
-        and halved on the same trigger - so the two stay index-aligned and the
+        and trimmed on the same trigger - so the two stay index-aligned and the
         timestamps describe exactly the frames the verdict was computed from.
+
+        The trim drops the *oldest* half rather than halving by `[::2]`, and the
+        difference is the whole ballgame. Stride-halving is right for the value
+        windows, whose statistics do not care about order or spacing, but it is
+        wrong for a clock: the very first sample survives every halving, so the
+        buffer degenerates into that one ancient timestamp followed by a dense
+        block of recent ones, and the analysis reads the distance between them as
+        a gap. On a clean 50 Hz log that reported a 501-second hole in a
+        600-second recording whose largest real interval was 20 ms. A contiguous
+        recent window at true resolution cannot manufacture a gap.
         """
 
     def stamp(self, log_time: int) -> None:
@@ -173,9 +186,16 @@ class _Topic:
         self._decimate_clock(log_time)
 
     def _decimate_clock(self, log_time: int) -> None:
-        self.clock.append(log_time / 1e9)
+        stamp = log_time / 1e9
+        if self.clock:
+            # Measured on the raw stream, before any trimming, so `widest` is the
+            # exact largest interval of the whole log in constant memory - the one
+            # thing a bounded window cannot recover.
+            self.widest = max(self.widest, stamp - self.clock[-1])
+        self.clock.append(stamp)
         if len(self.clock) > 2 * QUALITY_WINDOW:
-            self.clock = self.clock[::2]
+            keep = (len(self.clock) + 1) // 2
+            self.clock = self.clock[len(self.clock) - keep :]
 
     def rate(self) -> float | None:
         span = self.span_seconds()
@@ -200,6 +220,10 @@ class _Topic:
 
     def quality_series(self) -> dict[str, list[float]]:
         return {f"{self.topic}.{name}": window.values for name, window in self.windows.items()}
+
+    def widest_interval(self) -> float:
+        """Exact largest gap between consecutive accepted samples, over the whole log."""
+        return self.widest
 
     def quality_clock(self) -> list[float] | None:
         """Timestamps aligned with `quality_series`, or None when nothing was sampled."""
@@ -288,7 +312,11 @@ class McapReader:
                 topic.stats() for topic in sorted(topics.values(), key=lambda t: t.topic)
             ),
             quality=(
-                analyze(judged.quality_series(), timestamps=judged.quality_clock())
+                analyze(
+                    judged.quality_series(),
+                    timestamps=judged.quality_clock(),
+                    max_interval_seconds=judged.widest_interval(),
+                )
                 if judged is not None
                 else None
             ),

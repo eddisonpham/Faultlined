@@ -70,9 +70,22 @@ succeed.
 6. **Ragged rows are rejected at the contract boundary** with a message naming the widths seen, so the
    failure is one clear validation error instead of an `IndexError` three layers down.
 7. **All three readers supply the clock**: the LeRobot reader passes the `timestamp` column, the
-   synthetic path passes `episode["timestamps"]`, and the MCAP reader carries a decimated log-time series
-   alongside its existing decimated value window — halved on the same trigger, so the memory bound is
-   unchanged.
+   synthetic path passes `episode["timestamps"]`, and the MCAP reader carries a log-time series
+   alongside its existing decimated value window, so the memory bound is unchanged.
+
+   The MCAP clock is **trimmed by dropping its oldest half, not by stride-halving**, even though the
+   value windows beside it still use `[::2]`. This split was not a design preference; the first
+   implementation shared the stride and the end-to-end run immediately falsified it. A clock buffer
+   halved with `[::2]` keeps sample 0 forever, so it degenerates into one ancient timestamp followed
+   by a dense block of recent ones, and the gap detector reads the distance between them as a dropped
+   recording: a clean 50 Hz, 600-second log was published as `integrity=gapped` with a 501-second
+   maximum gap. Value windows are immune because their statistics ignore order and spacing. A
+   contiguous recent window at true resolution cannot manufacture a gap.
+8. **The reader also reports the exact whole-log maximum interval**, in constant memory, alongside the
+   bounded window, and `analyze` takes it as `max_interval_seconds`. A bounded window cannot see a
+   freeze that happened before it filled, and reporting `ok` there would be the same falsehood in the
+   opposite direction. The override may raise `max_gap_seconds` and make `integrity` `gapped`; it may
+   not touch `gap_ratio`, because a ratio over a retained window is not a ratio over the log.
 
 ## Options considered
 
@@ -90,8 +103,14 @@ succeed.
   wrong number. That is the intended trade: absence over falsehood, stated where the operator sees it.
 - `episode_quality` grows 7 columns; readers and the three quality queries publish them; the OpenAPI
   contract is regenerated (`EpisodeSummary`, `EpisodeQualityResponse`).
-- The MCAP reader's memory bound is unchanged — the clock is decimated with the same `_Window` — but it
-  is a second series to keep in lockstep, pinned by `tests/unit/readers/test_mcap.py`.
+- The MCAP reader's memory bound is unchanged, but its clock and its value windows are now trimmed by
+  *different* rules on the same trigger, so a future change that re-unifies them will reintroduce the
+  false gap. Two tests in `tests/unit/readers/test_mcap.py` fail if it does, and both were confirmed
+  to fail against the stride-halving version.
+- The temporal signal describes the most recent `2 * QUALITY_WINDOW` accepted samples of a topic, which
+  at 50 Hz is about 20 seconds. `max_gap_seconds` and `integrity` cover the whole log; `gap_ratio`
+  covers only that window. This asymmetry is deliberate, and it is the one place in the product where a
+  published number is scoped rather than universal.
 - Verdict semantics changed, so episodes ingested before this ADR may carry a `worst`-based verdict in
   their stored `dims` JSON. The `verdict` column is recomputed only on re-ingest; content addressing
   means re-ingesting the same bytes is idempotent and is the supported way to refresh it.

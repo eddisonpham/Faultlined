@@ -278,3 +278,68 @@ def _bag(
     finally:
         writer.finish()
     return path
+
+
+@pytest.mark.unit
+def test_a_log_much_longer_than_the_quality_window_is_not_reported_as_gapped(
+    tmp_path: Path,
+) -> None:
+    """The regression that made this signal untrustworthy the first time.
+
+    The clock buffer used to be halved with `[::2]`, in lockstep with the value
+    windows. That is correct for values - their statistics ignore order and
+    spacing - and wrong for a clock: sample 0 survives every halving, so the
+    buffer ended up as one ancient timestamp followed by a dense block of recent
+    ones, and the gap detector read the distance between them as a dropped
+    recording. A clean 50 Hz log was reported as having a 501-second hole.
+
+    Four times the window, so the buffer is trimmed at least three times and the
+    residue has somewhere to go.
+    """
+    rate = 50.0
+    count = 8 * QUALITY_WINDOW
+    bodies = [{"position": [j, j, j]} for j in range(count)]
+    path = _bag(tmp_path / "long.mcap", {"/joint_states": (rate, bodies)})
+
+    quality = read_episode(path).quality
+
+    assert quality is not None
+    assert quality.integrity == "ok", quality.max_gap_seconds
+    # The whole-log maximum is measured on the raw stream, so it is the true
+    # inter-message interval and not a distance between decimated survivors.
+    assert quality.max_gap_seconds == pytest.approx(1 / rate, rel=1e-3)
+    assert quality.gap_ratio == 0.0
+
+
+@pytest.mark.unit
+def test_a_real_drop_before_the_retained_window_is_still_reported(tmp_path: Path) -> None:
+    """The bounded window cannot see this; the exact whole-log maximum can.
+
+    A freeze in the first tenth of a long log is discarded by the time the buffer
+    fills. Reporting `ok` there would be the same lie in the opposite direction,
+    so the reader keeps the largest interval it ever saw in constant memory and
+    hands it to the analysis.
+    """
+    rate = 50.0
+    count = 8 * QUALITY_WINDOW
+    period = round(1e9 / rate)
+    freeze_after = count // 10
+    path = tmp_path / "dropped.mcap"
+    writer = Writer(str(path), compression=CompressionType.NONE)
+    writer.start(profile="", library="test")
+    try:
+        topic = "/joint_states"
+        schema_id = writer.register_schema(topic, "json", b"{}")
+        channel_id = writer.register_channel(topic, "json", schema_id)
+        for index in range(count):
+            body = json.dumps({"position": [index, index, index]}).encode()
+            offset = period * index + (30 * 1e9 if index >= freeze_after else 0)
+            writer.add_message(channel_id, int(offset), body, int(offset))
+    finally:
+        writer.finish()
+
+    quality = read_episode(path).quality
+
+    assert quality is not None
+    assert quality.integrity == "gapped"
+    assert quality.max_gap_seconds == pytest.approx(30.0, rel=1e-3)

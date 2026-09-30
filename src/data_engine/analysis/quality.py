@@ -163,6 +163,7 @@ def analyze(
     series: Mapping[str, Sequence[float]],
     *,
     timestamps: Sequence[float] | None = None,
+    max_interval_seconds: float | None = None,
 ) -> EpisodeQuality:
     """Compute motion-quality signals from named per-dimension frame series.
 
@@ -172,6 +173,15 @@ def analyze(
     still get the motion verdict - but `integrity` stays `unknown`, because
     "the recording was continuous" is a claim about time and cannot be made
     without it.
+
+    `max_interval_seconds` is for the streaming reader, which keeps a bounded
+    window of a log far too long to hold in memory. Its timestamps describe only
+    the retained window, so a drop that happened an hour ago is invisible to
+    them; the reader can still know the largest interval it ever saw, exactly and
+    in constant memory, and passes it here. It raises `max_gap_seconds` and can
+    make `integrity` `gapped`, but it cannot raise `gap_ratio` - a ratio over a
+    window is not a ratio over the log, and reporting one as the other would be
+    the same class of lie this function exists to prevent.
 
     All series must cover the same frames; callers pass coherent slices (the
     synthetic contract validates this, readers slice one episode).
@@ -203,6 +213,16 @@ def analyze(
         )
 
     clock = _clock(timestamps, frame_count)
+    widest, ratio, gapped, threshold = clock
+    if (
+        max_interval_seconds is not None
+        and math.isfinite(max_interval_seconds)
+        and max_interval_seconds > (widest or 0.0)
+    ):
+        # A drop the retained window cannot see still happened, and "the recording
+        # was continuous" has to mean the whole recording.
+        widest = max_interval_seconds
+        gapped = gapped or max_interval_seconds > threshold
     if frame_count < MIN_FRAMES or not columns:
         return EpisodeQuality(
             frame_count=frame_count,
@@ -211,8 +231,8 @@ def analyze(
             stall_ratio=0.0,
             verdict="unknown",
             dims=(),
-            max_gap_seconds=clock[0],
-            gap_ratio=clock[1],
+            max_gap_seconds=widest,
+            gap_ratio=ratio,
             integrity="unknown",
         )
 
@@ -251,9 +271,9 @@ def analyze(
         stall_ratio=stall_ratio,
         verdict=verdict,
         dims=dims,
-        max_gap_seconds=clock[0],
-        gap_ratio=clock[1],
-        integrity="gapped" if clock[2] else ("ok" if clock[0] is not None else "unknown"),
+        max_gap_seconds=widest,
+        gap_ratio=ratio,
+        integrity="gapped" if gapped else ("ok" if widest is not None else "unknown"),
         worst_verdict=worst_verdict,
         worst_dim=worst_dim,
         judged_dims=judged,
@@ -262,8 +282,8 @@ def analyze(
 
 def _clock(
     timestamps: Sequence[float] | None, frame_count: int
-) -> tuple[float | None, float, bool]:
-    """`(max gap seconds, fraction of gapped transitions, any gap)`.
+) -> tuple[float | None, float, bool, float]:
+    """`(max gap seconds, fraction of gapped transitions, any gap, threshold)`.
 
     The threshold is relative to the median interval rather than an absolute one,
     because a 30 Hz arm and a 1 kHz torque loop are both healthy and a fixed
@@ -272,24 +292,24 @@ def _clock(
     inflated by that same drop would raise the bar above every real interval.
     """
     if timestamps is None or frame_count < MIN_FRAMES:
-        return None, 0.0, False
+        return None, 0.0, False, 0.0
     if len(timestamps) != frame_count:
         raise ValueError("timestamps must cover the same frames as the series")
     clock = [float(value) for value in timestamps]
     if not all(math.isfinite(value) for value in clock):
-        return None, 0.0, False
+        return None, 0.0, False, 0.0
     intervals = [right - left for left, right in pairwise(clock)]
     if any(interval < 0 for interval in intervals):
         # A clock that went backwards is not a gap, it is a broken source; the
         # duration is meaningless and every rate derived from it would be a lie.
-        return None, 0.0, True
+        return None, 0.0, True, 0.0
     ordered = sorted(intervals)
     median = ordered[len(ordered) // 2]
     if median <= 0:
-        return max(intervals), (1.0 if any(ordered) else 0.0), any(ordered)
+        return max(intervals), (1.0 if any(ordered) else 0.0), any(ordered), 0.0
     threshold = GAP_INTERVAL_FACTOR * median
     gapped = sum(1 for interval in intervals if interval > threshold)
-    return max(intervals), gapped / len(intervals), gapped > 0
+    return max(intervals), gapped / len(intervals), gapped > 0, threshold
 
 
 def _deltas(values: Sequence[float]) -> list[float]:
