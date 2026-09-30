@@ -836,6 +836,22 @@
         "title": "EpisodeValidationResponse",
         "type": "object"
       },
+      "ExportPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "build_hash": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Build Hash",
+            "type": "string"
+          }
+        },
+        "required": [
+          "build_hash"
+        ],
+        "title": "ExportPayload",
+        "type": "object"
+      },
       "FailingEpisodeRow": {
         "description": "One quarantined episode with its current failed validation result.",
         "properties": {
@@ -2291,6 +2307,44 @@
           "payload"
         ],
         "title": "SubmitBuildJobRequest",
+        "type": "object"
+      },
+      "SubmitExportJobRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "deadline_seconds": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deadline Seconds"
+          },
+          "max_attempts": {
+            "default": 3,
+            "maximum": 10.0,
+            "minimum": 1.0,
+            "title": "Max Attempts",
+            "type": "integer"
+          },
+          "payload": {
+            "$ref": "#/components/schemas/ExportPayload"
+          },
+          "type": {
+            "const": "export",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "payload"
+        ],
+        "title": "SubmitExportJobRequest",
         "type": "object"
       },
       "SubmitJobRequest": {
@@ -3772,6 +3826,9 @@
                   },
                   {
                     "$ref": "#/components/schemas/SubmitBuildJobRequest"
+                  },
+                  {
+                    "$ref": "#/components/schemas/SubmitExportJobRequest"
                   }
                 ],
                 "title": "Body"

@@ -60,6 +60,7 @@ class JobType(StrEnum):
     VALIDATE = "validate"
     INDEX = "index"
     BUILD = "build"
+    EXPORT = "export"
     WORKLOAD = "workload"
     GC = "gc"
 

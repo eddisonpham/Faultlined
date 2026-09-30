@@ -20,6 +20,7 @@ class Settings(BaseSettings):
 
     database_url: SecretStr = SecretStr("postgresql://localhost:5432/data_engine")
     artifact_root: Path = Path("./var/artifacts")
+    export_root: Path = Path("./var/exports")
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
     log_format: Literal["json", "text"] = "json"
     worker_slots: str = "auto"  # "auto" or "cpu=N,gpu=N"
@@ -33,6 +34,11 @@ class Settings(BaseSettings):
     @field_validator("artifact_root")
     @classmethod
     def _expand_artifact_root(cls, value: Path) -> Path:
+        return value.expanduser()
+
+    @field_validator("export_root")
+    @classmethod
+    def _expand_export_root(cls, value: Path) -> Path:
         return value.expanduser()
 
     def worker_slot_counts(self) -> tuple[int, int]:

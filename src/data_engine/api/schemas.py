@@ -128,8 +128,25 @@ class SubmitBuildJobRequest(_JobPolicy):
     payload: BuildPayload
 
 
+class ExportPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    build_hash: str = Field(min_length=1, max_length=64)
+
+
+class SubmitExportJobRequest(_JobPolicy):
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["export"]
+    payload: ExportPayload
+
+
 AnyJobRequest = (
-    SubmitJobRequest | SubmitSourceJobRequest | SubmitValidateJobRequest | SubmitBuildJobRequest
+    SubmitJobRequest
+    | SubmitSourceJobRequest
+    | SubmitValidateJobRequest
+    | SubmitBuildJobRequest
+    | SubmitExportJobRequest
 )
 
 

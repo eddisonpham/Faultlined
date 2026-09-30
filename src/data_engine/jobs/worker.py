@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from data_engine.builds import BuildError, DatasetBuilder
+from data_engine.builds.export import BuildExporter, ExportBuildUnknown, ExportError
 from data_engine.catalog.repository import IdempotencyConflict, PostgresCatalog
 from data_engine.config import Settings
 from data_engine.ingest.readers.base import ReaderError
@@ -49,6 +50,8 @@ _TERMINAL_FAILURES: tuple[type[Exception], ...] = (
     InvalidJobPayload,
     UnsupportedJobType,
     IdempotencyConflict,
+    ExportBuildUnknown,
+    ExportError,
 )
 
 
@@ -57,6 +60,10 @@ def _is_terminal(exc: Exception) -> bool:
 
 
 def _failure_reason_code(exc: Exception) -> ReasonCode:
+    if isinstance(exc, ExportBuildUnknown):
+        return ReasonCode.EXPORT_BUILD_UNKNOWN
+    if isinstance(exc, ExportError):
+        return ReasonCode.EXPORT_FAILED
     if isinstance(exc, InvalidJobPayload):
         return ReasonCode.INGEST_PARSE_FAILED
     if isinstance(exc, ReaderError):
@@ -122,6 +129,8 @@ class IngestWorker:
             return self._validate(payload)
         if job_type == JobType.BUILD:
             return self._build(payload, job_id=str(job["id"]))
+        if job_type == JobType.EXPORT:
+            return self._export(payload, job_id=str(job["id"]))
         raise UnsupportedJobType(f"unsupported job type: {job_type}")
 
     def _selection(
@@ -234,6 +243,39 @@ class IngestWorker:
             "profile_hash": build.profile_hash,
             "code_commit": build.code_commit,
         }
+
+    def _export(self, payload: dict[str, Any], *, job_id: str) -> dict[str, Any]:
+        """Materialise a build as a LeRobot v3 dataset on disk (ADR 0025).
+
+        The build hash is the address: an export that already exists there is a
+        verified no-op, so a retried job converges instead of duplicating work.
+        Membership comes from the build's own rows, then full episode rows are
+        fetched for the artifact hashes and metadata the layout needs - a
+        member that has left the catalog is a caller-visible error, not a
+        silently smaller dataset.
+        """
+        build_hash = payload.get("build_hash")
+        if not isinstance(build_hash, str) or not build_hash.strip():
+            raise InvalidJobPayload("payload.build_hash must be a non-empty build hash")
+        build_hash = build_hash.strip()
+        build = self.catalog.get_build(build_hash)
+        if build is None:
+            raise ExportBuildUnknown(f"unknown build hash: {build_hash}")
+        members = self.catalog.build_episodes(build_hash)
+        if not members:
+            raise InvalidJobPayload(f"build {build_hash} has no member episodes")
+        member_rows = self.catalog.get_episodes([str(m["episode_id"]) for m in members])
+        found = {str(row["id"]) for row in member_rows}
+        missing = [str(m["episode_id"]) for m in members if str(m["episode_id"]) not in found]
+        if missing:
+            raise InvalidJobPayload(
+                f"build members no longer in the catalog: {', '.join(missing[:5])}"
+            )
+        exporter = BuildExporter(self.settings.export_root, self.artifacts)
+        # ExportError (malformed build, undecodable artifact) propagates as
+        # itself: deterministic on every attempt, so it is terminal, and its
+        # own reason codes say EXPORT_* rather than INGEST_*.
+        return {**exporter.export(build, member_rows), "job_id": job_id}
 
     def _code_commit(self) -> str:
         """The commit that produced a build, when the checkout can name one.

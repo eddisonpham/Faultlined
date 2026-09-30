@@ -250,3 +250,38 @@ def test_cancel_endpoint_reports_missing_and_conflicting_jobs() -> None:
     body = conflict.json()
     assert body["code"] == "INVALID_TRANSITION"
     assert "running -> canceled" in body["detail"]
+
+
+def test_export_job_submits_with_its_own_contract() -> None:
+    """`export` names a build; the payload is flat, like validate/build."""
+    app = create_app(Settings(_env_file=None), initialize_database=False)
+    catalog = FakeCatalog()
+    app.state.catalog = catalog
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/v1/jobs",
+        json={"type": "export", "payload": {"build_hash": "bld_abc123"}},
+        headers={"Idempotency-Key": "exp-1"},
+    )
+
+    assert response.status_code == 202
+    body = response.json()
+    assert body["type"] == "export"
+    assert body["payload"] == {"build_hash": "bld_abc123"}
+    assert catalog.last_payload == {"build_hash": "bld_abc123"}
+
+
+def test_export_job_rejects_an_empty_build_hash() -> None:
+    response = _client().post(
+        "/api/v1/jobs", json={"type": "export", "payload": {"build_hash": ""}}
+    )
+    assert response.status_code == 422
+
+
+def test_export_job_rejects_unknown_payload_fields() -> None:
+    response = _client().post(
+        "/api/v1/jobs",
+        json={"type": "export", "payload": {"build_hash": "bld_x", "unexpected": 1}},
+    )
+    assert response.status_code == 422
