@@ -183,22 +183,6 @@ def _live(url: str | None, ms: int, html: str) -> str:
     return f'<div class="de-live"{_poll_attrs(url, ms)}>{html}</div>'
 
 
-def _sweep() -> str:
-    """Navigation indicator: a spring trace shown only while a page is in flight.
-
-    Server-rendered hidden. There is deliberately no page-load spinner: the
-    document is fully rendered by the time any script runs, so a loading panel
-    on load is a panel sitting above content that is already there - it claimed
-    work that was never outstanding. This appears only when a link click starts
-    a real navigation, which is the one case where the wait is real.
-    """
-    return (
-        '<div class="de-sweep-panel" data-sweep-panel hidden aria-hidden="true">'
-        '<div class="de-sweep" data-sweep><span></span><span></span><span></span></div>'
-        "</div>"
-    )
-
-
 def _page(
     title: str,
     active: str,
@@ -222,7 +206,6 @@ def _page(
         # fine-use-app is the vendored hook the CRT themes hang their scanline
         # and background off, so the shell carries it rather than <body>.
         f'<body><a class="de-skip fine-use-focusable" href="#main">Skip to content</a>'
-        f"{_sweep()}"
         f'<div class="de-shell fine-use-app">{_nav(active, theme)}'
         f"{_banner()}"
         f'<div class="de-head"><h1 class="fine-use-h1">{escape(title)}</h1>'

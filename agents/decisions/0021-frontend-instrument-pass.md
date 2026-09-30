@@ -263,6 +263,35 @@ left to right. A progress rule occludes nothing and is where someone already loo
 The blur is the load-bearing part, not decoration. A fade alone reads as a rendering glitch; a
 simultaneous defocus reads as "this is being replaced".
 
+**Superseded in part (2026-09-30). Both motion claims above were wrong, and an
+operator reported them as a glow.** The blur is gone, and so is the indicator.
+
+The blur first: on a neon terminal a blurred copy of the entire page is the same
+full-screen glow rule 2 rejects on text, and because it only existed between a
+link click and the next document it was reported as a rendering bug rather than a
+style. The transition dims to 0.25 and scales to 0.995.
+
+The indicator second. It went through three shapes - an in-flow panel that pushed
+the page down, a centred box that covered it, then a 2px rule - and the rule was
+still a decoration drawn over a page the server had already rendered, still a glow,
+and still motion with no informational content: the browser's own load state is
+the progress indicator and it is tied to the real document load rather than to a
+timer. The spring integrator went with it.
+
+The nav also lost its 2px `backdrop-filter`, which blurred the rows scrolling
+underneath it. It is opaque now, the same fix the sticky table header already used
+for the identical problem.
+
+**What changed about catching these.** Every check above was a text assertion
+against the stylesheet, and text assertions cannot see a `filter` that only
+applies during a navigation - which is precisely why the blur passed review
+twice. `scripts/ui_audit.mjs` now drives headless Chrome over the DevTools
+protocol and measures computed styles on all eleven pages, including the
+leaving state it applies itself. No dependencies: Node's built-in WebSocket
+against Chrome's own protocol, because a tool needing `npm install` is a tool
+that does not get run. It was verified by reintroducing both defects and
+confirming it fails, then removing them and confirming it passes.
+
 **Correction (2026-09-30): the blur is removed.** The reasoning above is wrong on this page.
 The same stylesheet turns the vendored phosphor glow off because "a blurred copy of every number
 behind the real one reads as decoration", and a 3px blur over the *entire* page is that same

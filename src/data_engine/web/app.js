@@ -368,130 +368,7 @@
         scratch.remove();
       }
     });
-  }
-
-  /* --------------------------------------------------------------- physics */
-
-  /*
-   * A damped harmonic oscillator, integrated per frame with semi-implicit Euler:
-   *
-   *     m * x'' = -k * (x - target) - c * x'
-   *
-   * The damping ratio zeta = c / (2 * sqrt(k * m)) decides the character, and
-   * is the only number that needs choosing: under 1 overshoots and rings, 1 is
-   * the fastest approach with no overshoot, over 1 is sluggish. The constants
-   * below give zeta = 0.537, so a step response overshoots ~13.5% and settles in
-   * ~570 ms. Raise c much past 14 and it reads as a plain CSS ease-out.
-   *
-   * Fixed 1/120 s substeps, not the raw frame delta: a dropped frame must not
-   * change the trajectory. Capped so a backgrounded tab does not return and try
-   * to catch up two hundred steps.
-   */
-  var SPRING_K = 170;   // stiffness
-  var SPRING_C = 14;    // damping  -> zeta ~ 0.537, ~13.5% overshoot
-  var SPRING_M = 1;     // mass
-
-  function Spring(stiffness, damping, mass) {
-    this.k = stiffness;
-    this.c = damping;
-    this.m = mass;
-    this.value = 0;
-    this.velocity = 0;
-    this.target = 0;
-  }
-
-  Spring.prototype.step = function (dt) {
-    var substep = 1 / 120;
-    var remaining = Math.min(dt, 0.25);
-    while (remaining > 0) {
-      var h = remaining > substep ? substep : remaining;
-      var force = -this.k * (this.value - this.target) - this.c * this.velocity;
-      this.velocity += (force / this.m) * h;
-      this.value += this.velocity * h;
-      remaining -= h;
-    }
-    // Snap at the asymptote. A spring never actually arrives, and one that
-    // never stops keeps the compositor busy for the life of the page.
-    if (Math.abs(this.value - this.target) < 0.001 && Math.abs(this.velocity) < 0.001) {
-      this.value = this.target;
-      this.velocity = 0;
-      return true;
-    }
-    return false;
-  };
-
-  /*
-   * The navigation indicator: three masses on springs, released toward staggered
-   * targets so the trace sweeps, overshoots and settles. Bar heights are written
-   * straight from the integrator, so the motion is the physics rather than a
-   * picture of physics.
-   *
-   * Shown ONLY while a navigation is genuinely in flight, never on load. The
-   * document is server-rendered, so by the time any script runs the content is
-   * already there; an indicator that cannot be sure whether something is loading
-   * is worse than none.
-   */
-  var sweepEl = null;
-  var sweepBars = [];
-  var sweepSprings = [];
-  var sweepFrame = null;
-  var sweepStart = 0;
-
-  function showSweep() {
-    if (!sweepEl || !sweepBars.length) return;
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-    sweepEl.removeAttribute("hidden");
-    // Restart from rest every time. The springs are allocated once and reused,
-    // so a second navigation must reset their state explicitly.
-    sweepSprings.forEach(function (sp, i) {
-      sp.value = 0;
-      sp.velocity = 0;
-      sp.releasedAt = i * 55;
-    });
-    sweepStart = 0;
-    if (!sweepFrame) sweepFrame = window.requestAnimationFrame(sweepLoop);
-  }
-
-  function sweepLoop(now) {
-    if (!sweepStart) sweepStart = now;
-    var elapsed = now - sweepStart;
-    var filled = 0;
-    sweepSprings.forEach(function (sp, i) {
-      var age = elapsed - sp.releasedAt;
-      if (age <= 0) return;
-      sp.target = 1;
-      sp.step(Math.min(age, 32) / 1000);
-      var v = Math.max(0, Math.min(1, sp.value));
-      filled += v;
-      // Segments fill left to right; each stops at its own settled value, so
-      // the line completes and then the whole rule eases off.
-      sweepBars[i].style.transform = "scaleX(" + v.toFixed(4) + ")";
-    });
-    // Past the settle the line is complete and the new document is arriving;
-    // hold it rather than retracting, which would read as "going backwards".
-    if (elapsed > 1400) { hideSweep(); return; }
-    sweepFrame = window.requestAnimationFrame(sweepLoop);
-  }
-
-  function hideSweep() {
-    if (sweepFrame) { window.cancelAnimationFrame(sweepFrame); sweepFrame = null; }
-    if (sweepEl) sweepEl.setAttribute("hidden", "");
-  }
-
-  function initSweep() {
-    sweepEl = $("[data-sweep-panel]");
-    sweepBars = sweepEl ? $$("[data-sweep] span", sweepEl) : [];
-    // Same damping ratio for all three; only the release time differs, so they
-    // read as one mechanism at three moments rather than as three differently
-    // tuned things.
-    sweepSprings = sweepBars.map(function (bar, i) {
-      var sp = new Spring(SPRING_K - i * 14, SPRING_C, SPRING_M);
-      sp.releasedAt = i * 55;
-      return sp;
-    });
-  }
-
-  /* ---------------------------------------------------------- page transition */
+  }/* ---------------------------------------------------------- page transition */
 
   /*
    * A cross-fade between pages, on the Material 3 emphasized pair. Deliberately
@@ -502,6 +379,12 @@
    * A same-document link, a modified click, or a cancelled navigation all leave
    * the class behind, so the page can never end up invisible; `pageshow` and a
    * short timer are the backstops.
+   *
+   * This is the only thing that moves during a navigation. There is no progress
+   * rule, no sweep, no spinner: the document is server-rendered, so anything
+   * drawn during the wait is decoration drawn over a page that is already
+   * correct, and it was reported as a glow. The browser's own load state is the
+   * progress indicator, and it is the honest one.
    */
   function initTransition() {
     var reduce = window.matchMedia("(prefers-reduced-motion: reduce)");
@@ -520,7 +403,6 @@
         try { url = new URL(href, window.location.href); } catch (e) { return; }
         if (url.origin !== window.location.origin) return;
         if (url.pathname === window.location.pathname && url.search === window.location.search) return;
-        showSweep();
         doc.body.classList.add("de-leaving");
       },
       true
@@ -528,13 +410,10 @@
     // Any way the transition ends other than a fresh document, un-hide.
     window.addEventListener("pageshow", function () {
       doc.body.classList.remove("de-leaving");
-      hideSweep();
     });
-    window.addEventListener("pagehide", hideSweep);
     window.setTimeout(function () {
       if (doc.body.classList.contains("de-leaving") && doc.visibilityState === "visible") {
         doc.body.classList.remove("de-leaving");
-        hideSweep();
       }
     }, 400);
   }
@@ -557,7 +436,6 @@
 
   function boot() {
     initTheme();
-    initSweep();
     stagger();
     // The entrance animation is gated on html:not([data-booted]). Flip it after
     // the first frame so the entrance plays once and never again - without it

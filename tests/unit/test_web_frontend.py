@@ -440,62 +440,31 @@ def test_motion_is_opt_in_everywhere() -> None:
 
 
 @pytest.mark.unit
-def test_the_navigation_indicator_is_a_real_spring_not_a_keyframe() -> None:
-    """Physics-based means an ODE, and the constants are the ones that show it.
+def test_nothing_is_drawn_over_the_page_while_it_navigates() -> None:
+    """The indicator is gone, and this is why.
 
-    At k=170 c=14 m=1 the damping ratio is 0.537: ~13.5% overshoot. The previous
-    constants (c=22) gave 0.85, which is nearly critically damped and looked
-    exactly like a CSS ease-out - the "physics" was invisible.
-    """
-    import math
+    Three shapes were tried: an in-flow panel that pushed the page down, a
+    centred box that covered it, and a 2px rule at the top. The document is
+    server-rendered, so the content is already on screen before any script runs,
+    and every one of them was decoration drawn over a page that was already
+    correct. The last was reported as a glow that appeared on navigation and
+    vanished on refresh - exactly what a class-driven effect does.
 
-    script = _no_comments(app_script())
-    assert "function Spring(" in script
-    assert "semi-implicit Euler" in script or "while (remaining > 0)" in script
-    k = int(re.search(r"SPRING_K = (\d+)", script).group(1))
-    c = int(re.search(r"SPRING_C = (\d+)", script).group(1))
-    m = int(re.search(r"SPRING_M = (\d+)", script).group(1))
-    zeta = c / (2 * math.sqrt(k * m))
-    overshoot = math.exp(-math.pi * zeta / math.sqrt(1 - zeta**2))
-    assert 0.45 < zeta < 0.65, f"zeta {zeta:.3f} is outside the visibly-springy band"
-    assert overshoot > 0.08, f"overshoot {overshoot:.1%} would be invisible"
-    # And the fixed substep, so a dropped frame cannot change the trajectory.
-    assert "var substep = 1 / 120;" in script
-    # Springs are built once, not per frame: allocating per frame is a leak.
-    assert script.count("new Spring(") == 1, "springs must be allocated once and reused"
-
-
-@pytest.mark.unit
-def test_nothing_is_ever_drawn_over_content_that_has_already_loaded() -> None:
-    """The reported bug: a loading panel rendered *above* an already-loaded page.
-
-    It sat in normal flow, so it occupied real vertical space and pushed the
-    finished page down the viewport. The fix is structural rather than cosmetic:
-    the indicator is an out-of-flow overlay, hidden in the served markup and shown
-    only for the duration of a navigation, so a settled page has nothing above it
-    by construction instead of by timing.
+    Nothing replaces it: the browser's own load state is the progress indicator,
+    and it is tied to the real document load rather than to a timer.
     """
     html = status_page({}, "vt220")
-    assert "data-sweep-panel" in html
-    assert 'aria-hidden="true"' in html, "a decorative sweep must not be read aloud"
-    # Hidden as served: an idle page must not contain a visible indicator.
-    panel = re.search(r'<div class="de-sweep-panel"[^>]*>', html).group(0)
-    assert "hidden" in panel, "the indicator must ship hidden, not fade out after load"
-
     css = layout_css()
-    block = css.split(".de-sweep-panel {")[1].split("}")[0]
-    assert "position: fixed" in block, "an in-flow indicator pushes the page down"
-    # The class sets `display: grid`, which outranks the UA rule for the `hidden`
-    # attribute, so the hide has to be restated at class specificity or the panel
-    # is a full-viewport overlay on every settled page.
-    assert ".de-sweep-panel[hidden] { display: none; }" in css
-
     script = _no_comments(app_script())
-    assert 'sweepEl.setAttribute("hidden", "")' in script, "it has to be reliably removed"
-    assert "if (reduce.matches)" in script, "reduced motion skips the sweep entirely"
-    # No second, in-flow progress bar survives anywhere in the shell.
-    assert "de-progress" not in html
-    assert "de-progress" not in css
+    for name in ("de-sweep-panel", "de-sweep", "data-sweep", "data-sweep-panel", "de-progress"):
+        assert name not in html, f"{name} is drawn over the page"
+        assert name not in css, f"{name} still has styles"
+        assert name not in script, f"{name} still has behaviour"
+    # The integrator went with it: springs exist only to move that rule.
+    assert "function Spring(" not in script
+    assert "requestAnimationFrame" not in script.split("initShortcuts")[0], (
+        "nothing left to animate per frame except the transition itself"
+    )
 
 
 @pytest.mark.unit
@@ -687,38 +656,41 @@ def test_the_page_is_never_blurred_while_it_is_leaving() -> None:
     The outgoing page was dimmed to 25% *and* blurred by 3px. On a neon
     terminal a blurred copy of the whole page is a full-screen glow: it was
     reported as a phosphor halo that had come back, and it only appeared on
-    navigation, because a refresh adds no class. Nothing else on the page may
-    reintroduce it either, so the blur is banned from any rule that styles
-    <body> or <html>.
+    navigation, because a refresh adds no class. Nothing else may reintroduce
+    it either, so no blur is allowed anywhere on the page.
     """
-    css = layout_css()
+    css = _no_comments(layout_css())
     block = css.split("body.de-leaving {")[1].split("}")[0]
     assert "filter" not in block, "a full-page blur is a glow, not a transition"
     for selector in ("body {", "body.de-leaving {"):
         rule = css.split(selector)[1].split("}")[0]
         assert "filter" not in rule, f"{selector} must not filter the page"
-    # The nav's backdrop blur is a different thing - it sits behind the chrome,
-    # is present on every settled page, and is not a glow. Guard the distinction
-    # so a well-meaning future edit does not delete it by accident.
-    assert "backdrop-filter: blur(2px)" in css
+    # The nav blurred the rows scrolling under it, which is the same decoration
+    # one element lower. It is opaque instead - the fix the sticky table header
+    # already used for the identical problem.
+    nav = css.split(".de-nav {")[1].split("}")[0]
+    assert "backdrop-filter" not in nav, "the nav must not blur the content under it"
+    assert "transparent)" not in nav, "an opaque strip cannot fade to transparent"
+    # Nothing anywhere may blur. Comments are stripped first, because the sheet
+    # documents both removals and a docstring is not a declaration.
+    assert "filter:" not in css, "a blur anywhere in the sheet is a glow on screen"
 
 
 @pytest.mark.unit
-def test_the_progress_rule_does_not_cover_the_page() -> None:
-    """It was a bordered box floating over the content it was describing.
+def test_the_only_navigation_motion_is_the_fade() -> None:
+    """One transition, no companion effect.
 
-    A centred panel reads as a dialog - it occludes the page and implies a
-    decision. A hairline at the top edge occludes nothing and is where someone
-    already looks after clicking.
+    The fade is the honest signal that the document is being replaced. Anything
+    else during a navigation is a second thing moving for no informational
+    reason, and it is what the operator saw as a glow.
     """
     css = layout_css()
-    block = css.split(".de-sweep-panel {")[1].split("}")[0]
-    assert "position: fixed" in block
-    assert re.search(r"inset:\s*0 0 auto 0", block), "pinned to the top edge, not centred"
-    assert "place-items: center" not in block, "a centred box covers the content"
-    assert re.search(r"height:\s*2px", block), "a rule, not a panel"
-    # It must not intercept clicks meant for the page underneath.
-    assert "pointer-events: none" in block
+    block = css.split("body.de-leaving {")[1].split("}")[0]
+    assert re.search(r"\bopacity:\s*0\.", block)
+    for banned in ("filter", "box-shadow", "backdrop-filter"):
+        assert banned not in block, f"{banned} on the outgoing page is a glow"
+    script = _no_comments(app_script())
+    assert script.count('classList.add("de-leaving")') == 1, "one trigger, not several"
 
 
 @pytest.mark.unit

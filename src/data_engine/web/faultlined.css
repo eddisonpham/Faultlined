@@ -23,7 +23,8 @@
  *    `text-shadow` inherits, so clearing it on the two elements that set it
  *    clears it from every descendant as well. The rule covers motion too: the
  *    page transition dims but never blurs, because a blurred page is the same
- *    glow at full-screen size.
+ *    glow at full-screen size. The rule covers `backdrop-filter` too: the nav
+ *    is opaque rather than blurring the rows that scroll under it.
  * 3. **Motion is opt-in.** Every animation sits behind
  *    `prefers-reduced-motion: no-preference`.
  */
@@ -132,17 +133,22 @@ body::before {
   margin: 0 -1.25rem 1rem;
   padding-inline: 1.25rem;
   border-bottom: 1px solid var(--fine-use-border, #0a0);
-  /* A faceplate is a machined strip: a faint top highlight, a hard bottom edge. */
+  /* A faceplate is a machined strip: a faint top highlight, a hard bottom edge.
+     Both gradient stops are opaque on purpose. The previous version faded to
+     `transparent` and put a 2px `backdrop-filter` on the nav to compensate, so
+     the content scrolling underneath was blurred into a halo behind the chrome -
+     the same decoration rule 2 rejects everywhere else, in the one place it is
+     hardest to notice. The sticky table header solved the identical problem by
+     being opaque; the nav does the same now. */
   background:
     linear-gradient(
       to bottom,
-      color-mix(in srgb, var(--fine-use-surface, #010) 70%, transparent),
-      transparent
+      color-mix(in srgb, var(--fine-use-surface, #010) 60%, var(--fine-use-bg, #000)),
+      var(--fine-use-bg, #000)
     );
   position: sticky;
   top: 0;
   z-index: 20;
-  backdrop-filter: blur(2px);
 }
 
 .de-brand {
@@ -1328,52 +1334,19 @@ pre.de-json {
 
 .de-skip:focus { left: 0.5rem; top: 0.5rem; }
 
-/* ---- navigation indicator ----------------------------------------------- */
+/* ---- no navigation indicator --------------------------------------------- */
 
 /*
- * A fixed overlay, not an in-flow block. The previous version was an ordinary
- * div in the document, which meant it occupied vertical space and pushed the
- * already-rendered page down the screen while claiming to be waiting for it.
- * An indicator that displaces the content it is describing is a layout bug
- * wearing a costume.
+ * There is deliberately no progress rule, sweep or spinner here. The document
+ * is server-rendered, so by the time any script runs the content is already on
+ * screen; anything drawn during the wait is decoration drawn over a page that
+ * is already correct. It went through three shapes - an in-flow panel that
+ * pushed the page down, a centred box that covered it, then a 2px rule - and the
+ * rule was still reported as a glow appearing on navigation.
+ *
+ * The browser's own load state is the progress indicator, and it is the honest
+ * one: it is tied to the actual document load rather than to a timer.
  */
-/* A 2px rule pinned to the top of the viewport, not a panel in the middle of
-   it. The old version floated a bordered box over the content, which read as a
-   dialog rather than as a status: it covered the page it was describing and it
-   implied a decision the operator might have to make. A progress rule is
-   unambiguous, occludes nothing, and is where a person already looks after
-   clicking.
-
-   `inset: 0 auto auto 0` with a width driven from JS, so the three spans are
-   segments of one line rather than three separate marks. */
-.de-sweep-panel {
-  position: fixed;
-  inset: 0 0 auto 0;
-  z-index: 200;
-  height: 2px;
-  pointer-events: none;
-  background: color-mix(in srgb, var(--de-line, #0a0) 40%, transparent);
-}
-
-.de-sweep-panel[hidden] { display: none; }
-
-.de-sweep {
-  display: flex;
-  gap: 2px;
-  height: 100%;
-  width: 100%;
-  transform-origin: left;
-}
-
-.de-sweep span {
-  display: block;
-  flex: 1;
-  height: 100%;
-  background: var(--fine-use-accent, #0c0);
-  transform-origin: left;
-  /* No transition: the integrator already produces a smooth per-frame value,
-     and a CSS transition on top would lag the physics rather than smooth it. */
-}
 
 /* ---- narrow screens ------------------------------------------------------- */
 
