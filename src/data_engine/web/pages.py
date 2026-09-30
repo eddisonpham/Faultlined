@@ -8,6 +8,11 @@ this module owns layout, semantics, and escaping.
 Polling re-requests the same page with ``X-Fragment: 1`` and swaps the returned
 HTML. The alternative, re-rendering JSON in JavaScript, would mean writing every
 row twice and two renderers eventually disagreeing.
+
+Every page function here must survive being handed a half-populated model. The
+data comes from a live catalog that can be mid-ingest, and a page that 500s
+because a row lacks a field is worse than one that renders a dash. See
+``agents/architecture/frontend.md``.
 """
 
 from __future__ import annotations
@@ -23,22 +28,27 @@ VENDOR = HERE / "vendor" / "terminal-ui"
 CORE_URL = "/ui/vendor/terminal-ui/core.css"
 THEME_URL = "/ui/vendor/terminal-ui/theme-{name}.css"
 LAYOUT_URL = "/ui/faultlined.css"
+APP_JS_URL = "/ui/app.js"
 
 # Upstream ships more themes; these four are vendored. See vendor/terminal-ui/NOTICE.md.
 THEMES = ("vt220", "amber", "github-dark", "monochrome")
 DEFAULT_THEME = "vt220"
 
+# (href, label, number-key). The key is printed in the nav and handled by
+# app.js; keeping the two in one tuple means a link cannot advertise a shortcut
+# the runtime does not implement. Ordered by how often an operator looks, not by
+# alphabet - Status first because it is the landing page, Incidents second
+# because a night-time notifier is the reason to come back to this UI.
 NAV_LINKS = (
-    ("/ui", "Status"),
-    ("/ui/jobs", "Jobs"),
-    ("/ui/episodes", "Episodes"),
-    ("/ui/failures", "Failures"),
-    ("/ui/slices", "Slices"),
-    ("/ui/incidents", "Incidents"),
-    ("/ui/insights", "Insights"),
-    ("/ui/metrics", "Metrics"),
-    ("/ui/artifacts", "Artifacts"),
-    ("/docs", "API"),
+    ("/ui", "Status", "1"),
+    ("/ui/incidents", "Incidents", "2"),
+    ("/ui/jobs", "Jobs", "3"),
+    ("/ui/episodes", "Episodes", "4"),
+    ("/ui/failures", "Failures", "5"),
+    ("/ui/slices", "Slices", "6"),
+    ("/ui/insights", "Insights", "7"),
+    ("/ui/metrics", "Metrics", "8"),
+    ("/ui/artifacts", "Artifacts", "9"),
 )
 
 FONT_URL = "/ui/vendor/departure-mono/DepartureMono-Regular.woff2"
@@ -76,70 +86,224 @@ def font_bytes() -> bytes:
     return FONT_PATH.read_bytes()
 
 
+def app_script() -> str:
+    """The client runtime. Read per request like the CSS, so an edit is live."""
+    return (HERE / "app.js").read_text(encoding="utf-8")
+
+
 def layout_css() -> str:
     return (HERE / "faultlined.css").read_text(encoding="utf-8")
 
 
-def _theme(name: str | None) -> str:
+def theme_or_default(name: str | None) -> str:
+    """Resolve an untrusted ``?theme=`` value to a vendored theme name.
+
+    Public because the error handlers need it: a 500 page has to be rendered in
+    the theme the operator had selected, and an unknown name must fall back
+    rather than emit a ``<link>`` to a stylesheet that does not exist.
+    """
     return name if name in THEMES else DEFAULT_THEME
 
 
 def _nav(active: str, theme: str) -> str:
-    links = " ".join(
-        f'<a href="{href}"{' aria-current="page"' if href == active else ""}>{label}</a>'
-        for href, label in NAV_LINKS
+    links = "".join(
+        f'<a href="{href}" data-key="{key}" class="fine-use-focusable"'
+        f"{' aria-current="page"' if href == active else ''}>{label}</a>"
+        for href, label, key in NAV_LINKS
     )
     options = "".join(
         f'<option value="{t}"{" selected" if t == theme else ""}>{t}</option>' for t in THEMES
     )
     return (
-        '<nav class="de-nav">'
-        '<span class="de-brand">Faultlined<span> / data engine</span></span>'
+        '<nav class="de-nav fine-use-focusable" aria-label="Sections">'
+        '<a class="de-brand" href="/ui">Faultlined'
+        "<span> / data engine</span></a>"
         f"{links}"
         '<span class="de-spacer"></span>'
-        f'<form method="get" action="{active}"><select class="de-theme" name="theme" '
-        f'onchange="this.form.submit()">{options}</select></form>'
+        # Link health. Hidden by default: an unchanging "live" badge in the
+        # corner of every page reads as branding, not as information. app.js
+        # reveals it the moment the state is anything but healthy, which is the
+        # only time it carries news. The word is still always present, so the
+        # state is never conveyed by hue alone.
+        '<span class="de-led" data-led data-state="ok" role="status" hidden>'
+        "<span data-led-text></span></span>"
+        # Hidden until app.js confirms it can switch the stylesheet; the form
+        # submit below is the no-JS path and stays in the markup.
+        f'<form method="get" action="{escape(active)}" class="de-theme-form">'
+        '<select class="de-theme theme-dropdown fine-use-focusable" name="theme" '
+        f'data-theme-select hidden onchange="this.form.submit()">{options}</select>'
+        '<button type="submit" class="de-sr">Apply theme</button></form>'
         "</nav>"
     )
 
 
-def _page(title: str, active: str, body: str, theme: str, script: str = "") -> str:
+def _banner() -> str:
+    """Failure strip. Server-rendered hidden; app.js reveals it.
+
+    The single most important error state in this UI: a poll that silently
+    fails leaves yesterday's numbers on screen looking authoritative.
+    """
+    return (
+        '<div class="de-banner" data-banner data-visible="0" role="alert">'
+        '<span class="de-banner-mark" aria-hidden="true">!</span>'
+        '<span class="de-banner-msg" data-banner-msg></span>'
+        '<button type="button" data-banner-retry>retry now</button>'
+        "</div>"
+    )
+
+
+def _poll_attrs(url: str | None, ms: int) -> str:
+    """Attributes app.js reads to drive a panel. Empty string disables polling."""
+    if not url:
+        return ""
+    return f' data-poll="{escape(url)}" data-poll-ms="{ms}"'
+
+
+def _live(url: str | None, ms: int, html: str) -> str:
+    """Wrap the volatile part of a page in the region app.js replaces.
+
+    Deliberately the *innermost* element rather than ``<main>``: a poll that
+    replaces the whole main region would also wipe the filter forms and the
+    panel headings around it, so a filtered Jobs page would quietly lose its
+    filter after three seconds. The fragment returned by the route must be
+    byte-identical in shape to what sits inside this element.
+    """
+    return f'<div class="de-live"{_poll_attrs(url, ms)}>{html}</div>'
+
+
+def _sweep() -> str:
+    """Navigation indicator: a spring trace shown only while a page is in flight.
+
+    Server-rendered hidden. There is deliberately no page-load spinner: the
+    document is fully rendered by the time any script runs, so a loading panel
+    on load is a panel sitting above content that is already there - it claimed
+    work that was never outstanding. This appears only when a link click starts
+    a real navigation, which is the one case where the wait is real.
+    """
+    return (
+        '<div class="de-sweep-panel" data-sweep-panel hidden aria-hidden="true">'
+        '<div class="de-sweep" data-sweep><span></span><span></span><span></span></div>'
+        "</div>"
+    )
+
+
+def _page(
+    title: str,
+    active: str,
+    body: str,
+    theme: str,
+) -> str:
+    """Assemble a full document. ``body`` is the already-composed page content."""
+    subtitle = _SUBTITLES.get(active, "")
+    sub = f'<p class="de-sub">{escape(subtitle)}</p>' if subtitle else ""
     return (
         '<!doctype html><html lang="en" data-theme="' + theme + '">'
         '<head><meta charset="utf-8">'
         f"<title>{escape(title)} // Faultlined</title>"
         '<meta name="viewport" content="width=device-width,initial-scale=1">'
+        '<meta name="color-scheme" content="dark">'
         f'<link rel="stylesheet" href="{CORE_URL}">'
-        f'<link rel="stylesheet" href="{THEME_URL.format(name=theme)}">'
+        f'<link rel="stylesheet" data-de-theme href="{THEME_URL.format(name=theme)}">'
         f'<link rel="stylesheet" href="{LAYOUT_URL}">'
-        f'</head><body><div class="de-shell">{_nav(active, theme)}'
-        f'<div class="de-head"><h1>{escape(title)}</h1>'
-        '<span class="de-clock" data-clock>--:--:--</span></div>'
-        f"{body}"
-        f"<script>{script}</script></div></body></html>"
+        f'<script src="{APP_JS_URL}" defer></script>'
+        "</head>"
+        # fine-use-app is the vendored hook the CRT themes hang their scanline
+        # and background off, so the shell carries it rather than <body>.
+        f'<body><a class="de-skip fine-use-focusable" href="#main">Skip to content</a>'
+        f"{_sweep()}"
+        f'<div class="de-shell fine-use-app">{_nav(active, theme)}'
+        f"{_banner()}"
+        f'<div class="de-head"><h1 class="fine-use-h1">{escape(title)}</h1>'
+        '<span class="de-clock" data-clock data-stale="0">--:--:--</span></div>'
+        f"{sub}"
+        f'<main id="main" tabindex="-1">{body}</main>'
+        '<span class="de-sr" role="status" aria-live="polite" data-live></span>'
+        "</div></body></html>"
     )
+
+
+def error_page(status: int, detail: str, theme: str | None = None) -> str:
+    """A failure the operator has to read, rendered in the same instrument skin.
+
+    A raw JSON 500 on a page the browser navigated to is a dead end; this says
+    what happened, gives the correlation id to quote, and offers a way back.
+
+    ``theme`` is resolved through the same allowlist as every other page, so a
+    caller cannot emit a ``<link>`` to a stylesheet that does not exist. The
+    error path is the last thing standing between a bad query string and a page
+    that renders with no stylesheet at all.
+    """
+    return _page(
+        f"Error {status}",
+        "",
+        _section(
+            f"Request failed // {status}",
+            f'<p class="de-empty">{escape(detail)}</p>'
+            '<p class="de-sub">this is usually transient: the catalog may be '
+            "starting, or a job is holding a lock.</p>"
+            '<form method="get" action=""><button type="submit" '
+            'class="de-cancel fine-use-focusable">retry</button></form>',
+            "the panel did not load",
+        ),
+        theme_or_default(theme),
+    )
+
+
+# One line of context per section, so the operator knows what a panel is and how
+# fresh it is without leaving the page. Deliberately describes the *work*, never
+# the transport: no route names, no verbs, no endpoint paths. The browser surface
+# is an operator console, and a route template rendered as a heading tells the
+# reader nothing they can act on while disclosing the shape of the surface.
+_SUBTITLES = {
+    "/ui": "live telemetry // poll 3s",
+    "/ui/jobs": "queue and run history // newest first",
+    "/ui/incidents": "deterministic notifier // read-only",
+    "/ui/episodes": "curation view // quality scored at ingest",
+    "/ui/failures": "quarantine triage // read-only",
+    "/ui/slices": "named curation filters // membership recomputed on read",
+    "/ui/insights": "dataset distribution // outliers are removal candidates",
+    "/ui/metrics": "runtime telemetry // where the time goes",
+    "/ui/artifacts": "content addressed // hash is the identity",
+}
 
 
 # ---------------------------------------------------------------- primitives
 
 
 def _readouts(pairs: list[tuple[str, str, str]]) -> str:
+    """A row of instrument readouts. ``pairs`` is (legend, value-html, unit)."""
     cells = "".join(
-        f'<div class="de-readout"><dt>{escape(label)}</dt>'
-        f"<dd>{value}<small>{escape(unit)}</small></dd></div>"
+        f'<div class="de-readout block-item"><dt>{escape(label)}</dt>'
+        f'<dd class="current-value">{value}<small>{escape(unit)}</small></dd></div>'
         for label, value, unit in pairs
     )
     return f'<dl class="de-readouts">{cells}</dl>'
 
 
 def _meter(fraction: float, width: int = 24) -> str:
-    """ASCII meter, e.g. [#########.............] 38%."""
+    """ASCII meter, e.g. [#########.............] 38%.
+
+    Kept as text rather than a styled div: it survives a print, a screen reader,
+    and a stylesheet that failed to load, and it needs no ARIA to be legible.
+    """
     filled = max(0, min(width, round(fraction * width)))
     return (
-        f'<span class="de-meter">[{"#" * filled}'
+        f'<span class="de-meter" role="img" '
+        f'aria-label="{round(fraction * 100)} percent">[{"#" * filled}'
         f'<span class="off">{"." * (width - filled)}</span>] '
         f"{round(fraction * 100)}%</span>"
     )
+
+
+def _copyable(value: str, shown: str | None = None) -> str:
+    """An identifier the operator can click to copy in full.
+
+    Tables truncate ids to keep columns narrow, and a truncated id pasted into
+    a bug report is worse than no id. Shift-click still selects the text.
+    """
+    full = escape(str(value))
+    text = escape(str(shown if shown is not None else value))
+    return f'<code class="de-copy" data-copy="{full}" title="click to copy">{text}</code>'
 
 
 def _verdict_badge(verdict: Any) -> str:
@@ -149,7 +313,20 @@ def _verdict_badge(verdict: Any) -> str:
     return f'<span class="text-{css}">{escape(str(verdict))}</span>'
 
 
-def _sparkline(values: list[float], *, width: int = 260, height: int = 44) -> str:
+def _svg_open(width: int, height: int, label: str, extra: str = "") -> str:
+    """Scope-screen frame.
+
+    ``role="img"`` with a real label rather than a decorative trace: a
+    sparkline is data, and a screen reader should be told it is a chart rather
+    than skip an empty element.
+    """
+    return (
+        f'<svg class="de-chart{extra}" viewBox="0 0 {width} {height}" '
+        f'preserveAspectRatio="none" role="img" aria-label="{escape(label)}">'
+    )
+
+
+def _sparkline(values: list[float], *, width: int = 260, height: int = 44, label: str = "") -> str:
     """SVG trace of a series on the graticule; one `<polyline>`, nothing fetched."""
     data = [float(v) for v in values] or [0.0]
     lo, hi = min(data), max(data)
@@ -159,10 +336,10 @@ def _sparkline(values: list[float], *, width: int = 260, height: int = 44) -> st
         f"{i * step:.1f},{height - 3 - (v - lo) / span * (height - 6):.1f}"
         for i, v in enumerate(data)
     )
+    span_text = f", range {lo:.4g} to {hi:.4g}" if label else ""
     return (
-        f'<svg class="de-chart" viewBox="0 0 {width} {height}" '
-        f'preserveAspectRatio="none" role="img">'
-        f'<polyline points="{points}"/></svg>'
+        _svg_open(width, height, f"{label or 'trend'}: {len(data)} samples{span_text}")
+        + f'<polyline points="{points}"/></svg>'
     )
 
 
@@ -182,8 +359,8 @@ def _histogram_svg(bins: list[dict[str, Any]], *, width: int = 260, height: int 
 
     rects = "".join(rect(i, int(b.get("count") or 0)) for i, b in enumerate(bins))
     return (
-        f'<svg class="de-chart de-chart-bars" viewBox="0 0 {width} {height}" '
-        f'preserveAspectRatio="none" role="img">{rects}</svg>'
+        _svg_open(width, height, f"histogram of {len(bins)} bins", " de-chart-bars")
+        + f"{rects}</svg>"
     )
 
 
@@ -201,10 +378,7 @@ def _scatter_svg(
         return f'<circle cx="{index * step:.1f}" cy="{cy:.1f}" r="2"/>'
 
     dots = "".join(dot(i, v) for i, v in enumerate(values))
-    return (
-        f'<svg class="de-chart de-chart-dots" viewBox="0 0 {width} {height}" '
-        f'preserveAspectRatio="none" role="img">{dots}</svg>'
-    )
+    return _svg_open(width, height, f"{len(items)} episodes by {key}") + f"{dots}</svg>"
 
 
 def _state_badge(state: str) -> str:
@@ -218,6 +392,148 @@ def _state_badge(state: str) -> str:
         "retrying": "warning",
     }.get(state, "comment")
     return f'<span class="text-{css}">{escape(state)}</span>'
+
+
+def _table(caption: str, headers: str, rows: str, extra: str = "", empty: str | None = None) -> str:
+    """A data table with a real caption, inside a scroll container.
+
+    The caption is visually hidden but present: a table of job states with no
+    accessible name is a grid of anonymous cells to a screen reader, and this
+    UI is meant to be usable without sight.
+
+    The wrapper is what stops a wide table from pushing a horizontal scrollbar
+    onto the whole page. The Episodes table is ten columns and does overflow at
+    laptop width; without this the entire document scrolls sideways, including
+    the nav. ``tabindex="0"`` makes the scroll region keyboard-reachable, which
+    is required or a keyboard user cannot pan it at all.
+    """
+    if not rows:
+        return _empty(empty if empty is not None else caption)
+    return (
+        '<div class="de-table-wrap" tabindex="0" role="region" '
+        f'aria-label="{escape(caption)}">'
+        f'<table class="de-table fine-use-data-table{extra}">'
+        f'<caption class="de-sr">{escape(caption)}</caption>'
+        f"<thead><tr>{headers}</tr></thead><tbody>{rows}</tbody></table>"
+        "</div>"
+    )
+
+
+def _empty(what: str, hint: str = "", link: tuple[str, str] | None = None) -> str:
+    """Empty state.
+
+    Says *what is absent* and, where there is one, *what would make it appear*.
+    A bare blank panel reads as a broken page; "// no jobs recorded" reads as a
+    fact about the system.
+
+    `link` is a (label, href) pair rendered as real markup. It is a separate
+    argument rather than a flag on `hint` because `hint` is escaped: a hint that
+    quietly stopped escaping would be a hole, and one that escaped an author's
+    <a> would be a broken link. Two arguments, two rules, no third way.
+    """
+    tail = f" // {escape(hint)}" if hint else ""
+    if link:
+        label, href = link
+        tail += f' // <a href="{escape(href)}">{escape(label)}</a>'
+    return f'<p class="de-empty">// {escape(what)}{tail}</p>'
+
+
+def _section(title: str, body: str, label: str = "") -> str:
+    """A bolted-down panel: heading, optional silkscreen label, content."""
+    bezel = f'<span class="de-bezel-label">{escape(label)}</span>' if label else ""
+    return (
+        '<section class="de-section fine-use-component">'
+        f"<h2>{escape(title)}{bezel}</h2>{body}</section>"
+    )
+
+
+def _text(value: Any) -> str:
+    """A plain string, never None. Used where a helper is chained onto the result."""
+    return "" if value is None else str(value)
+
+
+# ------------------------------------------------------------------ ingest form
+
+# The two shapes an ingest can take, in the words a person would use. The
+# underlying job types are `ingest` (an episode in the request) and
+# `ingest_source` (a path on disk); those names are for the code.
+_INGEST_KINDS = (
+    ("episode", "an episode"),
+    ("path", "a dataset on disk"),
+)
+
+_INGEST_STEPS = (
+    ("Describe the episode", "Name the task and robot. Frames are generated as a ramp."),
+    ("Or point at a path", "A LeRobot dataset directory. The format is detected on read."),
+    ("Watch it land", "Jobs shows the queue. Episodes shows what was registered."),
+)
+
+
+def _ingest_form(
+    error: str = "",
+    values: dict[str, str] | None = None,
+) -> str:
+    """The only way data enters the system, and the first thing a new user sees.
+
+    A plain form POST, so it works with scripting off - consistent with every
+    other control here, and the reason it needs no JavaScript to be usable.
+
+    Errors are rendered inline next to the control that caused them rather than
+    as a page-level failure. A form that discards what you typed and shows a
+    stack trace somewhere else is indistinguishable from the form being broken.
+    """
+    vals = values or {}
+    kind = vals.get("kind", "episode")
+    if kind not in dict(_INGEST_KINDS):
+        kind = "episode"
+
+    def field(name: str, label: str, placeholder: str, *, wide: bool = False) -> str:
+        value = escape(vals.get(name, ""))
+        cls = "de-field de-field-wide" if wide else "de-field"
+        return (
+            f'<label class="{cls}" for="ing-{name}">'
+            f'<span class="de-field-label">{escape(label)}</span>'
+            f'<input id="ing-{name}" name="{name}" type="text" value="{value}" '
+            f'placeholder="{escape(placeholder)}" autocomplete="off" spellcheck="false">'
+            "</label>"
+        )
+
+    options = "".join(
+        f'<option value="{value}"{" selected" if value == kind else ""}>{escape(label)}</option>'
+        for value, label in _INGEST_KINDS
+    )
+    steps = "".join(
+        f'<li><span class="de-step-n">{i}</span>{escape(text)}</li>'
+        for i, (_, text) in enumerate(_INGEST_STEPS, start=1)
+    )
+    notice = f'<p class="de-notice de-notice-error">{escape(error)}</p>' if error else ""
+
+    return _section(
+        "Ingest data",
+        (
+            f"{notice}"
+            '<ol class="de-steps">' + steps + "</ol>"
+            '<form class="de-ingest" method="post" action="/ui/jobs">'
+            f'<div class="de-field-row">'
+            f'<label class="de-field" for="ing-kind">'
+            f'<span class="de-field-label">what are you loading</span>'
+            f'<select id="ing-kind" name="kind">{options}</select>'
+            "</label></div>"
+            f'<div class="de-field-row">'
+            + field("task", "task", "pick_place")
+            + field("robot", "robot", "arm")
+            + field("frames", "frames", "3")
+            + "</div>"
+            '<div class="de-field-row">'
+            + field("source", "dataset path (optional)", "data/lerobot/my_dataset", wide=True)
+            + "</div>"
+            '<button type="submit" class="de-submit">queue ingest job</button>'
+            '<p class="de-sub-note">The worker picks it up within a second. '
+            "This is a no-op-safe form: submitting twice creates two jobs.</p>"
+            "</form>"
+        ),
+        "no javascript required",
+    )
 
 
 def _when(value: Any) -> str:
@@ -244,70 +560,16 @@ def _pretty(value: Any) -> str:
         return str(value)
 
 
-_CLOCK_JS = """
-(function () {
-  var el = document.querySelector('[data-clock]');
-  if (!el) return;
-  var tick = function () {
-    var d = new Date();
-    el.textContent = d.toISOString().slice(11, 19) + ' UTC';
-  };
-  tick();
-  setInterval(tick, 1000);
-})();
-"""
-
-# Intervals follow agents/architecture/frontend.md: jobs list 3 s, detail 5 s,
-# and polling pauses while the tab is hidden.
-_POLL_JS = """
-(function (url, ms) {
-  setInterval(function () {
-    if (document.hidden) return;
-    fetch(url, {headers: {'X-Fragment': '1'}})
-      .then(function (r) { return r.ok ? r.text() : null; })
-      .then(function (t) {
-        if (t) document.querySelector('[data-poll]').innerHTML = t;
-      })
-      .catch(function () { /* keep the last good render on a transient error */ });
-  }, ms);
-})(%s, %d);
-"""
-
-
-def _script(url: str | None, ms: int) -> str:
-    return _CLOCK_JS + ("" if url is None else _POLL_JS % (json.dumps(url), ms))
-
-
-# Counts the remaining job budget down in the browser so a deadline does not need a
-# poll to look alive. Purely presentational: the server still owns the timeout.
-_DEADLINE_JS = """
-(function () {
-  var el = document.querySelector('[data-deadline]');
-  if (!el) return;
-  var deadline = Number(el.getAttribute('data-deadline')) * 1000;
-  var tick = function () {
-    var left = Math.round((deadline - Date.now()) / 1000);
-    if (left <= 0) {
-      el.textContent = Math.abs(Math.round(left / 60)) + 'm over';
-      el.className = 'text-error';
-      return;
-    }
-    el.textContent = Math.round(left / 60) + 'm left';
-  };
-  tick();
-  setInterval(tick, 15000);
-})();
-"""
+# The clock, the poller and the deadline countdown all live in web/app.js now.
+# Keeping them here meant every page carried its own copy of the same three
+# functions, and a fix to the failure banner had to be made nine times.
 
 
 # ---------------------------------------------------------------- status
 
 
 def status_page(model: dict[str, Any], theme: str) -> str:
-    body = (
-        f'<p class="de-sub">live telemetry // poll 3s</p><div data-poll>{_status_body(model)}</div>'
-    )
-    return _page("Status", "/ui", body, theme, _script("/ui", 3000))
+    return _page("Status", "/ui", _live("/ui", 3000, _status_body(model)), theme)
 
 
 def status_fragment(model: dict[str, Any]) -> str:
@@ -341,17 +603,39 @@ def _status_body(model: dict[str, Any]) -> str:
 
     peak = max([int(v) for v in depth.values()] + [1])
     rows = "".join(
-        f'<tr><td>{escape(str(k))}</td><td class="num">{v}</td>'
+        f"<tr><td>{_state_badge(str(k))}</td>"
+        f'<td class="num">{v}</td>'
         f"<td>{_meter(int(v) / peak)}</td></tr>"
         for k, v in depth.items()
     )
-    queue = (
-        '<section class="de-section"><h2>Queue depth by state</h2>'
-        '<table class="de-table"><thead><tr><th>State</th><th class="num">Jobs</th>'
-        f"<th>Load</th></tr></thead><tbody>{rows}</tbody></table></section>"
+    queue = _section(
+        "Queue depth by state",
+        _table(
+            "Queue depth by job state",
+            '<th>State</th><th class="num">Jobs</th><th>Load</th>',
+            rows,
+        ),
+        f"peak {peak}",
     )
 
-    return readouts + queue
+    # The form is the *only* way data enters the system, so on a system that has
+    # never run it is the most important panel on the page - not an empty-state
+    # apology appended below three readouts. It disappears the moment there is
+    # anything to look at, because after that it is a distraction from the work.
+    #
+    # ...except when the last submission was rejected. A failure has to reopen
+    # the form even on a populated system, because the error is rendered inside
+    # it: gating on emptiness alone means someone who mistypes a field on a busy
+    # system gets a 200 with no explanation and no way to correct it.
+    onboarding = ""
+    ingest_error = str(model.get("ingest_error") or "")
+    if ingest_error or (total_jobs == 0 and episodes == 0):
+        onboarding = _ingest_form(
+            ingest_error,
+            model.get("ingest_values") if isinstance(model.get("ingest_values"), dict) else None,
+        )
+
+    return readouts + onboarding + queue
 
 
 # ---------------------------------------------------------------- jobs
@@ -359,16 +643,23 @@ def _status_body(model: dict[str, Any]) -> str:
 
 def jobs_page(model: dict[str, Any], state_filter: str | None, theme: str) -> str:
     query = f"?state={escape(state_filter)}" if state_filter else ""
-    body = (
-        '<p class="de-sub">newest first // poll 3s</p>'
-        f'<form class="de-filters" method="get" action="/ui/jobs">'
+    filters = (
+        '<form class="de-filters" method="get" action="/ui/jobs">'
         '<label for="state">filter</label>'
-        '<select id="state" name="state" onchange="this.form.submit()">'
-        f"{_options(state_filter)}</select>"
-        '<button type="submit">apply</button></form>'
-        f"<div data-poll>{_jobs_body(model)}</div>"
+        '<select id="state" name="state" class="fine-use-focusable" '
+        f'onchange="this.form.submit()">{_options(state_filter)}</select>'
+        '<button type="submit" class="fine-use-focusable">apply</button>'
+        "</form>"
     )
-    return _page("Jobs", "/ui/jobs", body, theme, _script("/ui/jobs" + query, 3000))
+    body = (
+        _section(
+            "Queue",
+            _live("/ui/jobs" + query, 3000, _jobs_body(model)),
+            "newest first",
+        )
+        + filters
+    )
+    return _page("Jobs", "/ui/jobs", body, theme)
 
 
 def jobs_fragment(model: dict[str, Any]) -> str:
@@ -394,23 +685,29 @@ def _attempts(job: dict[str, Any]) -> str:
 def _jobs_body(model: dict[str, Any]) -> str:
     items = model.get("items", [])
     if not items:
-        return '<p class="de-empty">// no jobs recorded</p>'
+        return _empty(
+            "no jobs recorded",
+            "queue the first one from the ingest form",
+            ("status page", "/ui"),
+        )
     rows = "".join(
         "<tr>"
-        f'<td><a href="/ui/jobs/{escape(str(i["id"]))}">{escape(str(i["id"])[:8])}</a></td>'
+        f'<td><a href="/ui/jobs/{escape(str(i["id"]))}">'
+        f"{_copyable(str(i['id']), str(i['id'])[:8])}</a></td>"
         f"<td>{escape(str(i['type']))}</td>"
         f"<td>{_state_badge(str(i['state']))}</td>"
         f"<td>{_attempts(i)}</td>"
         f"<td>{_when(i.get('created_at'))}</td>"
         f"<td>{_when(i.get('finished_at'))}</td>"
-        f'<td class="dim">{escape(str(i["correlation_id"])[:8])}</td>'
+        f'<td class="dim">{_copyable(str(i["correlation_id"]), str(i["correlation_id"])[:8])}</td>'
         "</tr>"
         for i in items
     )
-    return (
-        '<table class="de-table"><thead><tr><th>Job</th><th>Type</th><th>State</th>'
-        "<th>Attempts</th><th>Queued</th><th>Finished</th><th>Trace</th></tr></thead>"
-        f"<tbody>{rows}</tbody></table>"
+    return _table(
+        "Jobs, newest first",
+        "<th>Job</th><th>Type</th><th>State</th><th>Attempts</th>"
+        "<th>Queued</th><th>Finished</th><th>Trace</th>",
+        rows,
     )
 
 
@@ -475,14 +772,11 @@ def _cancel_action(job: dict[str, Any], theme: str) -> str:
 
 def _produced_section(episodes: list[dict[str, Any]] | None) -> str:
     if not episodes:
-        return (
-            '<section class="de-section"><h2>Produced episodes</h2>'
-            '<p class="de-sub text-comment">// this job has not registered episodes</p></section>'
-        )
+        return _section("Produced episodes", _empty("this job has not registered episodes"))
     rows = "".join(
         "<tr>"
         f'<td><a href="/ui/episodes/{escape(str(e.get("id")))}">'
-        f"<code>{escape(str(e.get('id'))[:12])}</code></a></td>"
+        f"{_copyable(str(e.get('id')), str(e.get('id'))[:12])}</a></td>"
         f"<td>{escape(str(e.get('episode_key') or '-'))}</td>"
         f"<td>{escape(str(e.get('format') or '-'))}</td>"
         f"<td>{_state_badge(str(e.get('state') or 'ingested'))}</td>"
@@ -490,10 +784,14 @@ def _produced_section(episodes: list[dict[str, Any]] | None) -> str:
         "</tr>"
         for e in episodes
     )
-    return (
-        '<section class="de-section"><h2>Produced episodes</h2>'
-        '<table class="de-table"><thead><tr><th>Episode</th><th>Key</th>'
-        f"<th>Format</th><th>State</th><th>Registered</th></tr></thead><tbody>{rows}</tbody></table></section>"
+    return _section(
+        "Produced episodes",
+        _table(
+            "Episodes produced by this job",
+            "<th>Episode</th><th>Key</th><th>Format</th><th>State</th><th>Registered</th>",
+            rows,
+        ),
+        str(len(episodes)),
     )
 
 
@@ -547,10 +845,10 @@ def _report_section(report: dict[str, Any] | None) -> str:
             or "-",
         ),
     ]
-    return (
-        '<section class="de-section"><h2>Run report</h2><dl class="de-kv">'
-        + "".join(f"<dt>{k}</dt><dd>{v}</dd>" for k, v in facts)
-        + "</dl></section>"
+    return _section(
+        "Run report",
+        '<dl class="de-kv">' + "".join(f"<dt>{k}</dt><dd>{v}</dd>" for k, v in facts) + "</dl>",
+        "one run, end to end",
     )
 
 
@@ -562,9 +860,9 @@ def job_detail_page(
 ) -> str:
     state = str(job.get("state"))
     facts = [
-        ("job id", escape(str(job.get("id")))),
+        ("job id", _copyable(str(job.get("id")))),
         ("type", escape(str(job.get("type")))),
-        ("trace", escape(str(job.get("correlation_id")))),
+        ("trace", _copyable(str(job.get("correlation_id")))),
         ("attempts", _attempts(job)),
         ("queued", _when(job.get("created_at"))),
         ("started", _when(job.get("started_at"))),
@@ -574,48 +872,46 @@ def job_detail_page(
     if job.get("error"):
         facts.append(("error", escape(str((job["error"] or {}).get("code", "see below")))))
     blocks = [
-        '<section class="de-section"><h2>State</h2>'
-        f"{_strip(state)}{_cancel_action(job, theme)}</section>",
-        '<section class="de-section"><h2>Record</h2><dl class="de-kv">'
-        + "".join(f"<dt>{k}</dt><dd>{v}</dd>" for k, v in facts)
-        + "</dl></section>",
-        '<section class="de-section"><h2>Payload</h2>'
-        f'<pre class="de-json">{escape(_pretty(job.get("payload")))}</pre></section>',
+        _section("State", _strip(state) + _cancel_action(job, theme), state),
+        _section(
+            "Record",
+            '<dl class="de-kv">' + "".join(f"<dt>{k}</dt><dd>{v}</dd>" for k, v in facts) + "</dl>",
+        ),
+        _section("Payload", f'<pre class="de-json">{escape(_pretty(job.get("payload")))}</pre>'),
     ]
     if job.get("result"):
         blocks.append(
-            '<section class="de-section"><h2>Result</h2>'
-            f'<pre class="de-json">{escape(_pretty(job["result"]))}</pre></section>'
+            _section("Result", f'<pre class="de-json">{escape(_pretty(job["result"]))}</pre>')
         )
     if job.get("error"):
         blocks.append(
-            '<section class="de-section"><h2>Error</h2>'
-            f'<pre class="de-json">{escape(_pretty(job["error"]))}</pre></section>'
+            _section("Error", f'<pre class="de-json">{escape(_pretty(job["error"]))}</pre>')
         )
     blocks.append(_report_section(report))
     blocks.append(_produced_section(produced))
     episode = (job.get("result") or {}).get("episode_id")
     if episode:
-        link = f"/api/v1/episodes/{escape(str(episode))}"
-        blocks.append(f'<p><a href="{link}">// episode json</a></p>')
-    return _page(
-        "Job " + str(job.get("id"))[:8],
-        "/ui/jobs",
-        "".join(blocks),
-        theme,
-        _script(None, 0) + _DEADLINE_JS,
-    )
+        # A link to the episode's own page, not to a raw document. Handing the
+        # operator a JSON blob is a developer affordance wearing an operator's
+        # clothes; the page it registers on is the thing they came to look at.
+        blocks.append(f'<p><a href="/ui/episodes/{escape(str(episode))}">// open episode</a></p>')
+    return _page("Job " + str(job.get("id"))[:8], "/ui/jobs", "".join(blocks), theme)
 
 
 # ---------------------------------------------------------------- artifacts
 
 
 def artifacts_page(model: dict[str, Any], theme: str) -> str:
-    body = (
-        '<p class="de-sub">content addressed // poll 5s</p>'
-        f"<div data-poll>{_artifacts_body(model)}</div>"
+    return _page(
+        "Artifacts",
+        "/ui/artifacts",
+        _section(
+            "Stored artifacts",
+            _live("/ui/artifacts", 5000, _artifacts_body(model)),
+            "content addressed",
+        ),
+        theme,
     )
-    return _page("Artifacts", "/ui/artifacts", body, theme, _script("/ui/artifacts", 5000))
 
 
 def artifacts_fragment(model: dict[str, Any]) -> str:
@@ -625,22 +921,21 @@ def artifacts_fragment(model: dict[str, Any]) -> str:
 def _artifacts_body(model: dict[str, Any]) -> str:
     items = model.get("items", [])
     if not items:
-        return '<p class="de-empty">// no artifacts stored</p>'
+        return _empty("no artifacts stored", "ingest a dataset to produce one")
     total = sum(int(a.get("size_bytes") or 0) for a in items)
     rows = "".join(
         "<tr>"
-        f"<td><code>{escape(str(a['hash'])[:24])}</code></td>"
+        f"<td>{_copyable(str(a['hash']), str(a['hash'])[:24])}</td>"
         f'<td class="num">{_bytes(a.get("size_bytes"))}</td>'
         f"<td>{_when(a.get('created_at'))}</td>"
         f'<td class="num">{escape(str(len(a.get("episode_ids") or [])))}</td>'
         "</tr>"
         for a in items
     )
-    return (
-        f'<p class="de-sub">{len(items)} shown // {_bytes(total)} on this page</p>'
-        '<table class="de-table"><thead><tr><th>Hash</th><th class="num">Size</th>'
-        '<th>Written</th><th class="num">Episodes</th></tr></thead>'
-        f"<tbody>{rows}</tbody></table>"
+    return f'<p class="de-sub">{len(items)} shown // {_bytes(total)} on this page</p>' + _table(
+        "Stored artifacts",
+        '<th>Hash</th><th class="num">Size</th><th>Written</th><th class="num">Episodes</th>',
+        rows,
     )
 
 
@@ -657,20 +952,17 @@ def _ms(value: Any) -> str:
 # Traces worth a sparkline: what a data engine's operator watches. Anything not
 # present in the window simply does not render.
 TRACE_SERIES = (
-    ("api_request_duration_seconds", "api latency"),
+    # The metric key is an internal name; the label is what the operator reads.
+    ("api_request_duration_seconds", "request handling"),
     ("jobs_run_time_seconds", "job run time"),
     ("pipeline_stage_duration_seconds", "stage duration"),
-    ("catalog_query_duration_seconds", "catalog query"),
+    ("catalog_query_duration_seconds", "catalog search"),
     ("jobs_queue_depth", "queue depth"),
 )
 
 
 def metrics_page(model: dict[str, Any], theme: str) -> str:
-    body = (
-        '<p class="de-sub">runtime telemetry // poll 5s // window from /api/v1/metrics</p>'
-        f"<div data-poll>{_metrics_body(model)}</div>"
-    )
-    return _page("Metrics", "/ui/metrics", body, theme, _script("/ui/metrics", 5000))
+    return _page("Metrics", "/ui/metrics", _live("/ui/metrics", 5000, _metrics_body(model)), theme)
 
 
 def metrics_fragment(model: dict[str, Any]) -> str:
@@ -702,28 +994,32 @@ def _metrics_body(model: dict[str, Any]) -> str:
             ("worker heartbeat", heartbeat_cell, ""),
             ("records", str(model.get("record_count", 0)), ""),
             ("queue depth", str(sum(int(v) for v in depth.values())), "jobs"),
-            ("api p95", _p95(api), "ms"),
+            ("handling p95", _p95(api), "ms"),
             ("run p95", _p95(runs), "ms"),
-            ("query p95", _p95(queries), "ms"),
+            ("search p95", _p95(queries), "ms"),
         ]
     )
 
     traces = "".join(
-        '<section class="de-section"><h2>'
-        + escape(label)
-        + "</h2>"
-        + _sparkline([float(p["v"]) for p in series.get(name, [])])
-        + f'<p class="de-sub">{len(series.get(name, []))} buckets</p></section>'
+        _section(
+            label,
+            _sparkline([float(p["v"]) for p in series.get(name, [])], label=label)
+            + f'<p class="de-sub">{len(series.get(name, []))} buckets</p>',
+            f"{len(series.get(name, []))} buckets",
+        )
         for name, label in TRACE_SERIES
         if series.get(name)
     )
     if not traces:
-        traces = '<p class="de-empty">// no series in window</p>'
+        traces = _empty("no series in window", "metrics are written as the engine runs")
 
+    # Rows are the operation as a reader would name it. The underlying route
+    # stays an internal detail: it is a stable label, but it is a label for the
+    # code, not for the person deciding whether this system is healthy.
     api_rows = "".join(
         "<tr>"
-        f"<td><code>{escape(str(s['labels'].get('route', '-')))}</code></td>"
-        f"<td>{escape(str(s['labels'].get('method', '-')))}</td>"
+        f"<td>{escape(_operation(s['labels'].get('route', '-')))}</td>"
+        f"<td>{escape(str(s['labels'].get('method', '-')).upper())}</td>"
         f"<td>{escape(str(s['labels'].get('status_class', '-')))}</td>"
         f'<td class="num">{s["count"]}</td>'
         f'<td class="num">{_ms(s["p50"])}</td>'
@@ -732,16 +1028,17 @@ def _metrics_body(model: dict[str, Any]) -> str:
         "</tr>"
         for s in sorted(api, key=lambda s: float(s["p95"]), reverse=True)
     )
-    api_table = (
-        '<section class="de-section"><h2>API latency by route</h2>'
-        + (
-            '<table class="de-table"><thead><tr><th>Route</th><th>Method</th><th>Status</th>'
-            '<th class="num">Hits</th><th class="num">p50 ms</th><th class="num">p95 ms</th>'
-            f'<th class="num">p99 ms</th></tr></thead><tbody>{api_rows}</tbody></table>'
-            if api_rows
-            else '<p class="de-empty">// no api traffic in window</p>'
-        )
-        + "</section>"
+    api_table = _section(
+        "Time spent handling requests",
+        _table(
+            "Time spent per operation, slowest first",
+            "<th>Operation</th><th>Outcome</th><th>Class</th>"
+            '<th class="num">Hits</th><th class="num">p50 ms</th>'
+            '<th class="num">p95 ms</th><th class="num">p99 ms</th>',
+            api_rows,
+            empty="no request traffic in window",
+        ),
+        "sorted by p95",
     )
 
     stage_rows = "".join(
@@ -768,23 +1065,22 @@ def _metrics_body(model: dict[str, Any]) -> str:
         "</tr>"
         for s in sorted(queries, key=lambda s: float(s["p95"]), reverse=True)[:20]
     )
-    tail = (
-        '<section class="de-section"><h2>Stage + catalog latency</h2>'
-        + (
-            '<table class="de-table"><thead><tr><th>Stage</th><th>Status</th>'
-            '<th class="num">Runs</th><th class="num">p50 ms</th><th class="num">p95 ms</th>'
-            f"<th>Load</th></tr></thead><tbody>{stage_rows}</tbody></table>"
-            if stage_rows
-            else '<p class="de-empty">// no stages measured</p>'
+    tail = _section(
+        "Stage + catalog latency",
+        _table(
+            "Pipeline stage latency",
+            '<th>Stage</th><th>Status</th><th class="num">Runs</th>'
+            '<th class="num">p50 ms</th><th class="num">p95 ms</th><th>Load</th>',
+            stage_rows,
+            empty="no stages measured",
         )
-        + (
-            '<table class="de-table"><thead><tr><th>Catalog op</th><th class="num">Calls</th>'
-            '<th class="num">p50 ms</th><th class="num">p95 ms</th></tr></thead>'
-            f"<tbody>{query_rows}</tbody></table>"
-            if query_rows
-            else ""
-        )
-        + "</section>"
+        + _table(
+            "Catalog operation latency, slowest 20",
+            '<th>Catalog op</th><th class="num">Calls</th>'
+            '<th class="num">p50 ms</th><th class="num">p95 ms</th>',
+            query_rows,
+            empty="no catalog queries measured",
+        ),
     )
     return readouts + traces + api_table + tail
 
@@ -795,16 +1091,62 @@ def _p95(summaries: list[dict[str, Any]]) -> str:
     return _ms(max(float(s["p95"]) for s in summaries))
 
 
+# A route template is a label for the code. An operator reading a latency table
+# wants to know which *operation* is slow, and "episode listing" answers that
+# where "/api/v1/episodes" only restates the file layout.
+#
+# The lookup is (path fragment -> operation name) and it is matched against the
+# whole template, not just the last segment, because the last segment is often
+# the part that varies: "/api/v1/monitoring/tick" ends in "tick". Anything
+# unmapped degrades to its last segment with separators tidied, never to the raw
+# template, so a newly added route cannot leak its shape into the UI by omission.
+_OPERATIONS = (
+    ("/health", "health check"),
+    ("/monitoring/tick", "monitoring window"),
+    ("/monitoring/notify-preview", "notification preview"),
+    ("/monitoring", "monitoring"),
+    ("/episodes/export", "episode export"),
+    ("/quality", "quality scoring"),
+    ("/validation", "validation"),
+    ("/episodes", "episode listing"),
+    ("/artifacts", "artifact listing"),
+    ("/incidents/summary", "incident summary"),
+    ("/incidents", "incident queue"),
+    ("/contracts", "contract checks"),
+    ("/slices", "slice listing"),
+    ("/metrics", "metrics"),
+    ("/failures", "failure listing"),
+    ("/status", "status"),
+    ("/jobs", "job listing"),
+)
+
+
+def _operation(route: str) -> str:
+    """Name the operation a route performs, without disclosing the route."""
+    text = str(route or "").strip()
+    if not text or text == "-":
+        return "unknown"
+    lowered = text.lower()
+    for fragment, name in _OPERATIONS:
+        if fragment in lowered:
+            return name
+    # Unmapped: the last concrete segment, tidied. No slashes, no braces.
+    segments = [seg for seg in lowered.split("/") if seg and not seg.startswith("{")]
+    tail = segments[-1] if segments else "unknown"
+    return tail.replace("-", " ").replace("_", " ")
+
+
 # ---------------------------------------------------------------- failures
 
 
 def failures_page(model: dict[str, Any], theme: str) -> str:
     """What is failing, by reason code, and the episodes it quarantined."""
-    body = (
-        '<p class="de-sub">quarantine triage // read-only</p>'
-        f"<div data-poll>{_failures_body(model)}</div>"
+    return _page(
+        "Failures",
+        "/ui/failures",
+        _live("/ui/failures", 10000, _failures_body(model)),
+        theme,
     )
-    return _page("Failures", "/ui/failures", body, theme, _script("/ui/failures", 10000))
 
 
 def failures_fragment(model: dict[str, Any]) -> str:
@@ -843,7 +1185,7 @@ def _failures_body(model: dict[str, Any]) -> str:
     )
     episode_rows = "".join(
         f'<tr><td><a href="/ui/episodes/{escape(str(e.get("id")))}">'
-        f"<code>{escape(str(e.get('id'))[:12])}</code></a></td>"
+        f"{_copyable(str(e.get('id')), str(e.get('id'))[:12])}</a></td>"
         f"<td>{escape(str(e.get('episode_key') or '-'))}</td>"
         f"<td>{escape(str(e.get('format') or '-'))}</td>"
         f"<td>{_state_badge(str(e.get('state') or 'quarantined'))}</td>"
@@ -855,24 +1197,31 @@ def _failures_body(model: dict[str, Any]) -> str:
     )
     return (
         readouts
-        + '<section class="de-section"><h2>Reason codes</h2>'
-        + (code_chips or '<p class="de-empty">// nothing quarantined</p>')
-        + "</section>"
-        + (
-            '<table class="de-table"><thead><tr><th>Profile</th><th class="num">Failed</th>'
-            f"</tr></thead><tbody>{profile_rows}</tbody></table>"
-            if profile_rows
-            else ""
+        + _section(
+            "Reason codes",
+            code_chips or _empty("nothing quarantined", "validation has rejected nothing"),
+            "most frequent first",
         )
-        + '<section class="de-section"><h2>Quarantined episodes</h2>'
-        + (
-            '<table class="de-table"><thead><tr><th>Episode</th><th>Key</th><th>Format</th>'
-            f"<th>State</th><th>Profile</th><th>Reason codes</th><th>Verdict</th></tr></thead>"
-            f"<tbody>{episode_rows}</tbody></table>"
-            if episode_rows
-            else '<p class="de-empty">// no quarantined episodes</p>'
+        + _section(
+            "Failures by profile",
+            _table(
+                "Failed episodes by validation profile",
+                '<th>Profile</th><th class="num">Failed</th>',
+                profile_rows,
+                empty="no profile has failed",
+            ),
         )
-        + "</section>"
+        + _section(
+            "Quarantined episodes",
+            _table(
+                "Quarantined episodes",
+                "<th>Episode</th><th>Key</th><th>Format</th><th>State</th>"
+                "<th>Profile</th><th>Reason codes</th><th>Verdict</th>",
+                episode_rows,
+                empty="no quarantined episodes",
+            ),
+            str(len(rows)),
+        )
     )
 
 
@@ -886,11 +1235,12 @@ def incidents_page(model: dict[str, Any], theme: str) -> str:
     rather than buried in a column: an incident that would wake someone is separated
     from one you would simply find tomorrow.
     """
-    body = (
-        '<p class="de-sub">deterministic notifier // read-only</p>'
-        f"<div data-poll>{_incidents_body(model)}</div>"
+    return _page(
+        "Incidents",
+        "/ui/incidents",
+        _live("/ui/incidents", 10000, _incidents_body(model)),
+        theme,
     )
-    return _page("Incidents", "/ui/incidents", body, theme, _script("/ui/incidents", 10000))
 
 
 def incidents_fragment(model: dict[str, Any]) -> str:
@@ -933,47 +1283,56 @@ def _incidents_body(model: dict[str, Any]) -> str:
     digest_block = f'<pre class="de-digest">{escape(str(digest))}</pre>'
 
     if not rows:
-        table = (
-            '<p class="de-empty">// the notifier has nothing to say // '
-            "run one window with POST /api/v1/monitoring/tick</p>"
+        table = _empty(
+            "the notifier has nothing to say",
+            "no window has been evaluated yet",
         )
     else:
-        body_rows = "".join(_incident_row(row) for row in rows)
-        table = (
-            '<table class="de-table"><thead><tr><th>Severity</th><th>Label</th>'
-            '<th>Scope</th><th>Evidence</th><th class="num">Seen</th>'
-            "<th>Status</th><th>Last seen</th><th>Channel</th></tr></thead>"
-            f"<tbody>{body_rows}</tbody></table>"
+        body_rows = "".join(incident_row_html(row) for row in rows)
+        table = _table(
+            "Incident queue, worst first",
+            "<th>Severity</th><th>Label</th><th>Scope</th><th>Evidence</th>"
+            '<th class="num">Seen</th><th>Status</th><th>Last seen</th><th>Channel</th>',
+            body_rows,
         )
 
     return (
         readouts
         + health_strip
-        + '<section class="de-section"><h2>Queue</h2>'
-        + table
-        + "</section>"
-        + '<section class="de-section"><h2>Notify preview</h2>'
-        + '<p class="de-sub">exactly what a notifier would deliver // nothing is sent</p>'
-        + digest_block
-        + "</section>"
+        + _section(
+            "Queue",
+            table,
+            f"{notify_count} would notify" if notify_count else "nothing needs a human",
+        )
+        + _section(
+            "Notify preview",
+            '<p class="de-sub">exactly what a notifier would deliver // '
+            "nothing is sent</p>" + digest_block,
+            "ADR 0020",
+        )
     )
 
 
-def _incident_row(row: dict[str, Any]) -> str:
+def incident_row_html(row: dict[str, Any]) -> str:
+    """One incident row. Public because the escaping is worth testing directly."""
     severity = str(row.get("severity") or "info")
     status = str(row.get("status") or "open")
     channel = str(row.get("notify_class") or "queue")
+    notifying = channel == "notify"
     channel_cell = (
         '<span class="text-warning">notify</span>'
-        if channel == "notify"
+        if notifying
         else '<span class="text-comment">queue</span>'
     )
+    # A left edge on the row, so the two kinds of incident are separable at a
+    # glance without reading the Channel column.
+    row_class = ' class="de-notify"' if notifying else ""
     return (
-        "<tr>"
+        f"<tr{row_class}>"
         f"<td>{_severity_badge(severity)}</td>"
         f"<td><code>{escape(str(row.get('label') or '-'))}</code></td>"
         f"<td>{escape(str(row.get('scope') or '-'))}</td>"
-        f"<td>{escape(str(row.get('summary') or '-'))}</td>"
+        f'<td class="de-evidence">{escape(str(row.get("summary") or "-"))}</td>'
         f'<td class="num">{int(row.get("occurrence_count") or 1)}</td>'
         f"<td>{_state_badge(status)}</td>"
         f"<td>{escape(str(row.get('last_seen') or '-'))}</td>"
@@ -995,23 +1354,30 @@ def _health_strip(health: dict[str, Any]) -> str:
     blind = "no" if not health.get("blind") else "YES"
     readouts = _readouts(
         [
-            ("last tick", last, "info"),
+            ("last tick", escape(last), "info"),
             ("baseline scopes", str(int(health.get("baseline_scopes", 0))), "comment"),
             ("held", str(int(health.get("held_scopes", 0))), "warning"),
             ("budget/window", str(int(health.get("alert_budget_per_window", 0))), "comment"),
             ("blind", blind, "error" if health.get("blind") else "success"),
         ]
     )
-    return f'<section class="de-section"><h2>Monitor health</h2>{readouts}</section>'
+    return _section("Monitor health", readouts, "is the notifier itself alive")
 
-
-# ---------------------------------------------------------------- slices
+    # ---------------------------------------------------------------- slices
 
 
 def slices_page(model: dict[str, Any], theme: str) -> str:
     """Named curation filters and a link to each slice's manifest."""
-    body = f"<div data-poll>{_slices_body(model)}</div>"
-    return _page("Slices", "/ui/slices", body, theme, _script("/ui/slices", 10000))
+    return _page(
+        "Slices",
+        "/ui/slices",
+        _section(
+            "Saved slices",
+            _live("/ui/slices", 10000, _slices_body(model)),
+            "membership recomputed on read",
+        ),
+        theme,
+    )
 
 
 def slices_fragment(model: dict[str, Any]) -> str:
@@ -1021,7 +1387,7 @@ def slices_fragment(model: dict[str, Any]) -> str:
 def _slices_body(model: dict[str, Any]) -> str:
     items = model.get("items") or []
     if not items:
-        return '<p class="de-empty">// no saved slices // POST /api/v1/slices to create one</p>'
+        return _empty("no saved slices", "save a filter from Episodes to create one")
     rows = "".join(
         "<tr>"
         f"<td><code>{escape(str(s.get('name')))}</code></td>"
@@ -1030,15 +1396,20 @@ def _slices_body(model: dict[str, Any]) -> str:
         f"<td><code>{escape(str((s.get('filter_config') or {}).get('state') or 'any'))}"
         f" / {escape(str((s.get('filter_config') or {}).get('flag') or 'any'))}</code></td>"
         f"<td>{_when(s.get('updated_at'))}</td>"
-        f'<td><a href="/api/v1/slices/{escape(str(s.get("id")))}/manifest">// manifest</a></td>'
+        # A manifest is the build input: a machine-readable list of the exact
+        # episodes this slice resolves to. Downloading one is a legitimate
+        # operator action, so the link stays - but it is a download of a named
+        # artifact, not a hand-off to a raw endpoint path.
+        f'<td><a href="/api/v1/slices/{escape(str(s.get("id")))}/manifest" download>'
+        "// download manifest</a></td>"
         "</tr>"
         for s in items
     )
-    return (
-        '<p class="de-sub">named curation filters // membership recomputed on read</p>'
-        '<table class="de-table"><thead><tr><th>Name</th><th class="num">Members</th>'
-        f"<th>Notes</th><th>Filter</th><th>Updated</th><th>Manifest</th></tr></thead>"
-        f"<tbody>{rows}</tbody></table>"
+    return _table(
+        "Saved curation slices",
+        '<th>Name</th><th class="num">Members</th><th>Notes</th>'
+        "<th>Filter</th><th>Updated</th><th>Manifest</th>",
+        rows,
     )
 
 
@@ -1052,17 +1423,26 @@ def episodes_page(
     if state_filter or flag:
         pairs = [f"state={escape(state_filter or '')}", f"flag={escape(flag or '')}"]
         query = "?" + "&".join(pairs)
-    body = (
-        '<p class="de-sub">curation view // poll 5s</p>'
+    filters = (
         '<form class="de-filters" method="get" action="/ui/episodes">'
         '<label for="state">state</label>'
-        f'<select id="state" name="state">{_pick(EPISODE_STATES, state_filter)}</select>'
+        '<select id="state" name="state" class="fine-use-focusable" '
+        f'onchange="this.form.submit()">{_pick(EPISODE_STATES, state_filter)}</select>'
         '<label for="flag">flag</label>'
-        f'<select id="flag" name="flag">{_pick(EPISODE_FLAGS, flag, empty="all")}</select>'
-        '<button type="submit">apply</button></form>'
-        f"<div data-poll>{_episodes_body(model)}</div>"
+        '<select id="flag" name="flag" class="fine-use-focusable" '
+        f'onchange="this.form.submit()">{_pick(EPISODE_FLAGS, flag, empty="all")}</select>'
+        '<button type="submit" class="fine-use-focusable">apply</button>'
+        "</form>"
     )
-    return _page("Episodes", "/ui/episodes", body, theme, _script("/ui/episodes" + query, 5000))
+    body = (
+        _section(
+            "Episodes",
+            _live("/ui/episodes" + query, 5000, _episodes_body(model)),
+            "quality scored at ingest",
+        )
+        + filters
+    )
+    return _page("Episodes", "/ui/episodes", body, theme)
 
 
 def episodes_fragment(model: dict[str, Any]) -> str:
@@ -1079,10 +1459,11 @@ def _pick(choices: tuple[str, ...], selected: str | None, empty: str = "all") ->
 def _episodes_body(model: dict[str, Any]) -> str:
     items = model.get("items", [])
     if not items:
-        return '<p class="de-empty">// no episodes match</p>'
+        return _empty("no episodes match", "clear the filters to see everything")
     rows = "".join(
         "<tr>"
-        f'<td><a href="/ui/episodes/{escape(str(i["id"]))}">{escape(str(i["id"])[:8])}</a></td>'
+        f'<td><a href="/ui/episodes/{escape(str(i["id"]))}">'
+        f"{_copyable(str(i['id']), str(i['id'])[:8])}</a></td>"
         f"<td>{escape(str(i.get('episode_key') or '-'))}</td>"
         f"<td>{escape(str(i.get('format') or '-'))}</td>"
         f"<td>{_state_badge(str(i.get('state') or 'ingested'))}</td>"
@@ -1095,11 +1476,12 @@ def _episodes_body(model: dict[str, Any]) -> str:
         "</tr>"
         for i in items
     )
-    return (
-        '<table class="de-table"><thead><tr><th>Episode</th><th>Key</th><th>Format</th>'
-        '<th>State</th><th class="num">Frames</th><th class="num">Move</th>'
-        '<th class="num">Jerk</th><th>Stall</th><th>Verdict</th><th>Ingested</th></tr></thead>'
-        f"<tbody>{rows}</tbody></table>"
+    return _table(
+        "Episodes matching the current filter",
+        "<th>Episode</th><th>Key</th><th>Format</th><th>State</th>"
+        '<th class="num">Frames</th><th class="num">Move</th><th class="num">Jerk</th>'
+        "<th>Stall</th><th>Verdict</th><th>Ingested</th>",
+        rows,
     )
 
 
@@ -1137,10 +1519,7 @@ def _bounded(value: Any, ceiling: float = 1.0) -> float:
 
 def _validation_section(validations: list[dict[str, Any]] | None) -> str:
     if not validations:
-        return (
-            '<section class="de-section"><h2>Validation</h2>'
-            '<p class="de-sub text-comment">// no validation runs for this episode</p></section>'
-        )
+        return _section("Validation", _empty("no validation runs for this episode"))
 
     def _verdict(v: dict[str, Any]) -> str:
         if v.get("passed"):
@@ -1151,7 +1530,7 @@ def _validation_section(validations: list[dict[str, Any]] | None) -> str:
         "<tr>"
         f"<td><code>{escape(str(v.get('profile_name') or '-'))}</code>"
         f'<span class="text-comment">@{escape(str(v.get("profile_version") or "-"))}</span></td>'
-        f"<td><code>{escape(str(v.get('profile_hash', ''))[:12])}</code></td>"
+        f"<td>{_copyable(_text(v.get('profile_hash')), _text(v.get('profile_hash'))[:12])}</td>"
         f"<td>{_verdict(v)}</td>"
         f"<td>{escape(', '.join(str(c) for c in (v.get('reason_codes') or [])) or '-')}</td>"
         "</tr>"
@@ -1172,13 +1551,18 @@ def _validation_section(validations: list[dict[str, Any]] | None) -> str:
         + "".join(violation_blocks)
         + "</ul>"
         if violation_blocks
-        else '<p class="de-sub text-comment">// no violations</p>'
+        else '<p class="de-empty">// no violations</p>'
     )
-    return (
-        '<section class="de-section"><h2>Validation</h2>'
-        '<table class="de-table"><thead><tr><th>Profile</th><th>Hash</th>'
-        f"<th>Verdict</th><th>Reasons</th></tr></thead><tbody>{rows}</tbody></table>"
-        f"{violations_html}</section>"
+    passed = sum(1 for v in validations if v.get("passed"))
+    return _section(
+        "Validation",
+        _table(
+            "Validation results by profile",
+            "<th>Profile</th><th>Hash</th><th>Verdict</th><th>Reasons</th>",
+            rows,
+        )
+        + violations_html,
+        f"{passed}/{len(validations)} passed",
     )
 
 
@@ -1201,9 +1585,10 @@ def episode_detail_page(
         ("fps", escape(str(meta.get("fps") or "-"))),
     ]
     blocks = [
-        '<section class="de-section"><h2>Record</h2><dl class="de-kv">'
-        + "".join(f"<dt>{k}</dt><dd>{v}</dd>" for k, v in facts)
-        + "</dl></section>"
+        _section(
+            "Record",
+            '<dl class="de-kv">' + "".join(f"<dt>{k}</dt><dd>{v}</dd>" for k, v in facts) + "</dl>",
+        )
     ]
     blocks.append(_quality_section(quality))
     blocks.append(_validation_section(validations))
@@ -1221,30 +1606,27 @@ def episode_detail_page(
             for name, c in sorted(channels.items())
         )
         blocks.append(
-            '<section class="de-section"><h2>Channels</h2>'
-            '<table class="de-table"><thead><tr><th>Channel</th><th class="num">n</th>'
-            '<th class="num">min</th><th class="num">max</th><th class="num">mean</th>'
-            f'<th class="num">std</th></tr></thead><tbody>{rows}</tbody></table></section>'
+            _section(
+                "Channels",
+                _table(
+                    "Per-channel statistics",
+                    '<th>Channel</th><th class="num">n</th><th class="num">min</th>'
+                    '<th class="num">max</th><th class="num">mean</th>'
+                    '<th class="num">std</th>',
+                    rows,
+                ),
+                str(len(channels)),
+            )
         )
     blocks.append(
-        '<section class="de-section"><h2>Metadata</h2>'
-        f'<pre class="de-json">{escape(_pretty(meta))}</pre></section>'
+        _section("Metadata", f'<pre class="de-json">{escape(_pretty(meta))}</pre>', "raw")
     )
-    return _page(
-        "Episode " + str(episode.get("id"))[:8],
-        "/ui/episodes",
-        "".join(blocks),
-        theme,
-        _script(None, 0),
-    )
+    return _page("Episode " + str(episode.get("id"))[:8], "/ui/episodes", "".join(blocks), theme)
 
 
 def _quality_section(quality: dict[str, Any] | None) -> str:
     if not quality:
-        return (
-            '<section class="de-section"><h2>Motion quality</h2>'
-            '<p class="de-empty">// no quality signals for this episode</p></section>'
-        )
+        return _section("Motion quality", _empty("no quality signals for this episode"))
     readouts = _readouts(
         [
             ("verdict", _verdict_badge(quality.get("verdict")), ""),
@@ -1273,23 +1655,25 @@ def _quality_section(quality: dict[str, Any] | None) -> str:
     )
     table = ""
     if rows:
-        table = (
-            '<table class="de-table"><thead><tr><th>Dim</th><th>Mode</th><th>Kind</th>'
-            '<th>Grip</th><th>sigma(d)/range</th><th class="num">mean|d|/range</th>'
-            f"</tr></thead><tbody>{rows}</tbody></table>"
+        table = _table(
+            "Per-dimension motion statistics",
+            "<th>Dim</th><th>Mode</th><th>Kind</th><th>Grip</th>"
+            '<th>sigma(d)/range</th><th class="num">mean|d|/range</th>',
+            rows,
         )
-    return '<section class="de-section"><h2>Motion quality</h2>' + readouts + table + "</section>"
+    return _section("Motion quality", readouts + table, "ADR 0018")
 
 
 # ---------------------------------------------------------------- insights
 
 
 def insights_page(model: dict[str, Any], theme: str) -> str:
-    body = (
-        '<p class="de-sub">dataset curation // poll 10s // /api/v1/quality/summary</p>'
-        f"<div data-poll>{_insights_body(model)}</div>"
+    return _page(
+        "Insights",
+        "/ui/insights",
+        _live("/ui/insights", 10000, _insights_body(model)),
+        theme,
     )
-    return _page("Insights", "/ui/insights", body, theme, _script("/ui/insights", 10000))
 
 
 def insights_fragment(model: dict[str, Any]) -> str:
@@ -1311,18 +1695,20 @@ def _insights_body(model: dict[str, Any]) -> str:
         ]
     )
 
-    length_section = (
-        '<section class="de-section"><h2>Episode lengths</h2>'
-        + _histogram_svg(length.get("histogram") or [])
+    length_section = _section(
+        "Episode lengths",
+        _histogram_svg(length.get("histogram") or [])
         + f'<p class="de-sub">min {escape(str(length.get("min", "-")))}'
-        f" // max {escape(str(length.get('max', '-')))} frames</p></section>"
+        f" // max {escape(str(length.get('max', '-')))} frames</p>",
+        f"mean {_score(length.get('mean'))}",
     )
 
     speed = model.get("speed_distribution", [])
-    speed_section = (
-        '<section class="de-section"><h2>Speed distribution</h2>'
-        + (_scatter_svg(speed, "movement_score") if speed else '<p class="de-empty">// no data</p>')
-        + f'<p class="de-sub">{len(speed)} episodes // movement per frame</p></section>'
+    speed_section = _section(
+        "Speed distribution",
+        (_scatter_svg(speed, "movement_score") if speed else _empty("no data"))
+        + f'<p class="de-sub">{len(speed)} episodes // movement per frame</p>',
+        "one dot per episode",
     )
 
     matrix = model.get("heat_matrix", {})
@@ -1353,13 +1739,19 @@ def _insights_body(model: dict[str, Any]) -> str:
                     )
             body_rows += (
                 f'<tr><td><a href="/ui/episodes/{escape(str(e["episode_id"]))}">'
-                f"{escape(str(e['episode_id'])[:8])}</a></td>{cells}</tr>"
+                f"{_copyable(str(e['episode_id']), str(e['episode_id'])[:8])}</a></td>"
+                f"{cells}</tr>"
             )
-        heat = (
-            '<section class="de-section"><h2>Cross-episode variance // sigma(d)/range</h2>'
-            '<div class="de-heat-wrap"><table class="de-table de-heat-table"><thead><tr><th>Ep</th>'
-            f"{head}</tr></thead><tbody>{body_rows}</tbody></table></div>"
-            '<p class="de-sub">brighter = rougher // hover for values</p></section>'
+        heat = _section(
+            "Cross-episode variance // sigma(d)/range",
+            '<div class="de-heat-wrap" tabindex="0" role="region" '
+            'aria-label="Per-dimension variance, scrollable">'
+            '<table class="de-table de-heat-table">'
+            '<caption class="de-sr">Per-dimension normalised standard deviation, '
+            "brighter cells are rougher</caption>"
+            f"<thead><tr><th>Ep</th>{head}</tr></thead><tbody>{body_rows}</tbody></table></div>"
+            '<p class="de-sub">brighter = rougher // hover for values</p>',
+            f"{len(dims)} dims",
         )
 
     outliers = model.get("outliers", {})
@@ -1369,7 +1761,7 @@ def _insights_body(model: dict[str, Any]) -> str:
         + '</h3><ul class="de-outliers">'
         + "".join(
             f'<li><a href="/ui/episodes/{escape(str(o.get("episode_id")))}">'
-            f"{escape(str(o.get('episode_id'))[:8])}</a> "
+            f"{_copyable(str(o.get('episode_id')), str(o.get('episode_id'))[:8])}</a> "
             f'<span class="dim">{escape(str(o.get("episode_key") or ""))}</span> '
             f'<span class="num">{_score(o.get("value"))}</span> '
             f"{_verdict_badge(o.get('verdict'))}</li>"
@@ -1382,13 +1774,12 @@ def _insights_body(model: dict[str, Any]) -> str:
             ("length outliers", outliers.get("length", [])),
         )
     )
-    outlier_section = (
-        '<section class="de-section"><h2>Outliers // removal candidates</h2>'
-        + (
+    outlier_section = _section(
+        "Outliers // removal candidates",
+        (
             f'<div class="de-outlier-grid">{lists}</div>'
             if lists
-            else '<p class="de-empty">// no data</p>'
-        )
-        + "</section>"
+            else _empty("no data", "score more episodes to populate this")
+        ),
     )
     return readouts + length_section + speed_section + heat + outlier_section

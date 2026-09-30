@@ -1,10 +1,25 @@
 /*
- * Faultlined layout layer.
+ * Faultlined instrument layer.
  *
- * The terminal/instrument vocabulary (colours, type scale, tables, status badges,
- * ASCII bars) comes from the vendored stylesheet; see vendor/terminal-ui/NOTICE.md.
- * The display face is vendored Departure Mono; see vendor/departure-mono/NOTICE.md.
- * This file owns layout, the chart/graticule language, and where each face is used.
+ * The brief is a bench instrument, not a dashboard: machined bezels, silkscreen
+ * legends, status LEDs, an oscilloscope graticule, and hazard striping where
+ * something is actually wrong. Everything is drawn with borders, gradients and
+ * one vendored font — no images, no icon font, no build step.
+ *
+ * The colour/type vocabulary (custom properties, tables, badges, ASCII bars)
+ * comes from the vendored stylesheet; see vendor/terminal-ui/NOTICE.md. The
+ * display face is vendored Departure Mono; see vendor/departure-mono/NOTICE.md.
+ *
+ * Three rules the rest of this file obeys:
+ *
+ * 1. **Colour is never the only signal.** Every severity carries a word and a
+ *    distinct glyph as well as a hue, because an instrument that relies on red
+ *    alone is unusable for a red-green colourblind operator.
+ * 2. **Nothing glows unless the theme asked for it.** Phosphor halos come from
+ *    the vendored theme hooks, not from here, so a theme without CRT character
+ *    does not get a fake one.
+ * 3. **Motion is opt-in.** Every animation sits behind
+ *    `prefers-reduced-motion: no-preference`.
  */
 
 @font-face {
@@ -16,25 +31,49 @@
 }
 
 :root {
-  --de-gap: 0.75rem;
   --de-display: "Departure Mono", ui-monospace, SFMono-Regular, Consolas, monospace;
+  --de-mono: ui-monospace, SFMono-Regular, "Cascadia Mono", Consolas, monospace;
+  --de-gap: 0.75rem;
+  --de-radius: 2px;
+  /* Derived from whatever theme is active, resolved once. */
+  --de-fg: var(--fine-use-text, #0f0);
+  --de-dim: var(--fine-use-comment, #080);
+  --de-line: color-mix(in srgb, var(--fine-use-border, #0a0) 45%, transparent);
+  --de-faint: color-mix(in srgb, var(--fine-use-border, #0a0) 18%, transparent);
+  /* The status ramp is set per theme further down, not here. */
 }
 
-/* The pixel face carries the instrument register: headings, readouts, meters,
-   clocks, chart chrome. Prose stays on the vendored body stack. */
+/* ---- type register -------------------------------------------------------- */
+
+/* The pixel face carries the instrument chrome: legends, readouts, meters,
+   clocks, chart chrome. Data stays on the platform monospace stack, which is
+   what makes a column of numbers align. */
 .de-head h1,
 .de-brand,
 .de-section > h2,
 .de-outlier-h,
+.de-readout dt,
 .de-readout dd,
-.de-readout dd small,
 .de-meter,
 .de-clock,
 .de-strip,
-.de-table td.num,
-.de-kv dd,
-.de-outliers .num {
+.de-kv dt,
+.de-chip,
+.de-bezel-label,
+.de-table th {
   font-family: var(--de-display);
+}
+
+.de-table td,
+.de-kv dd,
+.de-outliers,
+pre.de-json,
+.de-digest,
+.de-empty,
+.de-violations,
+.de-json-inline,
+.de-readout dd small {
+  font-family: var(--de-mono);
 }
 
 /* ---- shell ---------------------------------------------------------------- */
@@ -42,65 +81,204 @@
 body {
   margin: 0;
   background: var(--fine-use-bg, #000);
-  color: var(--fine-use-text, #0f0);
+  color: var(--de-fg);
+  min-height: 100vh;
+}
+
+/* The graticule. A scope screen has a grid behind the trace, and it is the
+   cheapest way to make a flat page read as an instrument. Faint enough to stay
+   behind the data. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background-image:
+    repeating-linear-gradient(
+      to right,
+      var(--de-faint) 0 1px,
+      transparent 1px 3.5rem
+    ),
+    repeating-linear-gradient(
+      to bottom,
+      var(--de-faint) 0 1px,
+      transparent 1px 3.5rem
+    );
 }
 
 .de-shell {
-  max-width: 76rem;
+  position: relative;
+  z-index: 1;
+  max-width: 78rem;
   margin: 0 auto;
-  padding: 1.25rem 1.25rem 3rem;
+  padding: 0 1.25rem 4rem;
 }
+
+/* ---- faceplate nav -------------------------------------------------------- */
 
 .de-nav {
   display: flex;
-  align-items: baseline;
-  gap: 1.25rem;
+  align-items: center;
+  gap: 0.15rem;
   flex-wrap: wrap;
-  padding-bottom: 0.6rem;
-  margin-bottom: 1rem;
+  padding: 0.55rem 0;
+  margin: 0 -1.25rem 1rem;
+  padding-inline: 1.25rem;
   border-bottom: 1px solid var(--fine-use-border, #0a0);
+  /* A faceplate is a machined strip: a faint top highlight, a hard bottom edge. */
+  background:
+    linear-gradient(
+      to bottom,
+      color-mix(in srgb, var(--fine-use-surface, #010) 70%, transparent),
+      transparent
+    );
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  backdrop-filter: blur(2px);
 }
 
 .de-brand {
   font-weight: 700;
-  letter-spacing: 0.14em;
+  letter-spacing: 0.16em;
   text-transform: uppercase;
   color: var(--fine-use-accent, #0c0);
+  font-size: 0.9rem;
+  margin-right: 0.9rem;
+  white-space: nowrap;
 }
 
 .de-brand span {
-  color: var(--fine-use-comment, #080);
+  color: var(--de-dim);
   font-weight: 400;
+  letter-spacing: 0.1em;
 }
 
 .de-nav a {
-  color: var(--fine-use-text, #0f0);
+  color: var(--de-fg);
   text-decoration: none;
   text-transform: uppercase;
-  letter-spacing: 0.1em;
-  font-size: 0.78rem;
-  padding-bottom: 2px;
+  letter-spacing: 0.11em;
+  font-size: 0.7rem;
+  font-family: var(--de-display);
+  padding: 0.25rem 0.5rem;
+  border: 1px solid transparent;
+  border-radius: var(--de-radius);
+  /* The numeric key hint, revealed on focus/hover. Cheap affordance, no JS. */
+  position: relative;
 }
 
-.de-nav a:hover { border-bottom: 1px solid var(--fine-use-border, #0a0); }
+.de-nav a::after {
+  content: attr(data-key);
+  margin-left: 0.35rem;
+  color: var(--de-dim);
+  font-size: 0.6rem;
+  opacity: 0;
+  transition: opacity 90ms linear;
+}
+
+.de-nav a:hover,
+.de-nav a:focus-visible {
+  border-color: var(--de-line);
+  background: color-mix(in srgb, var(--fine-use-accent, #0c0) 10%, transparent);
+}
+
+.de-nav a:hover::after,
+.de-nav a:focus-visible::after {
+  opacity: 1;
+}
 
 .de-nav a[aria-current="page"] {
   color: var(--fine-use-accent, #0c0);
-  border-bottom: 2px solid var(--fine-use-accent, #0c0);
+  border-color: var(--fine-use-accent, #0c0);
+  background: color-mix(in srgb, var(--fine-use-accent, #0c0) 14%, transparent);
 }
 
 .de-nav .de-spacer { flex: 1; }
 
+/* ---- status LED ----------------------------------------------------------- */
+
+/* A single indicator for the whole page's link health, driven by app.js. Green
+   is steady, amber is retrying, red is failed, grey is unknown. The word is
+   always present in the accessible name so colour is never the only signal. */
+.de-led[hidden] { display: none; }
+
+.de-led {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-family: var(--de-display);
+  font-size: 0.62rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--de-dim);
+  padding: 0.2rem 0.45rem;
+  border: 1px solid var(--de-line);
+  border-radius: var(--de-radius);
+  white-space: nowrap;
+}
+
+.de-led::before {
+  content: "";
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: var(--de-dim);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--fine-use-bg, #000) 60%, transparent);
+}
+
+.de-led[data-state="ok"]::before { background: var(--de-ok); }
+.de-led[data-state="retry"]::before { background: var(--de-warn); }
+.de-led[data-state="down"]::before { background: var(--de-err); }
+.de-led[data-state="paused"]::before { background: var(--de-dim); opacity: 0.5; }
+
+@media (prefers-reduced-motion: no-preference) {
+  .de-led[data-state="retry"]::before { animation: de-blink 0.9s steps(2, start) infinite; }
+  .de-led[data-state="ok"]::before { animation: de-breathe 4s ease-in-out infinite; }
+}
+
+@keyframes de-breathe {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+
 .de-theme {
-  font: inherit;
-  font-size: 0.75rem;
+  font-family: var(--de-display);
+  font-size: 0.68rem;
   text-transform: uppercase;
   letter-spacing: 0.1em;
   background: transparent;
-  color: var(--fine-use-text, #0f0);
-  border: 1px solid var(--fine-use-border, #0a0);
-  padding: 0.15rem 0.35rem;
+  color: var(--de-fg);
+  border: 1px solid var(--de-line);
+  border-radius: var(--de-radius);
+  padding: 0.2rem 0.35rem;
+  cursor: pointer;
 }
+
+/* The theme form holds the select plus its no-JS submit button. The button is
+   screen-reader-only because the select's onchange submits in the normal case;
+   it exists so the control still works with scripting disabled. */
+.de-theme-form {
+  display: flex;
+  gap: 0.3rem;
+  align-items: center;
+}
+
+.de-theme-form .de-sr:focus {
+  position: static;
+  width: auto;
+  height: auto;
+  clip: auto;
+  margin: 0;
+  padding: 0.2rem 0.4rem;
+  border: 1px solid var(--de-line);
+  font-size: 0.6rem;
+}
+
+/* Poll region. No visual treatment of its own - it exists so app.js has a
+   stable, innermost element to replace without disturbing page chrome. */
+.de-live { min-height: 1rem; }
 
 /* ---- page header ---------------------------------------------------------- */
 
@@ -110,29 +288,194 @@ body {
   justify-content: space-between;
   gap: 1rem;
   flex-wrap: wrap;
-  margin-bottom: 0.25rem;
+  margin-bottom: 0.15rem;
 }
 
 .de-head h1 {
   margin: 0;
+  font-size: 1.35rem;
   text-transform: uppercase;
-  letter-spacing: 0.16em;
+  letter-spacing: 0.2em;
 }
 
 .de-clock {
   font-variant-numeric: tabular-nums;
-  color: var(--fine-use-comment, #080);
-  font-size: 0.8rem;
-  letter-spacing: 0.08em;
+  color: var(--de-dim);
+  font-size: 0.75rem;
+  letter-spacing: 0.1em;
+  white-space: nowrap;
 }
 
 .de-sub {
-  color: var(--fine-use-comment, #080);
-  font-size: 0.8rem;
+  color: var(--de-dim);
+  font-size: 0.72rem;
   margin: 0 0 1rem;
   text-transform: uppercase;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.14em;
+  font-family: var(--de-display);
 }
+
+/* ---- motion --------------------------------------------------------------- */
+
+/* Motion tokens are the published Material Design 3 values, from material-web
+   v0.192 `tokens/versions/v0_192/_md-sys-motion.scss`. Emphasized curves move
+   large surfaces, standard curves small state changes. A cubic-bezier is a
+   timeline, not a simulation; the one genuinely simulated motion here is the
+   navigation sweep, integrated per frame in app.js. */
+:root {
+  /* Material 3, v0.192, emphasized set. */
+  --de-ease-emphasized: cubic-bezier(0.2, 0, 0, 1);
+  --de-ease-emphasized-accelerate: cubic-bezier(0.3, 0, 0.8, 0.15);
+  --de-ease-emphasized-decelerate: cubic-bezier(0.05, 0.7, 0.1, 1);
+  /* Material 3, v0.192, standard set. */
+  --de-ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --de-ease-standard-accelerate: cubic-bezier(0.3, 0, 1, 1);
+  --de-ease-standard-decelerate: cubic-bezier(0, 0, 0, 1);
+  /* Material 3 durations, v0.192. */
+  --de-dur-short2: 100ms;
+  --de-dur-short4: 200ms;
+  --de-dur-medium2: 300ms;
+  --de-dur-medium4: 400ms;
+  --de-dur-long2: 500ms;
+}
+
+/* Panels arrive rather than pop, staggered by depth (`--i`, set by app.js and
+   capped at 8) so a page of six panels does not land as one slab.
+
+   Declared inside the `no-preference` guard, never cancelled by a `reduce`
+   override: opting in is the only direction that cannot be forgotten. */
+@media (prefers-reduced-motion: no-preference) {
+  /* The entrance runs once per document load, gated on [data-booted], which
+     app.js sets on <html> after the first frame. A poll replaces `.de-live`'s
+     innerHTML, and a new element restarts its animation from 0% - so an
+     ungated entrance replays on every cycle and strobes the page.
+     `animation-fill-mode: none` keeps the rule self-cleaning: the animated
+     property reverts to its resting value, so nothing can strand at opacity 0. */
+  html:not([data-booted]) .de-section,
+  html:not([data-booted]) .de-readouts {
+    animation: de-arrive var(--de-dur-long2) var(--de-ease-emphasized-decelerate) none;
+  }
+
+  html:not([data-booted]) .de-section {
+    animation-delay: calc(var(--i, 0) * 45ms);
+  }
+
+  /* A poll that changed nothing must not move. A poll that changed something
+     marks the region, not the page: no opacity dip, no reflow, no blink. */
+  .de-live[data-changed] {
+    animation: de-refresh var(--de-dur-medium2) var(--de-ease-standard-decelerate) none;
+  }
+
+  /* The outgoing page recedes: it dims and goes slightly out of focus, so the
+     incoming page reads as closer rather than merely different. `filter` is
+     transitioned alongside opacity deliberately - the blur is the signal that
+     something is being replaced, and without it a fade alone looks like a
+     rendering glitch.
+
+     This was previously a transition on `opacity` that nothing ever changed,
+     so it did nothing at all: the page snapped and only the bars moved. */
+  body.de-leaving {
+    opacity: 0.25;
+    filter: blur(3px);
+    transform: scale(0.995);
+    transition:
+      opacity var(--de-dur-short4) var(--de-ease-emphasized-accelerate),
+      filter var(--de-dur-short4) var(--de-ease-emphasized-accelerate),
+      transform var(--de-dur-short4) var(--de-ease-emphasized-accelerate);
+    /* Promote for the duration: animating a full-page blur repaints every
+       layer each frame otherwise, which is the difference between a smooth
+       transition and a visible stall on a dense page. */
+    will-change: opacity, filter;
+  }
+}
+
+@keyframes de-arrive {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 6px, 0);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Deliberately a hairline colour shift rather than an opacity dip. An opacity
+   animation on a region that re-renders is indistinguishable from a flicker;
+   a 6% lift is perceptible as "this updated" and cannot be read as a fault. */
+@keyframes de-refresh {
+  0% { color: var(--de-ok); }
+  100% { color: inherit; }
+}
+
+/* ---- fault banner --------------------------------------------------------- */
+
+/* Shown by app.js when a poll fails. Hazard striping is the one place the
+   instrument is allowed to shout, because it means the instrument itself is
+   unreliable and the numbers on screen may be stale. */
+.de-banner {
+  display: none;
+  align-items: center;
+  gap: 0.7rem;
+  flex-wrap: wrap;
+  margin: 0 0 1rem;
+  padding: 0.5rem 0.7rem;
+  border: 1px solid var(--de-err);
+  border-left-width: 4px;
+  background:
+    repeating-linear-gradient(
+      -45deg,
+      color-mix(in srgb, var(--de-err) 12%, transparent) 0 8px,
+      transparent 8px 16px
+    ),
+    color-mix(in srgb, var(--fine-use-bg, #000) 80%, var(--de-err));
+  font-size: 0.75rem;
+  letter-spacing: 0.06em;
+}
+
+.de-banner[data-visible="1"] { display: flex; }
+
+/* A boxed exclamation, drawn not typed: the mark is an aria-hidden decorative
+   glyph so the message text is what a screen reader announces. */
+.de-banner-mark {
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 1.2rem;
+  height: 1.2rem;
+  border: 1px solid var(--de-err);
+  color: var(--de-err);
+  font-family: var(--de-display);
+  font-weight: 700;
+  line-height: 1;
+}
+
+.de-banner .de-banner-msg { color: var(--de-fg); }
+
+.de-banner button {
+  font: inherit;
+  font-family: var(--de-display);
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  background: transparent;
+  color: var(--de-err);
+  border: 1px solid var(--de-err);
+  border-radius: var(--de-radius);
+  padding: 0.15rem 0.5rem;
+  cursor: pointer;
+  margin-left: auto;
+}
+
+.de-banner button:hover,
+.de-banner button:focus-visible {
+  background: var(--de-err);
+  color: var(--fine-use-bg, #000);
+}
+
+/* Staleness: when the last successful poll is old enough to matter, the clock
+   says so instead of quietly implying the numbers are current. */
+.de-clock[data-stale="1"] { color: var(--de-warn); }
 
 /* ---- telemetry readouts --------------------------------------------------- */
 
@@ -140,107 +483,431 @@ body {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr));
   gap: 1px;
-  background: var(--fine-use-border, #0a0);
-  border: 1px solid var(--fine-use-border, #0a0);
-  margin-bottom: 1.25rem;
+  background: var(--de-line);
+  border: 1px solid var(--de-line);
+  margin-bottom: 1.35rem;
 }
 
 .de-readout {
   background: var(--fine-use-surface, #010);
-  padding: 0.6rem 0.7rem;
+  padding: 0.55rem 0.7rem 0.5rem;
+  position: relative;
 }
 
 .de-readout dt {
-  font-size: 0.68rem;
+  font-size: 0.62rem;
   text-transform: uppercase;
-  letter-spacing: 0.14em;
-  color: var(--fine-use-comment, #080);
-  margin: 0 0 0.3rem;
+  letter-spacing: 0.16em;
+  color: var(--de-dim);
+  margin: 0 0 0.35rem;
 }
 
 .de-readout dd {
   margin: 0;
-  font-size: 1.4rem;
+  font-size: 1.45rem;
   font-variant-numeric: tabular-nums;
-  line-height: 1.1;
+  line-height: 1;
+  letter-spacing: 0.02em;
 }
 
 .de-readout dd small {
-  font-size: 0.7rem;
-  color: var(--fine-use-comment, #080);
-  letter-spacing: 0.08em;
-  margin-left: 0.2rem;
+  font-size: 0.65rem;
+  color: var(--de-dim);
+  letter-spacing: 0.1em;
+  margin-left: 0.25rem;
 }
 
-/* ---- sections ------------------------------------------------------------- */
+/* ---- bezel panels --------------------------------------------------------- */
 
-.de-section { margin-bottom: 1.4rem; }
+/* A section is a bolted-down plate. The corner marks are the screws; the inset
+   highlight is the machined edge. */
+.de-section {
+  position: relative;
+  margin-bottom: 1.5rem;
+  padding: 0.85rem 1rem 1rem;
+  border: 1px solid var(--de-line);
+  border-radius: var(--de-radius);
+  background: color-mix(in srgb, var(--fine-use-surface, #010) 35%, transparent);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--fine-use-border, #0a0) 25%, transparent);
+}
+
+.de-section::before,
+.de-section::after {
+  content: "";
+  position: absolute;
+  width: 3px;
+  height: 3px;
+  border: 1px solid var(--de-dim);
+  opacity: 0.7;
+  pointer-events: none;
+}
+
+.de-section::before { top: 4px; left: 4px; }
+.de-section::after { bottom: 4px; right: 4px; }
 
 .de-section > h2 {
-  font-size: 0.75rem;
+  font-size: 0.68rem;
   text-transform: uppercase;
-  letter-spacing: 0.16em;
+  letter-spacing: 0.2em;
   color: var(--fine-use-accent, #0c0);
-  margin: 0 0 0.5rem;
-  padding-bottom: 0.25rem;
-  border-bottom: 1px dashed var(--fine-use-border, #0a0);
+  margin: 0 0 0.7rem;
+  padding-bottom: 0.35rem;
+  border-bottom: 1px solid var(--de-line);
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
 }
 
-/* ---- ascii meter ---------------------------------------------------------- */
+.de-section > h2 .de-bezel-label {
+  margin-left: auto;
+  font-size: 0.6rem;
+  letter-spacing: 0.12em;
+  color: var(--de-dim);
+  text-transform: none;
+}
 
+/* ---- ASCII meter ---------------------------------------------------------- */
+
+/* The meter's own box is drawn by the characters, so the cell needs no chrome;
+   `aria-label` carries the same number for a screen reader. */
 .de-meter {
-  font-family: inherit;
   letter-spacing: 0.02em;
   white-space: pre;
   color: var(--fine-use-accent, #0c0);
 }
 
-.de-meter .off { color: var(--fine-use-comment, #080); opacity: 0.45; }
+.de-meter .off { color: var(--de-dim); opacity: 0.4; }
 
 /* ---- job state strip ------------------------------------------------------ */
 
 .de-strip {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.4rem;
-  font-size: 0.8rem;
-  letter-spacing: 0.1em;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.72rem;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
 }
 
-.de-strip .step { color: var(--fine-use-comment, #080); }
-.de-strip .step.done { color: var(--fine-use-text, #0f0); }
-.de-strip .step.now { color: var(--fine-use-bg, #000); background: var(--fine-use-accent, #0c0); padding: 0 0.3rem; }
-.de-strip .sep { color: var(--fine-use-comment, #080); }
+.de-strip .step { color: var(--de-dim); }
+.de-strip .step.done { color: var(--de-fg); }
+.de-strip .step.now {
+  color: var(--fine-use-bg, #000);
+  background: var(--fine-use-accent, #0c0);
+  padding: 0.05rem 0.35rem;
+  border-radius: var(--de-radius);
+}
+.de-strip .sep { color: var(--de-dim); opacity: 0.6; }
 
 /* ---- tables --------------------------------------------------------------- */
 
-.de-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+/* Each data plate is its own scroll region, both axes: the Episodes table is
+   ten columns and would otherwise drag the nav sideways.
+
+   The plate is deliberately a scrollport, because `overflow-x: auto` already
+   forces `overflow-y` to compute to `auto`. The column header is sticky against
+   this element, so its `top` is measured from the top of the table - not the
+   page. That is why the offset is 0 and why the header must not be given a
+   nav-relative offset: the nav's height is theme- and viewport-dependent.
+
+   Short tables never reach `max-height`, so nothing about them changes. */
+.de-table-wrap {
+  overflow: auto;
+  max-height: min(70vh, 44rem);
+  scrollbar-width: thin;
+  scrollbar-color: var(--fine-use-accent, #0c0) transparent;
+}
+
+/* Keyboard users must be able to reach the scroll region, so it takes focus -
+   and when they do, say so. */
+.de-table-wrap:focus-visible {
+  outline: 2px solid var(--fine-use-accent, #0c0);
+  outline-offset: -2px;
+}
+
+.de-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+  /* Long evidence strings would otherwise stretch the plate; wrap instead. */
+  table-layout: auto;
+}
+
+/* Sticky column headers, pinned *below* the nav.
+
+   The offset is a CSS variable rather than a literal because the nav height
+   depends on the font metrics and the theme. Hard-coding it (it was 2.4rem)
+   pinned the headers 34px above the real nav bottom, so they slid underneath the
+   nav and over the first rows of the table - the header and the data it labels
+   ended up in the same place. `body:has(.de-nav)` sets it from the live value.
+   */
+/* Header and cell share one line-box height and one padding, so a column label
+   and the value beneath it sit on the same line. `--de-cell-pad` and
+   `--de-row-line` are the single source for both, so they cannot drift apart. */
+.de-table {
+  --de-cell-pad: 0.45rem 0.6rem;
+  /* One line-box height for the header and the cells, as a length rather than a
+     ratio. A ratio would scale with each cell's own font-size and the header's
+     text would sit a couple of pixels off the baseline of the row beneath it. */
+  --de-row-line: 1.08rem;
+}
 
 .de-table th {
   text-align: left;
-  font-size: 0.68rem;
+  font-size: 0.6rem;
+  line-height: var(--de-row-line);
+  vertical-align: top;
   text-transform: uppercase;
-  letter-spacing: 0.12em;
-  color: var(--fine-use-comment, #080);
+  letter-spacing: 0.14em;
+  color: var(--de-dim);
   font-weight: 400;
-  padding: 0.35rem 0.5rem;
+  padding: var(--de-cell-pad);
   border-bottom: 1px solid var(--fine-use-border, #0a0);
   white-space: nowrap;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  /* Opaque, and the *panel* surface rather than the page background: the
+     section tint is a translucent mix, so a page-coloured header shows the rows
+     scrolling underneath it. */
+  background: var(--fine-use-surface, #010);
 }
 
 .de-table td {
-  padding: 0.32rem 0.5rem;
-  border-bottom: 1px solid color-mix(in srgb, var(--fine-use-border, #0a0) 35%, transparent);
+  font-size: 0.8rem;
+  line-height: var(--de-row-line);
+  padding: var(--de-cell-pad);
+  border-bottom: 1px solid var(--de-faint);
   font-variant-numeric: tabular-nums;
   vertical-align: top;
 }
 
-.de-table tbody tr:hover td { background: color-mix(in srgb, var(--fine-use-accent, #0c0) 8%, transparent); }
+.de-table tbody tr:hover td { background: color-mix(in srgb, var(--fine-use-accent, #0c0) 9%, transparent); }
+
 .de-table a { color: var(--fine-use-accent, #0c0); text-decoration: none; }
 .de-table a:hover { text-decoration: underline; }
 .de-table .num { text-align: right; }
-.de-table .dim { color: var(--fine-use-comment, #080); }
+.de-table .dim { color: var(--de-dim); }
+
+/* Copyable identifiers: monospace, click to copy, and a visible affordance so
+   the capability is discoverable rather than a secret. */
+.de-copy {
+  cursor: copy;
+  border-bottom: 1px dotted var(--de-dim);
+}
+
+.de-copy:hover { border-bottom-color: var(--fine-use-accent, #0c0); }
+
+/* ---- status colour: one palette, per theme -------------------------------- */
+
+/*
+ * The bug this fixes: `--fine-use-success` in the vendored sheets is a fully
+ * saturated #00ff00, and core.css applies it to `.text-success` at full weight.
+ * On the Status page that put a single pure-green "ok" in a row of grey numbers
+ * and it read as a highlighted button rather than as a reading - a sore thumb.
+ * Saturated primaries are for the one thing on screen that must be seen; a
+ * status word is not that thing.
+ *
+ * The fix is a dedicated status ramp per theme, held here rather than in the
+ * vendored file (which is pinned and must not be edited). Each ramp is derived
+ * from the Okabe-Ito colour-blind-safe set, then pulled down in chroma and
+ * nudged toward the theme's own background so the values sit *in* the palette
+ * rather than on top of it. Chosen hues:
+ *
+ *   ok      bluish green  #009E73   cool, unmistakably not the accent hue
+ *   warn    orange        #E69F00   the amber every instrument already uses
+ *   error   vermillion    #D55E00   red-orange; reads as alarm without neon
+ *   info    sky blue      #56B4E9   distinct from ok in both hue and lightness
+ *   muted   the theme's own comment colour, for "no value"
+ *
+ * Every one of these is distinguishable under deuteranopia, protanopia and
+ * tritanopia, and none of them is the theme accent, so "a number is coloured"
+ * and "this is the interactive accent" stop competing.
+ */
+:root {
+  /* Fallbacks for a theme we have not tuned. Mid-lightness, low chroma. */
+  --de-ok: #7fb3a3;
+  --de-warn: #d1a05f;
+  --de-err: #cf7f63;
+  --de-info: #7fa8c4;
+  --de-muted: #6b7280;
+}
+
+/* VT220: a green-phosphor terminal. The status ramp is desaturated toward the
+   phosphor so it belongs, and the accent stays the only saturated green. */
+[data-theme="vt220"] {
+  --de-ok: #6fae8f;
+  --de-warn: #c9a15c;
+  --de-err: #c9776a;
+  --de-info: #6f9fb5;
+  --de-muted: #4d7a4d;
+}
+
+/* Amber CRT: everything is already warm, so the ramp leans warm and the greens
+   are pulled to olive rather than fighting the background. */
+[data-theme="amber"] {
+  --de-ok: #9a9a52;
+  --de-warn: #c99244;
+  --de-err: #c26a4a;
+  --de-info: #9a8352;
+  --de-muted: #8a6428;
+}
+
+/* GitHub Dark: the only theme with a cool neutral ground, so the ramp can be
+   the most colourful of the four without shouting. Values are the Okabe-Ito
+   hues darkened one step to sit on #0d1117 at AA contrast. */
+[data-theme="github-dark"] {
+  --de-ok: #57ab8a;
+  --de-warn: #c69026;
+  --de-err: #d1705b;
+  --de-info: #6cb0d9;
+  --de-muted: #7d8590;
+}
+
+/* Monochrome: the theme's entire premise is maximum contrast with no hue, so
+   the status ramp is pure luminance. A red alert still has to be findable, and
+   here the *weight* does that work rather than the hue. */
+[data-theme="monochrome"] {
+  --de-ok: #b8b8b8;
+  --de-warn: #d0d0d0;
+  --de-err: #ffffff;
+  --de-info: #9a9a9a;
+  --de-muted: #6e6e6e;
+}
+
+/* Bind the ramp to the semantic classes. This deliberately does NOT touch
+   --fine-use-success and friends: the vendored `.status-*` components keep
+   their own saturated treatment, which is right for a filled chip you are
+   meant to read as a badge. Only inline status *words* get the quiet ramp. */
+.text-success { color: var(--de-ok); }
+.text-warning { color: var(--de-warn); }
+.text-error   { color: var(--de-err); }
+.text-info    { color: var(--de-info); }
+.text-comment { color: var(--de-muted); }
+
+/* ---- severity glyphs ------------------------------------------------------ */
+
+/* Hue is the third signal, not the first. The glyph and the word carry meaning
+   on their own. */
+.text-success::before { content: "\25cf"; margin-right: 0.3em; }
+.text-warning::before { content: "\25b2"; margin-right: 0.3em; }
+.text-error::before { content: "\2715"; margin-right: 0.3em; }
+.text-info::before { content: "\25c6"; margin-right: 0.3em; }
+.text-comment::before { content: "\00b7"; margin-right: 0.3em; }
+
+/* ---- ingest form ---------------------------------------------------------- */
+
+/* The one control that creates data, so it is allowed to be taller and denser
+   than the filter bar. Inputs share the filter bar's face so the page does not
+   grow a second control language, but they keep their typed value in normal case:
+   an uppercase-transformed text field shows the wrong text back to the person
+   who typed it, and `frames` is a number, not a label. */
+.de-ingest {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  margin-top: 0.7rem;
+}
+
+.de-field-row {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.de-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  flex: 1 1 8rem;
+  min-width: 0;
+}
+
+.de-field-wide { flex-basis: 100%; }
+
+.de-field-label {
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--de-dim);
+}
+
+.de-field input,
+.de-field select {
+  font-family: var(--de-display);
+  font-size: 0.75rem;
+  color: var(--de-fg);
+  background: var(--fine-use-bg, #000);
+  border: 1px solid var(--de-line);
+  border-radius: var(--de-radius);
+  padding: 0.3rem 0.5rem;
+  min-width: 0;
+}
+
+.de-field input::placeholder { color: var(--de-dim); opacity: 0.6; }
+
+.de-field input:focus-visible,
+.de-field select:focus-visible {
+  outline: 2px solid var(--fine-use-accent, #0c0);
+  outline-offset: -2px;
+}
+
+.de-submit {
+  align-self: flex-start;
+  font-family: var(--de-display);
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--fine-use-bg, #000);
+  background: var(--fine-use-accent, #0c0);
+  border: 1px solid var(--fine-use-accent, #0c0);
+  border-radius: var(--de-radius);
+  padding: 0.32rem 0.9rem;
+  cursor: pointer;
+}
+
+/* Inverts rather than glows, like every other action here: an inverted block
+   reads the same in all four vendored themes, including the phosphorless ones. */
+.de-submit:hover,
+.de-submit:focus-visible {
+  background: transparent;
+  color: var(--fine-use-accent, #0c0);
+  outline: none;
+}
+
+.de-submit:active { transform: translateY(1px); }
+
+.de-sub-note,
+.de-steps {
+  font-size: 0.66rem;
+  color: var(--de-dim);
+  line-height: 1.5;
+  margin: 0;
+}
+
+/* A two-line caveat has no business spanning a 1200px panel: the measure would
+   be absurd and the eye would have to travel back to find the start of the next
+   sentence. */
+.de-sub-note { max-width: 60ch; }
+
+.de-steps {
+  padding-left: 1.1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.de-step-n { color: var(--fine-use-accent, #0c0); margin-right: 0.4em; }
+
+.de-notice {
+  font-size: 0.7rem;
+  padding: 0.4rem 0.55rem;
+  border-left: 2px solid var(--de-err);
+  background: color-mix(in srgb, var(--de-err) 8%, transparent);
+  color: var(--de-fg);
+  margin: 0 0 0.6rem;
+}
 
 /* ---- filter bar ----------------------------------------------------------- */
 
@@ -249,93 +916,129 @@ body {
   align-items: center;
   gap: 0.5rem;
   flex-wrap: wrap;
-  margin-bottom: 0.6rem;
-  font-size: 0.78rem;
+  margin-bottom: 0.7rem;
+  font-size: 0.72rem;
   text-transform: uppercase;
   letter-spacing: 0.1em;
 }
 
-.de-filters label { color: var(--fine-use-comment, #080); }
+.de-filters label { color: var(--de-dim); }
 
 .de-filters select,
-.de-filters button {
-  font: inherit;
-  font-size: 0.75rem;
+.de-filters button,
+.de-filters input {
+  font-family: var(--de-display);
+  font-size: 0.7rem;
   text-transform: uppercase;
   letter-spacing: 0.1em;
-  background: transparent;
-  color: var(--fine-use-text, #0f0);
-  border: 1px solid var(--fine-use-border, #0a0);
-  padding: 0.2rem 0.5rem;
+  background: var(--fine-use-bg, #000);
+  color: var(--de-fg);
+  border: 1px solid var(--de-line);
+  border-radius: var(--de-radius);
+  padding: 0.2rem 0.45rem;
   cursor: pointer;
 }
 
+.de-filters label:has(select) { color: var(--de-dim); }
+
 /* ---- misc ----------------------------------------------------------------- */
 
-.de-kv { display: grid; grid-template-columns: max-content 1fr; gap: 0.25rem 1rem; font-size: 0.85rem; }
-.de-kv dt { color: var(--fine-use-comment, #080); text-transform: uppercase; letter-spacing: 0.1em; font-size: 0.72rem; }
+.de-kv {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 0.3rem 1rem;
+  font-size: 0.8rem;
+}
+
+.de-kv dt {
+  color: var(--de-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-size: 0.66rem;
+  align-self: baseline;
+}
+
 .de-kv dd { margin: 0; word-break: break-all; }
 
 pre.de-json {
   background: var(--fine-use-surface, #010);
-  border: 1px solid var(--fine-use-border, #0a0);
+  border: 1px solid var(--de-line);
+  border-radius: var(--de-radius);
   padding: 0.7rem;
   overflow: auto;
-  font-size: 0.78rem;
-  line-height: 1.4;
+  max-height: 26rem;
+  font-size: 0.72rem;
+  line-height: 1.5;
   margin: 0;
 }
 
-.de-empty { color: var(--fine-use-comment, #080); padding: 0.6rem 0; letter-spacing: 0.08em; }
+.de-empty {
+  color: var(--de-dim);
+  padding: 0.7rem 0;
+  letter-spacing: 0.1em;
+  font-size: 0.75rem;
+}
 
-.de-violations { margin: 0.4rem 0 0; padding-left: 1.1rem; font-size: 0.82rem; line-height: 1.7; }
-.de-violations code { color: var(--fine-use-error, #f55); }
+.de-chip {
+  display: inline-block;
+  font-size: 0.65rem;
+  letter-spacing: 0.1em;
+  padding: 0.1rem 0.4rem;
+  border: 1px solid currentColor;
+  border-radius: var(--de-radius);
+  margin: 0 0.25rem 0.25rem 0;
+}
+
+.de-violations {
+  margin: 0.4rem 0 0;
+  padding-left: 1.2rem;
+  font-size: 0.78rem;
+  line-height: 1.7;
+}
+
+.de-violations code { color: var(--de-err); }
 
 /* ---- lifecycle actions ---------------------------------------------------- */
 
 .de-attempts { white-space: nowrap; }
-.de-attempts .de-meter { font-size: 0.75rem; opacity: 0.8; }
+.de-attempts .de-meter { font-size: 0.7rem; opacity: 0.85; }
 
 .de-action {
   display: flex;
   align-items: center;
   gap: 0.7rem;
   flex-wrap: wrap;
-  margin-top: 0.7rem;
-  padding-top: 0.6rem;
-  border-top: 1px dashed var(--fine-use-border, #0a0);
+  margin-top: 0.8rem;
+  padding-top: 0.65rem;
+  border-top: 1px dashed var(--de-line);
 }
 
 .de-cancel {
-  font: inherit;
-  font-size: 0.75rem;
+  font-family: var(--de-display);
+  font-size: 0.7rem;
   text-transform: uppercase;
-  letter-spacing: 0.12em;
-  color: var(--fine-use-error, #a00);
+  letter-spacing: 0.14em;
+  color: var(--de-err);
   background: transparent;
-  border: 1px solid var(--fine-use-error, #a00);
+  border: 1px solid var(--de-err);
+  border-radius: var(--de-radius);
   padding: 0.25rem 0.7rem;
   cursor: pointer;
-  transition: background 120ms linear, color 120ms linear;
 }
 
-/* Hover/focus invert rather than glow: this is an instrument, not a web page, and
-   an inverted block reads unambiguously in every vendored theme. */
+/* Hover/focus inverts rather than glows: an inverted block reads unambiguously
+   in every vendored theme, including the ones with no phosphor. */
 .de-cancel:hover,
 .de-cancel:focus-visible {
-  background: var(--fine-use-error, #a00);
-  color: var(--fine-use-surface, #010);
+  background: var(--de-err);
+  color: var(--fine-use-bg, #000);
   outline: none;
 }
 
 .de-cancel:active { transform: translateY(1px); }
+.de-cancel[disabled] { opacity: 0.45; cursor: not-allowed; }
 
-@media (prefers-reduced-motion: no-preference) {
-  .de-cancel:hover,
-  .de-cancel:focus-visible { transition-duration: 80ms; }
-}
-
-.de-action-note { font-size: 0.7rem; letter-spacing: 0.08em; opacity: 0.75; }
+.de-action-note { font-size: 0.68rem; letter-spacing: 0.08em; color: var(--de-dim); }
 
 @media (prefers-reduced-motion: no-preference) {
   .de-pulse { animation: de-blink 1.6s steps(2, start) infinite; }
@@ -347,14 +1050,19 @@ pre.de-json {
 
 /* ---- oscilloscope charts -------------------------------------------------- */
 
-/* Traces sit on a graticule like a scope screen: dotted grid, phosphor line,
-   no gradients or shadows. The SVGs hold one polyline/rect set and nothing else. */
+/* Traces sit on a graticule like a scope screen: dotted grid, phosphor line, no
+   gradients or shadows on the trace itself. The SVGs hold one polyline/rect set
+   and nothing else.
+
+   `width: 100%` with no max-width: an earlier revision capped the trace at 46rem,
+   which left the chart filling 61% of its panel and made the panel look half
+   empty. A scope screen spans its bezel. */
 .de-chart {
   display: block;
   width: 100%;
-  max-width: 46rem;
-  height: 3.25rem;
-  border: 1px solid var(--fine-use-border, #0a0);
+  height: 4.5rem;
+  border: 1px solid var(--de-line);
+  border-radius: var(--de-radius);
   background-image:
     repeating-linear-gradient(
       to right,
@@ -373,34 +1081,37 @@ pre.de-json {
   stroke: var(--fine-use-accent, #0c0);
   stroke-width: 2;
   vector-effect: non-scaling-stroke;
+  stroke-linejoin: round;
+  stroke-linecap: round;
 }
 
-.de-chart-bars rect {
-  fill: var(--fine-use-accent, #0c0);
-  opacity: 0.7;
-}
-
+.de-chart-bars rect { fill: var(--fine-use-accent, #0c0); opacity: 0.75; }
 .de-chart-dots circle { fill: var(--fine-use-accent, #0c0); }
 
-/* The heat matrix scrolls horizontally on narrow screens; keep the scrollbar in
-   the instrument palette instead of the OS default. */
+/* ---- cross-episode heat matrix -------------------------------------------- */
+
+/* Same reasoning as .de-table-wrap: sixteen dimension columns do not fit a
+   laptop, and the matrix is the one place horizontal scrolling is expected. */
 .de-heat-wrap {
+  overflow-x: auto;
   scrollbar-width: thin;
   scrollbar-color: var(--fine-use-accent, #0c0) transparent;
 }
 
-/* ---- cross-episode heat matrix -------------------------------------------- */
+.de-heat-wrap:focus-visible {
+  outline: 2px solid var(--fine-use-accent, #0c0);
+  outline-offset: -2px;
+}
 
-.de-heat-wrap { overflow-x: auto; }
 .de-heat-table { width: auto; }
-.de-heat-table th { font-family: var(--de-display); font-size: 0.6rem; padding: 0.2rem; }
+.de-heat-table th { position: static; font-size: 0.58rem; padding: 0.2rem; }
 
 .de-heat-table td.de-heat {
   width: 1.7rem;
   height: 1.15rem;
   padding: 0;
   text-align: center;
-  color: var(--fine-use-comment, #080);
+  color: var(--de-dim);
   background: color-mix(
     in srgb,
     var(--fine-use-accent, #0c0) calc(var(--v, 0) * 100%),
@@ -419,10 +1130,10 @@ pre.de-json {
 }
 
 .de-outlier-h {
-  font-size: 0.68rem;
+  font-size: 0.64rem;
   text-transform: uppercase;
-  letter-spacing: 0.14em;
-  color: var(--fine-use-comment, #080);
+  letter-spacing: 0.16em;
+  color: var(--de-dim);
   margin: 0 0 0.35rem;
 }
 
@@ -430,42 +1141,251 @@ pre.de-json {
   list-style: none;
   margin: 0;
   padding: 0;
-  font-size: 0.8rem;
+  font-size: 0.76rem;
 }
 
 .de-outliers li {
   display: flex;
   gap: 0.5rem;
   align-items: baseline;
-  padding: 0.18rem 0;
-  border-bottom: 1px dashed color-mix(in srgb, var(--fine-use-border, #0a0) 35%, transparent);
+  flex-wrap: wrap;
+  padding: 0.2rem 0;
+  border-bottom: 1px dashed var(--de-faint);
 }
 
 .de-outliers .num {
   margin-left: auto;
   font-variant-numeric: tabular-nums;
-  color: var(--fine-use-text, #0f0);
+  color: var(--de-fg);
 }
 
 .de-outliers a { color: var(--fine-use-accent, #0c0); text-decoration: none; }
 .de-outliers a:hover { text-decoration: underline; }
 
-/* ---- incidents: the notifier's queue (ADR 0020) ---- */
+/* ---- incidents: the notifier's queue (ADR 0020) -------------------------- */
 
 .de-digest {
   margin: 0;
-  padding: 0.7rem 0.9rem;
-  border: 1px solid color-mix(in srgb, var(--fine-use-border, #0a0) 45%, transparent);
+  padding: 0.75rem 0.9rem;
+  border: 1px solid var(--de-line);
   border-left: 3px solid var(--fine-use-accent, #0c0);
+  border-radius: var(--de-radius);
   background: color-mix(in srgb, var(--fine-use-bg, #000) 88%, var(--fine-use-accent, #0c0));
-  color: var(--fine-use-text, #0f0);
-  font-size: 0.82rem;
-  line-height: 1.5;
+  color: var(--de-fg);
+  font-size: 0.78rem;
+  line-height: 1.6;
   white-space: pre-wrap;
   overflow-x: auto;
 }
 
-.de-table td:nth-child(4) {
-  max-width: 46ch;
-  color: var(--fine-use-dim, #0a0);
+/* The evidence column is prose, not a number: cap it so one long summary cannot
+   push the severity column off the plate. */
+.de-table td.de-evidence {
+  max-width: 44ch;
+  color: color-mix(in srgb, var(--de-fg) 78%, var(--fine-use-bg, #000));
+}
+
+/* An incident that would interrupt the owner gets a left edge. This is the one
+   place the queue uses a non-textual severity cue, because "wake up" is a
+   different kind of thing from "high" and should look like it. */
+.de-table tr.de-notify td:first-child { box-shadow: inset 3px 0 0 var(--de-warn); }
+
+/* ---- vendored theme hooks ------------------------------------------------- */
+
+/*
+ * The vendored themes (see vendor/terminal-ui/NOTICE.md) define their character
+ * against a small set of class hooks: .fine-use-component, .current-value,
+ * .log-entry, .status-*, .terminal-cursor, .fine-use-focusable. Our markup
+ * carries those hooks so the themes actually render - a CRT scanline or a
+ * phosphor halo that no element ever targets is a feature that does not exist.
+ *
+ * What follows is the bridge: our layout rules, narrowed to the properties the
+ * vendor sheets also set, so a theme's personality wins and our geometry does
+ * not fight it. Kept in one block on purpose - scattering these makes the
+ * cascade order between core.css, the theme and this file untrackable.
+ */
+
+/* core.css sets font-size on the heading classes; our h1/h2 sizes are the
+   layout, the theme's contribution is the text-shadow glow. */
+.de-head h1.fine-use-h1 {
+  font-size: 1.35rem;
+  font-weight: 400;
+  margin: 0;
+  line-height: 1.2;
+}
+.de-section > h2 {
+  /* .fine-use-h2 is not applied to section headings; these are silkscreen
+     legends, not page titles. */
+  font-size: 0.68rem;
+}
+
+/* The vendored component/table cards add a surface and a 2-3px border. We want
+   their border treatment but not their padding, which would break the readout
+   grid. */
+.fine-use-component {
+  padding: 0;
+  background-color: transparent;
+}
+.de-section.fine-use-component {
+  padding: 0.85rem 1rem 1rem;
+}
+
+/* A readouts cell is a "block" in the VT220 sense: an inset plate. Keep the
+   vendor inset shadow, drop nothing else. */
+.de-readout.block-item {
+  background: var(--fine-use-surface);
+}
+
+/* Status chips use the vendored .status-* treatment (solid fill, inverted
+   text) so an amber/vt220 theme lights them up rather than leaving them flat. */
+.de-led.status-online,
+.chip-status-online {
+  background-color: var(--fine-use-success);
+  color: var(--fine-use-bg);
+}
+.de-led.status-warning,
+.chip-status-warning {
+  background-color: var(--fine-use-warning);
+  color: var(--fine-use-bg);
+}
+.de-led.status-error,
+.chip-status-error {
+  background-color: var(--fine-use-error);
+  color: var(--fine-use-bg);
+}
+
+/* The blinking block cursor after the clock. Only VT220 and Amber ship one; the
+   other themes leave the element inert, which is correct rather than broken. */
+.de-clock::after {
+  content: "\2588";
+  margin-left: 0.35rem;
+  color: var(--fine-use-accent);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .de-clock::after { animation: de-blink 1.1s steps(2, start) infinite; }
+}
+
+/* Vendor focus rings are 3px with a halo; ours is 2px. The vendor one is a
+   better target for a keyboard user in a dense table, so keep it. */
+.fine-use-focusable:focus {
+  outline: 3px solid var(--fine-use-accent);
+  outline-offset: 2px;
+}
+
+/* ---- focus ---------------------------------------------------------------- */
+
+/* One visible focus treatment everywhere. Never removed, only restyled. */
+:focus-visible {
+  outline: 2px solid var(--fine-use-accent, #0c0);
+  outline-offset: 2px;
+}
+
+.de-nav a:focus-visible,
+.de-filters select:focus-visible,
+.de-theme:focus-visible,
+.de-filters button:focus-visible {
+  outline: 2px solid var(--fine-use-accent, #0c0);
+  outline-offset: 1px;
+}
+
+/* Screen-reader-only text: the live region and the LED's spoken name. */
+.de-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.de-skip {
+  position: absolute;
+  left: -999rem;
+  top: 0;
+  z-index: 100;
+  padding: 0.5rem 0.8rem;
+  background: var(--fine-use-bg, #000);
+  color: var(--fine-use-accent, #0c0);
+  border: 1px solid var(--fine-use-accent, #0c0);
+  font-family: var(--de-display);
+  font-size: 0.7rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.de-skip:focus { left: 0.5rem; top: 0.5rem; }
+
+/* ---- navigation indicator ----------------------------------------------- */
+
+/*
+ * A fixed overlay, not an in-flow block. The previous version was an ordinary
+ * div in the document, which meant it occupied vertical space and pushed the
+ * already-rendered page down the screen while claiming to be waiting for it.
+ * An indicator that displaces the content it is describing is a layout bug
+ * wearing a costume.
+ */
+/* A 2px rule pinned to the top of the viewport, not a panel in the middle of
+   it. The old version floated a bordered box over the content, which read as a
+   dialog rather than as a status: it covered the page it was describing and it
+   implied a decision the operator might have to make. A progress rule is
+   unambiguous, occludes nothing, and is where a person already looks after
+   clicking.
+
+   `inset: 0 auto auto 0` with a width driven from JS, so the three spans are
+   segments of one line rather than three separate marks. */
+.de-sweep-panel {
+  position: fixed;
+  inset: 0 0 auto 0;
+  z-index: 200;
+  height: 2px;
+  pointer-events: none;
+  background: color-mix(in srgb, var(--de-line, #0a0) 40%, transparent);
+}
+
+.de-sweep-panel[hidden] { display: none; }
+
+.de-sweep {
+  display: flex;
+  gap: 2px;
+  height: 100%;
+  width: 100%;
+  transform-origin: left;
+}
+
+.de-sweep span {
+  display: block;
+  flex: 1;
+  height: 100%;
+  background: var(--fine-use-accent, #0c0);
+  transform-origin: left;
+  /* No transition: the integrator already produces a smooth per-frame value,
+     and a CSS transition on top would lag the physics rather than smooth it. */
+}
+
+/* ---- narrow screens ------------------------------------------------------- */
+
+@media (max-width: 48rem) {
+  .de-shell { padding-inline: 0.75rem; }
+  .de-nav { margin-inline: -0.75rem; padding-inline: 0.75rem; }
+  .de-head h1 { font-size: 1.05rem; letter-spacing: 0.14em; }
+  .de-readout dd { font-size: 1.15rem; }
+  .de-section { padding: 0.7rem 0.65rem 0.8rem; }
+  .de-table { font-size: 0.74rem; }
+  .de-table td.de-evidence { max-width: 22ch; }
+  .de-nav { position: static; }
+  body::before { background-image: none; }
+}
+
+/* ---- print ---------------------------------------------------------------- */
+
+@media print {
+  body::before,
+  .de-nav,
+  .de-banner,
+  .de-filters { display: none; }
+  .de-section { break-inside: avoid; border-color: #999; }
 }

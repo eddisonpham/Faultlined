@@ -10,6 +10,7 @@ from data_engine.web.pages import (
     _bytes,
     _cancel_action,
     _deadline,
+    _empty,
     _histogram_svg,
     _insights_body,
     _meter,
@@ -159,10 +160,28 @@ def test_selected_theme_is_applied_and_pinned() -> None:
 
 
 @pytest.mark.unit
-def test_poll_script_targets_the_fragment_endpoint() -> None:
+def test_poll_region_targets_the_fragment_endpoint() -> None:
+    """The page declares its poll target as data; app.js sends X-Fragment."""
     html = jobs_page({"items": []}, None, DEFAULT_THEME)
-    assert '"/ui/jobs"' in html
-    assert "X-Fragment" in html
+    assert 'data-poll="/ui/jobs"' in html
+    assert 'data-poll-ms="3000"' in html
+    # The interval is per-section and follows the documented cadence.
+    assert 'data-poll="/ui"' in status_page({}, DEFAULT_THEME)
+    assert 'data-poll-ms="5000"' in artifacts_page({}, DEFAULT_THEME)
+
+
+@pytest.mark.unit
+def test_polling_replaces_only_the_live_region_not_the_page_chrome() -> None:
+    """A poll that swapped <main> would silently delete the filter forms.
+
+    This is the bug the innermost-region rule exists to prevent, so it is
+    asserted structurally rather than left to a browser check.
+    """
+    html = jobs_page({"items": []}, None, DEFAULT_THEME)
+    live = html.index('class="de-live"')
+    filters = html.index('class="de-filters"')
+    assert live < filters, "the poll region must be inside, not around, the filters"
+    assert "</main>" in html[live:], "the live region must close before </main>"
 
 
 @pytest.mark.unit
@@ -313,10 +332,116 @@ def test_metrics_body_reports_latency_and_a_stale_worker() -> None:
     }
     body = _metrics_body(model)
     assert "45s stale" in body
-    assert "/api/v1/jobs/{job_id}" in body
-    assert "API latency by route" in body
-    assert "api latency" in body
-    assert "4.0" in body  # p95 ms of the api route
+    # The route is reported as the operation it performs. The raw template is an
+    # internal label and must not reach the operator's screen.
+    assert "job listing" in body
+    assert "/api/v1" not in body
+    assert "Time spent handling requests" in body
+    assert "request handling" in body
+    assert "4.0" in body  # p95 ms of that operation
+
+
+@pytest.mark.unit
+def test_the_ingest_form_appears_only_on_a_genuinely_empty_system() -> None:
+    """It is the only way data gets in, so it leads an empty system...
+
+    ...and disappears the moment there is anything to look at. Left permanently
+    on the Status page it becomes a form nobody reads sitting above the numbers
+    they actually came for.
+    """
+    empty = {
+        "status": "ok",
+        "queue_depth": {},
+        "artifact_count": 0,
+        "episode_count": 0,
+        "resources": {},
+    }
+    assert "queue ingest job" in status_page(dict(empty), "vt220")
+
+    for populated in (
+        {**empty, "queue_depth": {"queued": 1}},
+        {**empty, "episode_count": 1},
+    ):
+        assert "queue ingest job" not in status_page(dict(populated), "vt220")
+
+
+@pytest.mark.unit
+def test_a_rejected_submission_reopens_the_form_on_a_busy_system() -> None:
+    """The error renders *inside* the form, so the gate must yield to it.
+
+    Found by driving the real form: gating purely on emptiness meant a bad
+    submission on a populated system returned 200 with the message going
+    nowhere - no error, no form, nothing to correct.
+    """
+    busy = {
+        "status": "ok",
+        "queue_depth": {"succeeded": 4},
+        "artifact_count": 4,
+        "episode_count": 4,
+        "resources": {},
+        "ingest_error": "Frames must be a whole number.",
+        "ingest_values": {"kind": "episode", "task": "pick_place", "frames": "abc"},
+    }
+    body = status_page(busy, "vt220")
+    assert "queue ingest job" in body, "the form must come back to be fixable"
+    assert "Frames must be a whole number." in body
+    assert 'value="pick_place"' in body
+
+
+@pytest.mark.unit
+def test_the_ingest_form_survives_a_rejected_submission() -> None:
+    """An error must land next to the form, with the typed values kept."""
+    model = {
+        "status": "ok",
+        "queue_depth": {},
+        "artifact_count": 0,
+        "episode_count": 0,
+        "resources": {},
+        "ingest_error": "Frames must be a whole number.",
+        "ingest_values": {"kind": "episode", "task": "pick_place", "frames": "abc"},
+    }
+    body = status_page(model, "vt220")
+    assert "Frames must be a whole number." in body
+    assert 'value="pick_place"' in body
+    assert 'value="abc"' in body
+
+
+@pytest.mark.unit
+def test_the_ingest_form_is_a_post_that_needs_no_javascript() -> None:
+    body = status_page(
+        {
+            "status": "ok",
+            "queue_depth": {},
+            "artifact_count": 0,
+            "episode_count": 0,
+            "resources": {},
+        },
+        "vt220",
+    )
+    assert '<form class="de-ingest" method="post" action="/ui/jobs">' in body
+    # Every control is a real named field with a label bound to it.
+    for name in ("kind", "task", "robot", "frames", "source"):
+        assert f'name="{name}"' in body
+        assert f'for="ing-{name}"' in body
+
+
+@pytest.mark.unit
+def test_an_empty_state_link_is_escaped_on_b_sides() -> None:
+    """`hint` is escaped; `link` is markup. Exactly one of them may be trusted.
+
+    Both halves have to escape or one of two failures is available: an author's
+    <a> silently rendering as literal text, or a value reaching the page raw.
+    """
+    rendered = _empty(
+        "nothing here",
+        "a <script>alert(1)</script> hint",
+        ("go <b>here</b>", '/ui"><script>alert(2)</script>'),
+    )
+    assert "<script>" not in rendered
+    assert "&lt;script&gt;" in rendered
+    # ...and the legitimate case still produces a real link, not escaped text.
+    linked = _empty("no jobs", "start here", ("status page", "/ui"))
+    assert '<a href="/ui">status page</a>' in linked
 
 
 @pytest.mark.unit
@@ -330,7 +455,7 @@ def test_metrics_body_marks_a_worker_that_never_reported() -> None:
         }
     )
     assert "no heartbeat" in body
-    assert "// no api traffic in window" in body
+    assert "// no request traffic in window" in body
 
 
 @pytest.mark.unit
@@ -661,5 +786,5 @@ def test_incidents_page_survives_missing_summary() -> None:
 @pytest.mark.unit
 def test_incidents_page_polls_its_own_fragment() -> None:
     html = incidents_page(_model(), DEFAULT_THEME)
-    assert "/ui/incidents/fragment" in html or "/ui/incidents" in html
-    assert "setInterval" in html
+    assert 'data-poll="/ui/incidents"' in html
+    assert "setInterval" not in html, "the poller lives in app.js, not inlined per page"
