@@ -22,6 +22,7 @@ import urllib.error
 import urllib.request
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import psycopg
 import pytest
@@ -137,3 +138,22 @@ def real_lerobot_dataset() -> Callable[[str], Path]:
         return root
 
     return fetch
+
+
+@pytest.fixture(scope="session")
+def mcap_log() -> Any:
+    """`scripts/make_mcap_log.py`, loaded once for the session.
+
+    The same generator backs the reader's unit tests and the B-002 benchmark
+    workload. A test that regenerated the log differently from the benchmark would be
+    measuring a different format than the one it claims, so there is exactly one
+    entry point and it is the committed script.
+    """
+    import importlib.util
+
+    path = Path(__file__).resolve().parents[1] / "scripts" / "make_mcap_log.py"
+    spec = importlib.util.spec_from_file_location("_make_mcap_log", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module

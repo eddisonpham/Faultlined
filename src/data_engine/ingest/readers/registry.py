@@ -12,8 +12,9 @@ from pathlib import Path
 
 from data_engine.ingest.readers.base import EpisodeExtraction, EpisodeReader, ReaderError
 from data_engine.ingest.readers.lerobot import LeRobotReader
+from data_engine.ingest.readers.mcap_reader import McapReader
 
-READERS: tuple[EpisodeReader, ...] = (LeRobotReader(),)
+READERS: tuple[EpisodeReader, ...] = (McapReader(), LeRobotReader())
 
 
 def reader_for(path: Path) -> EpisodeReader | None:

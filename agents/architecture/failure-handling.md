@@ -6,7 +6,7 @@ Stance: fail closed on data, fail open on telemetry, never silently drop (overvi
 
 | # | Failure mode | Component | Detection | Recovery | Test (planned) |
 |---|---|---|---|---|---|
-| F1 | Corrupt/truncated MCAP or malformed LeRobot dir | ingest | Reader parse failure / sniff mismatch | Reject with `INGEST_*` reason code; no catalog row; job `failed` (terminal — retrying won't fix data) | unit: reader fixtures; integration: submit corrupt file |
+| F1 | Corrupt/truncated MCAP or malformed LeRobot dir | ingest | Reader parse failure / sniff mismatch | Reject with `INGEST_*` reason code; no catalog row; job `failed` (terminal — retrying won't fix data) | unit: `tests/unit/readers/test_mcap.py`, `test_lerobot.py`; integration: submit corrupt file |
 | F2 | Missing required channel / bad timestamps | validation | Rule violations (FR-002) | Episode `quarantined` + reason codes; no indexing; revalidate endpoint for remediation (FR-003) | unit: each rule; integration: quarantine flow |
 | F3 | Invalid validation profile / config | validation, api | Schema validation at submission | 4xx `VALIDATION_PROFILE_INVALID`; job never created | contract: bad profile payloads |
 | F4 | Duplicate job submission | jobs | `idempotency_keys` unique constraint | Replay original response (202 + original job); 409 on key reuse with different payload | unit + contract: double POST |

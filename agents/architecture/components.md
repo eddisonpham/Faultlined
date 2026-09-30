@@ -48,11 +48,11 @@ One entry per component in [overview.md](overview.md)'s component map. Every com
 
 ## 5. Ingest (`ingest/`)
 
-- **Responsibility:** `EpisodeIngestService` registers one episode in the catalog, whatever format it arrived in. Two paths, one contract: the synthetic JSON episode carried in the job payload, and a dataset path read through `ingest/readers/`. The LeRobot reader (v2.1 and v3.0) is implemented; MCAP, ROS 2 bag, and the duplicate-source policy remain planned (FR-001).
+- **Responsibility:** `EpisodeIngestService` registers one episode in the catalog, whatever format it arrived in. Two paths, one contract: the synthetic JSON episode carried in the job payload, and a dataset path read through `ingest/readers/`. Two readers are implemented - LeRobot (v2.1 and v3.0) and MCAP ([ADR 0022](../decisions/0022-mcap-ingest-reader.md), one file is one episode) - and adding one is a registration in `ingest/readers/registry.py`, not a core change. ROS 2 CDR/protobuf payload decoding and the duplicate-source policy remain planned (FR-001).
 - **Inputs:** file paths/URLs + source metadata; ingest job payload (`ingest` carries the episode, `ingest_source` names a path).
 - **Outputs:** `episode` records (`synthetic-json`, `lerobot-v2`, `lerobot-v3`), artifact entries, and queryable metadata: task, robot, frame count, duration, fps, and per-channel min/max/mean/std/count. A reader returns a *description* of an episode, never its frames — the bytes stay in the artifact store, addressed by the hash of the file that produced them. Motion-quality signals (ADR 0018) are computed while the rows are in memory and persisted as `episode_quality` via [analysis](#15-analysis-analysis).
 - **Dependencies:** artifact store, catalog; format-specific readers behind `EpisodeReader` + a sniff-based registry; observability.
-- **Failure behavior:** the API validates the synthetic episode shape; a reader raises `ReaderError` on anything it cannot parse. Both are **terminal**: `_settle_failure` skips the retry branch for them, because the same bytes will fail identically on every attempt (F1). Content-addressed artifacts are checksum-verified. MCAP parsing and duplicate-source policy remain deferred. FR-001 target.
+- **Failure behavior:** the API validates the synthetic episode shape; a reader raises `ReaderError` on anything it cannot parse. Both are **terminal**: `_settle_failure` skips the retry branch for them, because the same bytes will fail identically on every attempt (F1). Content-addressed artifacts are checksum-verified. CDR/protobuf payload decoding and the duplicate-source policy remain deferred. FR-001 target.
 - **Owner:** implementer.
 
 ## 6. Validation (`validation/`)

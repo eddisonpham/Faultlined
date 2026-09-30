@@ -895,6 +895,56 @@ def _lerobot_benchmark(*, trials: int = 5, warmups: int = 1) -> BenchmarkResult 
     )
 
 
+def _mcap_benchmark(*, trials: int = 5, warmups: int = 1) -> BenchmarkResult | None:
+    """B-002: real MCAP ingest - stream the bag, describe it, hash the bytes.
+
+    The point of the number is bytes per second over a *file on disk*, so the
+    generator is not in the timed path: regenerating each trial would measure
+    `mcap.writer`. The file is the one `scripts/make_mcap_log.py` produces, and its
+    SHA-256 is recorded in the result so a future run can prove it measured the same
+    input.
+    """
+    root = Path("var/real-data/so101_pick_place.mcap")
+    if not root.is_file():
+        return None
+    import hashlib
+
+    service = EpisodeIngestService(
+        _BenchmarkCatalog(), FileArtifactStore(Path("var/benchmark-artifacts"))
+    )
+    size_bytes = root.stat().st_size
+    sequence = 0
+
+    def operation() -> Any:
+        nonlocal sequence
+        sequence += 1
+        return service.ingest_path(root, job_id=f"bench-mcap-{sequence:05d}")
+
+    result = run_benchmark(
+        operation,
+        name="mcap-ingest",
+        warmups=warmups,
+        trials=trials,
+        config={
+            "path": str(root),
+            "source_sha256": hashlib.sha256(root.read_bytes()).hexdigest(),
+            "bytes": size_bytes,
+            "warmups": warmups,
+            "trials": trials,
+            "database": "in-memory benchmark catalog; production filesystem artifact store",
+        },
+        dataset="faultlined so101_pick_place sensor log (MCAP, JSON-encoded topics)",
+        workload_version="1.0.0",
+    )
+    # Throughput is the headline for this backlog row, and p50 latency alone would make
+    # a reader that got slower on a smaller file look fine.
+    if result.summary.p50_seconds > 0:
+        result.config["throughput_mib_per_second_p50"] = round(
+            (size_bytes / 1024**2) / result.summary.p50_seconds, 3
+        )
+    return result
+
+
 # Entries are late-bound lambdas so tests can monkeypatch the workload functions.
 def _api_incidents_benchmark(*, trials: int = 10, warmups: int = 3) -> BenchmarkResult:
     return _client_benchmark(
@@ -1001,6 +1051,7 @@ WORKLOADS: dict[str, Callable[[], BenchmarkResult | None]] = {
     "monitor-evaluate": lambda: _monitor_evaluate_benchmark(),
     "ui-insights-page": lambda: _ui_insights_benchmark(),
     "lerobot-ingest-v3": lambda: _lerobot_benchmark(),
+    "mcap-ingest": lambda: _mcap_benchmark(),
 }
 
 

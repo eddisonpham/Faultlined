@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 from benchmarks.harness import (
@@ -80,7 +81,35 @@ def test_workload_registry_covers_the_backlog() -> None:
         "monitor-evaluate",
         "ui-insights-page",
         "lerobot-ingest-v3",
+        "mcap-ingest",
     }
+
+
+@pytest.mark.unit
+def test_mcap_workload_skips_cleanly_without_the_fixture(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from benchmarks.harness import _mcap_benchmark
+
+    monkeypatch.chdir(tmp_path)
+    assert _mcap_benchmark() is None
+
+
+@pytest.mark.unit
+def test_the_mcap_workload_reports_throughput_against_a_real_file(
+    mcap_log: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """B-002 exists to answer "bytes per second", so p50 alone is not a result."""
+    from benchmarks.harness import _mcap_benchmark
+
+    monkeypatch.chdir(tmp_path)
+    mcap_log.write_log(tmp_path / "var" / "real-data" / "so101_pick_place.mcap", seconds=4.0)
+    result = _mcap_benchmark(trials=2, warmups=0)
+    assert result is not None
+    assert result.status == "ok"
+    assert result.config["bytes"] > 0
+    assert result.config["throughput_mib_per_second_p50"] > 0.0
+    assert len(result.config["source_sha256"]) == 64
 
 
 @pytest.mark.unit

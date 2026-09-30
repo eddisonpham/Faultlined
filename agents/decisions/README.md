@@ -28,3 +28,5 @@ supersede it with a new ADR and update the affected docs.
 | [0018](0018-episode-quality-signals.md) | Episode quality signals are summarized at ingest | accepted |
 | [0019](0019-benchmark-workload-isolation.md) | Benchmark workloads run in isolated processes | accepted |
 | [0020](0020-deterministic-monitoring-notifier.md) | The monitoring notifier is deterministic | accepted |
+| [0021](0021-frontend-instrument-pass.md) | Instrument UI pass: one client runtime, visible failure, no Swagger surface | accepted |
+| [0022](0022-mcap-ingest-reader.md) | MCAP ingest: one file is one episode, and the file's own words are the only metadata | accepted |
