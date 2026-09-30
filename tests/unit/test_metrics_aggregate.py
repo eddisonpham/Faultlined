@@ -133,6 +133,70 @@ def test_read_metric_records_tolerates_missing_and_corrupt_lines(tmp_path: Path)
 
 
 @pytest.mark.unit
+def test_tail_read_returns_the_newest_records_in_chronological_order(tmp_path: Path) -> None:
+    path = tmp_path / "runtime.jsonl"
+    path.write_text(
+        "\n".join(json.dumps(_record(f"m{i:03d}", float(i))) for i in range(2_500)) + "\n",
+        encoding="utf-8",
+    )
+    tail = read_metric_records(path, max_records=100)
+    assert [record["name"] for record in tail] == [f"m{i:03d}" for i in range(2_400, 2_500)]
+
+
+@pytest.mark.unit
+def test_tail_read_across_a_chunk_boundary_is_complete(tmp_path: Path) -> None:
+    # Each record ~50 bytes; 2,500 of them span several 1 MiB chunks, so the
+    # requested window must survive chunk boundaries without loss or a phantom.
+    path = tmp_path / "runtime.jsonl"
+    path.write_text(
+        "\n".join(json.dumps(_record(f"m{i:05d}", float(i))) for i in range(30_000)) + "\n",
+        encoding="utf-8",
+    )
+    tail = read_metric_records(path, max_records=100)
+    assert [record["name"] for record in tail] == [f"m{i:05d}" for i in range(29_900, 30_000)]
+
+
+@pytest.mark.unit
+def test_tail_read_skips_corrupt_lines_like_the_forward_read(tmp_path: Path) -> None:
+    good = [json.dumps(_record(f"g{i}", float(i))) for i in range(10)]
+    path = tmp_path / "runtime.jsonl"
+    path.write_text(
+        "\n".join([*good[:5], "{corrupt", "", '{"no_name": 1}', *good[5:]]) + "\n",
+        encoding="utf-8",
+    )
+    tail = read_metric_records(path, max_records=4)
+    # Newest four *valid* records: g6..g9 (g5 sits behind g6..g9 in the tail).
+    assert [record["name"] for record in tail] == ["g6", "g7", "g8", "g9"]
+
+
+@pytest.mark.unit
+def test_tail_read_is_a_tail_not_a_full_parse(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The optimization is the point (EXP-0007): cost must track the window, not
+    # the history. Pin the load-bearing boundary, then verify the shrink.
+    from data_engine.observability import aggregate
+
+    monkeypatch.setattr(aggregate, "TAIL_MAX_BYTES", 4096)
+    path = tmp_path / "runtime.jsonl"
+    path.write_text(
+        "\n".join(json.dumps(_record(f"m{i:06d}", float(i))) for i in range(100_000)) + "\n",
+        encoding="utf-8",
+    )
+    tail = read_metric_records(path, max_records=4)
+    assert [record["name"] for record in tail] == ["m099996", "m099997", "m099998", "m099999"]
+
+
+@pytest.mark.unit
+def test_tail_read_handles_undersized_and_oversized_windows(tmp_path: Path) -> None:
+    path = tmp_path / "runtime.jsonl"
+    path.write_text(json.dumps(_record("only", 1.0)) + "\n", encoding="utf-8")
+    assert [r["name"] for r in read_metric_records(path, max_records=100)] == ["only"]
+    assert read_metric_records(path, max_records=0) == []
+    assert read_metric_records(tmp_path / "absent.jsonl", max_records=10) == []
+
+
+@pytest.mark.unit
 def test_window_records_filters_by_timestamp() -> None:
     now = datetime.now(UTC)
     old = _record("old", 1.0, timestamp=(now - timedelta(hours=2)).isoformat())

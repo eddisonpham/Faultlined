@@ -18,29 +18,93 @@ from typing import Any
 
 WORKER_HEARTBEAT_METRIC = "workers_heartbeat_age_seconds"
 
+#: Backward chunk size for a newest-N read. One MiB keeps a tick's read a few
+#: pages regardless of how long the sink has grown; 64 MiB is the ceiling past
+#: which we stop hunting for the window rather than read a pathological file.
+TAIL_CHUNK_BYTES = 1 << 20
+TAIL_MAX_BYTES = 64 << 20
+
+
+def _parse_line(line: bytes) -> dict[str, Any] | None:
+    """One JSONL line to a record, or None when blank, corrupt, or not a metric."""
+    text = line.strip()
+    if not text:
+        return None
+    try:
+        record = json.loads(text)
+    except json.JSONDecodeError:
+        return None
+    if isinstance(record, dict) and "name" in record and "value" in record:
+        return record
+    return None
+
 
 def read_metric_records(path: Path, *, max_records: int | None = None) -> list[dict[str, Any]]:
-    """Read metric records from a JSONL sink.
+    """Read metric records from a JSONL sink, newest N when a limit is given.
 
     A missing file is empty telemetry, not an error. Malformed lines are skipped
     rather than failing the reader: a truncated tail line after a crash must not
-    hide every healthy record before it. ``max_records`` keeps only the newest N.
+    hide every healthy record before it.
+
+    With ``max_records`` the file is read **from the end** in chunks and stops as
+    soon as N valid records are in hand, so a read costs the requested window,
+    not the history. That is load-bearing: the monitor re-reads the sink every
+    tick and the API reads it on every request, and EXP-0007 measured the
+    full-history parse at half a minute's worth of a 500k-record sink. Callers
+    that genuinely want the whole file still pass ``max_records=None``.
     """
     if not path.exists():
         return []
-    records: deque[dict[str, Any]] = deque(maxlen=max_records)
+    if max_records is not None and max_records <= 0:
+        return []
+    if max_records is not None:
+        return _read_tail(path, max_records)
+    records: list[dict[str, Any]] = []
     with path.open("r", encoding="utf-8") as stream:
         for line in stream:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                record = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if isinstance(record, dict) and "name" in record and "value" in record:
+            record = _parse_line(line.encode("utf-8"))
+            if record is not None:
                 records.append(record)
-    return list(records)
+    return records
+
+
+def _read_tail(path: Path, limit: int) -> list[dict[str, Any]]:
+    """The newest ``limit`` valid records, read backward, chronological on return.
+
+    Walks the file from the end in ``TAIL_CHUNK_BYTES`` blocks so the cost is the
+    window's, not the file's. A chunk boundary can split a line: the fragment is
+    carried to the next (earlier) block, and the file's first line is completed
+    after the loop. Corrupt lines inside the window are skipped exactly as the
+    forward read skips them. The walk stops early at ``TAIL_MAX_BYTES`` - a sink
+    whose newest 64 MiB holds no valid record is not worth paging through.
+    """
+    newest_first: deque[dict[str, Any]] = deque(maxlen=limit)
+    size = path.stat().st_size
+    position = size
+    carried = b""
+    with path.open("rb") as stream:
+        while position > 0 and len(newest_first) < limit:
+            if size - position >= TAIL_MAX_BYTES:
+                break
+            chunk_start = max(0, position - TAIL_CHUNK_BYTES)
+            stream.seek(chunk_start)
+            block = stream.read(position - chunk_start) + carried
+            position = chunk_start
+            lines = block.split(b"\n")
+            carried = lines[0]
+            for line in reversed(lines[1:]):
+                record = _parse_line(line)
+                if record is not None:
+                    newest_first.append(record)
+                    if len(newest_first) >= limit:
+                        break
+        if position == 0 and len(newest_first) < limit and carried.strip():
+            # The walk reached the file start; ``carried`` is now the completed
+            # first line. On any other exit it is a mid-file fragment.
+            record = _parse_line(carried)
+            if record is not None:
+                newest_first.append(record)
+    return list(reversed(newest_first))
 
 
 def window_records(

@@ -895,16 +895,19 @@ def _lerobot_benchmark(*, trials: int = 5, warmups: int = 1) -> BenchmarkResult 
     )
 
 
-def _mcap_benchmark(*, trials: int = 5, warmups: int = 1) -> BenchmarkResult | None:
+def _mcap_benchmark(
+    *, trials: int = 5, warmups: int = 1, path: Path | None = None, name: str = "mcap-ingest"
+) -> BenchmarkResult | None:
     """B-002: real MCAP ingest - stream the bag, describe it, hash the bytes.
 
     The point of the number is bytes per second over a *file on disk*, so the
     generator is not in the timed path: regenerating each trial would measure
     `mcap.writer`. The file is the one `scripts/make_mcap_log.py` produces, and its
     SHA-256 is recorded in the result so a future run can prove it measured the same
-    input.
+    input. A longer bag (B-007) passes its own `path` and `name`; a missing file
+    skips the workload rather than failing the run.
     """
-    root = Path("var/real-data/so101_pick_place.mcap")
+    root = path if path is not None else Path("var/real-data/so101_pick_place.mcap")
     if not root.is_file():
         return None
     import hashlib
@@ -922,7 +925,7 @@ def _mcap_benchmark(*, trials: int = 5, warmups: int = 1) -> BenchmarkResult | N
 
     result = run_benchmark(
         operation,
-        name="mcap-ingest",
+        name=name,
         warmups=warmups,
         trials=trials,
         config={
@@ -1037,8 +1040,10 @@ WORKLOADS: dict[str, Callable[[], BenchmarkResult | None]] = {
     "synthetic-episode-ingest": lambda: _ingest_microbenchmark(),
     "quality-analysis-303f": lambda: _quality_benchmark(303),
     "quality-analysis-3000f": lambda: _quality_benchmark(3000),
+    "quality-analysis-30000f": lambda: _quality_benchmark(30_000, trials=5, warmups=1),
     "validation-eval": lambda: _validation_benchmark(),
     "metrics-aggregation": lambda: _aggregation_benchmark(),
+    "metrics-aggregation-500k": lambda: _aggregation_benchmark(500_000, trials=5, warmups=1),
     "api-metrics-endpoint": lambda: _api_metrics_benchmark(),
     "api-episodes-catalog": lambda: _api_episodes_benchmark(),
     "api-episode-validation": lambda: _api_validation_benchmark(),
@@ -1052,6 +1057,12 @@ WORKLOADS: dict[str, Callable[[], BenchmarkResult | None]] = {
     "ui-insights-page": lambda: _ui_insights_benchmark(),
     "lerobot-ingest-v3": lambda: _lerobot_benchmark(),
     "mcap-ingest": lambda: _mcap_benchmark(),
+    "mcap-ingest-hour": lambda: _mcap_benchmark(
+        path=Path("var/real-data/so101_pick_place_hour.mcap"),
+        name="mcap-ingest-hour",
+        trials=3,
+        warmups=1,
+    ),
 }
 
 
