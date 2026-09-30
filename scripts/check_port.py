@@ -66,7 +66,7 @@ def main() -> int:
         )
         print(f"  find it:   {find}", file=sys.stderr)
     print("", file=sys.stderr)
-    print(f"To run on a different port:  DE_PORT={port + 1} just run", file=sys.stderr)
+    print(f"To run on a different port:  DE_API_PORT={port + 1} just run", file=sys.stderr)
     return 1
 
 

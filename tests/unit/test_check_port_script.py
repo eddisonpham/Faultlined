@@ -42,7 +42,7 @@ def test_an_occupied_port_is_reported_with_a_way_out(
     holder.listen(1)
     try:
         assert _PORT._is_free(port) is False
-        monkeypatch.setenv("DE_PORT", str(port))
+        monkeypatch.setenv("DE_API_PORT", str(port))
         monkeypatch.setattr(_PORT, "listening_pid", lambda _port: "4242")
         monkeypatch.setattr(_PORT, "process_image", lambda _pid: "python.exe")
         assert _PORT.main() == 1
@@ -54,7 +54,7 @@ def test_an_occupied_port_is_reported_with_a_way_out(
     assert "4242" in err, "the owning process must be named"
     # A diagnosis with no remedy is the failure mode this replaces.
     assert "taskkill" in err or "kill " in err
-    assert "DE_PORT=" in err, "there must be a way to proceed instead"
+    assert "DE_API_PORT=" in err, "there must be a way to proceed instead"
 
 
 @pytest.mark.unit
@@ -67,7 +67,7 @@ def test_an_unidentifiable_holder_still_gives_a_command(
     holder.bind((_PORT.HOST, port))
     holder.listen(1)
     try:
-        monkeypatch.setenv("DE_PORT", str(port))
+        monkeypatch.setenv("DE_API_PORT", str(port))
         monkeypatch.setattr(_PORT, "listening_pid", lambda _port: None)
         assert _PORT.main() == 1
     finally:
@@ -81,7 +81,7 @@ def test_an_unidentifiable_holder_still_gives_a_command(
 def test_a_malformed_port_does_not_crash_the_recipe(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """DE_PORT is operator input; a typo must not traceback out of `just run`."""
-    monkeypatch.setenv("DE_PORT", "not-a-number")
+    """DE_API_PORT is operator input; a typo must not traceback out of `just run`."""
+    monkeypatch.setenv("DE_API_PORT", "not-a-number")
     assert _PORT.port_from_env() == 8000
     capsys.readouterr()

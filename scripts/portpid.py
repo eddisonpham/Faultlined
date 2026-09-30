@@ -1,7 +1,9 @@
 """Port/PID lookup shared by the dev scripts (`check_port`, `stop_server`).
 
 Both scripts must agree with the port the application binds, so the port comes
-from the same environment variable the application reads (`DE_PORT`).
+from the same environment variable the application reads (`DE_API_PORT`, the
+`api_port` setting). An earlier version read `DE_PORT`, which the application
+never reads: the check would have passed while the server bound 8000 anyway.
 """
 
 from __future__ import annotations
@@ -14,7 +16,7 @@ HOST = "127.0.0.1"
 
 def port_from_env() -> int:
     try:
-        return int(os.environ.get("DE_PORT", "8000"))
+        return int(os.environ.get("DE_API_PORT", "8000"))
     except ValueError:
         return 8000
 

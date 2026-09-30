@@ -298,9 +298,13 @@ made both failures available at once.
 
 A second `just run` died with a bare `WinError 10048`. That reads like a fault in this project
 rather than "a server you started earlier is still listening" - and the fix is one command the
-reader has to guess. The recipe now checks the port first, using the same `DE_PORT` the settings
-read, and prints the holding PID with the exact command to stop it. A preflight check is the only
+reader has to guess. The recipe now checks the port first, using the same environment variable the
+settings read, and prints the holding PID with the exact command to stop it. A preflight check is the only
 kind of error handling that helps someone who does not already know the answer.
+
+Correction (2026-09-30): the variable named here was `DE_PORT`, which the settings never read. The
+preflight therefore checked 8000 whatever the operator set and printed an override the server would
+ignore. It reads `DE_API_PORT` (the `api_port` setting) now; see F19 in the failure-mode catalog.
 
 **The first attempt at that check was itself a bug, and a worse one.** It was written as a
 `#!/usr/bin/env bash` recipe with the port logic inline, which made `just` resolve the interpreter

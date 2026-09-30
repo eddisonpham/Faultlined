@@ -20,6 +20,8 @@ sys.path.insert(0, str(SCRIPTS))
 import portpid  # noqa: E402
 import stop_server  # noqa: E402
 
+from data_engine.config import Settings  # noqa: E402
+
 
 @pytest.fixture()
 def bound_port() -> tuple[int, socket.socket]:
@@ -32,15 +34,29 @@ def bound_port() -> tuple[int, socket.socket]:
 
 class TestPortFromEnv:
     def test_defaults_to_8000(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.delenv("DE_PORT", raising=False)
+        monkeypatch.delenv("DE_API_PORT", raising=False)
         assert portpid.port_from_env() == 8000
 
     def test_reads_the_environment(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("DE_PORT", "9123")
+        monkeypatch.setenv("DE_API_PORT", "9123")
         assert portpid.port_from_env() == 9123
 
     def test_garbage_falls_back_to_8000(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("DE_PORT", "not-a-port")
+        monkeypatch.setenv("DE_API_PORT", "not-a-port")
+        assert portpid.port_from_env() == 8000
+
+    def test_agrees_with_the_port_the_server_binds(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """F19: the check must read the same variable the application binds.
+
+        It used to read `DE_PORT`, which the settings never read, so the advice
+        it printed was a port the server would not use.
+        """
+        monkeypatch.setenv("DE_API_PORT", "9124")
+        assert portpid.port_from_env() == Settings().api_port
+
+    def test_the_old_variable_name_is_not_honoured(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("DE_API_PORT", raising=False)
+        monkeypatch.setenv("DE_PORT", "9125")
         assert portpid.port_from_env() == 8000
 
 
