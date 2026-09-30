@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 
 from data_engine.web import THEMES, app_script, layout_css, theme_or_default
 from data_engine.web.pages import (
+    CORE_URL,
     _copyable,
     _empty,
     _meter,
@@ -315,6 +316,48 @@ def test_error_page_renders_html_with_a_way_back() -> None:
 def test_error_page_keeps_the_requested_theme_and_falls_back_safely() -> None:
     assert "theme-amber.css" in error_page(500, "d", "amber")
     assert "theme-vt220.css" in error_page(500, "d", "not-a-theme")
+
+
+@pytest.mark.unit
+def test_the_theme_probe_never_outlives_the_swap() -> None:
+    """The glow that came back, and the one line that fixes it.
+
+    Switching themes appends a probe <link> to the end of <head> to confirm the
+    new sheet parses before the real link is repointed at it. That position is
+    *after* `faultlined.css`, so a probe left behind wins the cascade and
+    switches the vendored phosphor `text-shadow` back on for every readout. It
+    was reported as a glow that only a theme change cleared, because a theme
+    change is a form submit and therefore a full document load - the one case
+    where no probe is created.
+
+    The override that kills the glow is an ordinary rule in our stylesheet, so
+    it only holds while exactly one theme sheet is loaded before it.
+    """
+    script = app_script()
+    probe_load = script.split("probe.onload = function () {")[1].split("};")[0]
+    assert "probe.remove();" in probe_load, "the probe must go once it has been committed"
+    # Removed on the failure path too, so a missing theme file leaves nothing
+    # behind and the working theme keeps its place in the cascade.
+    probe_error = script.split("probe.onerror = function () {")[1].split("};")[0]
+    assert "probe.remove()" in probe_error
+    # And the probe must not masquerade as the real sheet: two elements with
+    # the marker would make the next lookup find the throwaway one.
+    assert 'probe.setAttribute("data-de-theme"' not in script
+
+
+@pytest.mark.unit
+def test_the_no_halo_override_beats_a_theme_sheet_loaded_after_it() -> None:
+    """The override is only as good as its position in the cascade.
+
+    It matches the vendor's specificity and relies on being linked later. That
+    is a real constraint on the document, not a detail of the stylesheet, so it
+    is asserted on the served order: the theme sheet before ours, always.
+    """
+    html = status_page({}, "vt220")
+    order = [html.index(href) for href in (CORE_URL, "theme-vt220.css", "faultlined.css")]
+    assert order == sorted(order), (
+        "faultlined.css must be linked last or the no-halo override loses the cascade"
+    )
 
 
 @pytest.mark.unit

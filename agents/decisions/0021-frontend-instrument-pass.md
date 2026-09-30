@@ -282,15 +282,37 @@ The nav also lost its 2px `backdrop-filter`, which blurred the rows scrolling
 underneath it. It is opaque now, the same fix the sticky table header already used
 for the identical problem.
 
+**A third defect, found only after the first two were fixed: the theme switcher
+was putting the glow back.** `applyTheme()` appends a probe `<link>` to the end
+of `<head>` so a new theme sheet is confirmed parseable before the real link is
+repointed at it. That position is *after* `faultlined.css`. The probe was
+removed on failure but never on success, so after any theme change the document
+carried a second copy of the theme sheet at the end of the head - which wins the
+cascade and switched the vendored phosphor `text-shadow` back on for every
+readout. Reported as a glow that only a theme change cleared, because a theme
+change is a form submit and therefore a full document load, the one case where
+no probe is created. Amber showed it worst and github-dark and monochrome not at
+all, purely because only amber and vt220 ship a glow rule.
+
+The override that removes the glow is an ordinary rule in our stylesheet: it
+matches the vendor's specificity and relies on being linked later. That is a
+constraint on the *document*, not a detail of the stylesheet, and nothing in the
+review path could see it. The probe is now removed on both paths, and the
+browser audit asserts the invariant structurally - exactly one theme sheet, and
+it loads before ours - rather than only asserting the absence of a glow.
+
 **What changed about catching these.** Every check above was a text assertion
 against the stylesheet, and text assertions cannot see a `filter` that only
-applies during a navigation - which is precisely why the blur passed review
-twice. `scripts/ui_audit.mjs` now drives headless Chrome over the DevTools
-protocol and measures computed styles on all eleven pages, including the
-leaving state it applies itself. No dependencies: Node's built-in WebSocket
-against Chrome's own protocol, because a tool needing `npm install` is a tool
-that does not get run. It was verified by reintroducing both defects and
-confirming it fails, then removing them and confirming it passes.
+applies during a navigation, nor a cascade that depends on what a script
+appended at runtime. `scripts/ui_audit.mjs` now drives headless Chrome over the
+DevTools protocol and measures all eleven pages under all four themes, 44 loads
+in total, including the leaving state it applies itself. No dependencies: Node's
+built-in WebSocket against Chrome's own protocol, because a tool needing
+`npm install` is a tool that does not get run. Each fix was verified by
+reintroducing the defect and confirming the audit fails on every page, then
+removing it and confirming it passes. Two of the three defects passed the audit
+the first time it was written, which is why the audit itself needed fixing twice
+before it was worth trusting.
 
 **Correction (2026-09-30): the blur is removed.** The reasoning above is wrong on this page.
 The same stylesheet turns the vendored phosphor glow off because "a blurred copy of every number

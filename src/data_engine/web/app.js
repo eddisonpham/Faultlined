@@ -37,9 +37,18 @@
 
   /*
    * Theme switching has to swap the *stylesheet*, not just an attribute: each
-   * theme is a separate vendored file. So we pre-load the candidates and only
+   * theme is a separate vendored file. So we pre-load the candidate and only
    * commit once the new sheet is actually parsed, which means a missing theme
    * file leaves the working theme in place instead of blanking the page.
+   *
+   * The probe must be removed once it has done its job. It is appended to the
+   * end of <head>, which is *after* faultlined.css, and a stylesheet left
+   * there wins the cascade over our own sheet: the amber and vt220 themes put a
+   * phosphor `text-shadow` on every readout, so the probe silently switched the
+   * vendor glow back on for the whole session and it was reported as a glow
+   * that a theme change made worse. The glow is off by a rule in
+   * faultlined.css, and that rule only holds while exactly one theme sheet is
+   * loaded before it.
    */
   function applyTheme(name) {
     if (THEMES.indexOf(name) < 0) return;
@@ -49,8 +58,8 @@
     if (link.getAttribute("href") === href) return;
     var probe = doc.createElement("link");
     probe.rel = "stylesheet";
-    probe.setAttribute("data-de-theme", "");
     probe.onload = function () {
+      probe.remove();
       doc.documentElement.setAttribute("data-theme", name);
       link.setAttribute("href", href);
     };
