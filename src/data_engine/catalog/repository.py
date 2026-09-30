@@ -833,30 +833,38 @@ class PostgresCatalog:
             ).fetchone()
             if row is None:
                 raise RuntimeError("build upsert returned no row")
-            for ordinal, member in enumerate(build.episodes):
-                connection.execute(
-                    """INSERT INTO build_episodes
-                           (build_hash, episode_id, source_hash, artifact_hash, ordinal)
-                       VALUES (%s, %s, %s, %s, %s)
-                       ON CONFLICT (build_hash, episode_id) DO NOTHING""",
+            # Two statements, not two per member. `executemany` pipelines the
+            # rows in one round trip, which is the difference between 2 and 2N
+            # statements: a 50-episode build issued 100 of them, and a real one
+            # would issue 20,000. Same rows, same conflict handling, same
+            # transaction - only the round trips changed.
+            #
+            # Lineage edges as well as the join table: `lineage_edges` is the
+            # graph everything else already queries, and a build that exists in
+            # only one of the two would be invisible to half the traversals.
+            members = list(build.episodes)
+            connection.cursor().executemany(
+                """INSERT INTO build_episodes
+                       (build_hash, episode_id, source_hash, artifact_hash, ordinal)
+                   VALUES (%s, %s, %s, %s, %s)
+                   ON CONFLICT (build_hash, episode_id) DO NOTHING""",
+                [
                     (
                         build.hash,
                         member["episode_id"],
                         member["source_hash"],
                         member["artifact_hash"],
                         ordinal,
-                    ),
-                )
-                # Lineage edge as well as the join table: `lineage_edges` is the
-                # graph everything else already queries, and a build that exists
-                # in only one of the two would be invisible to half the
-                # traversals. One edge per member - inside the loop, not after it.
-                connection.execute(
-                    """INSERT INTO lineage_edges (from_type, from_ref, to_type, to_ref, relation)
-                       VALUES ('build', %s, 'episode', %s, 'contains')
-                       ON CONFLICT DO NOTHING""",
-                    (build.hash, member["episode_id"]),
-                )
+                    )
+                    for ordinal, member in enumerate(members)
+                ],
+            )
+            connection.cursor().executemany(
+                """INSERT INTO lineage_edges (from_type, from_ref, to_type, to_ref, relation)
+                   VALUES ('build', %s, 'episode', %s, 'contains')
+                   ON CONFLICT DO NOTHING""",
+                [(build.hash, member["episode_id"]) for member in members],
+            )
         return dict(row)
 
     def get_build(self, build_id: str) -> dict[str, Any] | None:
@@ -1301,14 +1309,16 @@ class PostgresCatalog:
     ) -> list[dict[str, Any]]:
         """Recompute membership from the filter config and register it in the audit trail."""
         rows = self.list_episodes(limit=limit, state=state, flag=flag)
+        # One statement, not one per member. Membership is recomputed on every
+        # read by design, which means this write is on the hot path of every
+        # manifest fetch: a 20-episode slice issued 67 statements.
         with connect(self.settings) as connection:
-            for row in rows:
-                connection.execute(
-                    """INSERT INTO slice_memberships (slice_id, episode_id)
-                       VALUES (%s, %s)
-                       ON CONFLICT (slice_id, episode_id) DO NOTHING""",
-                    (slice_id, row["id"]),
-                )
+            connection.cursor().executemany(
+                """INSERT INTO slice_memberships (slice_id, episode_id)
+                   VALUES (%s, %s)
+                   ON CONFLICT (slice_id, episode_id) DO NOTHING""",
+                [(slice_id, row["id"]) for row in rows],
+            )
         return rows
 
     def slice_impact(self, slice_id: str) -> dict[str, Any] | None:
