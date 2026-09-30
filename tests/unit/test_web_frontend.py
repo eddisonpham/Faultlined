@@ -377,19 +377,32 @@ def test_markup_carries_the_hooks_the_vendored_themes_target() -> None:
     )
     assert "fine-use-app" in html, "scanlines and themed backgrounds hang off this"
     assert "fine-use-component" in html
-    assert "current-value" in html, "the phosphor glow on readouts needs this"
+    assert "current-value" in html, "the readout styling hangs off this"
     assert "block-item" in html
     assert "fine-use-data-table" in html
     assert "fine-use-focusable" in html
 
 
 @pytest.mark.unit
-def test_layout_stylesheet_does_not_neutralise_the_vendor_personality() -> None:
-    """The bridge may keep layout but must not strip a theme's distinguishing rule."""
+def test_layout_stylesheet_kills_the_halo_but_not_the_neon() -> None:
+    """The one theme rule we override is the glow - and only the glow.
+
+    The vendored CRT themes put a phosphor `text-shadow` on the big readouts and
+    the headings. It reads as an AI-generated affectation on a dense instrument
+    page, so it is deliberately off (faultlined.css rule 2). This test used to
+    ban `text-shadow: none` outright; the decision changed, the test with it.
+
+    What must *not* happen in the same breath is neutralising the theme itself:
+    the colours are the point, so the override must stop at text-shadow and
+    leave every `color` alone.
+    """
     css = layout_css()
-    assert "text-shadow: none" not in css
-    # The theme sheets own the glow; ours must not fight it with a competing
-    # opaque text colour on the same elements.
+    assert css.count("text-shadow: none") >= 1, "the halo override is gone"
+    halo_block = css.split("no halos", 1)[1]
+    assert "text-shadow: none" in halo_block
+    assert not re.search(r"text-shadow:\s*none[^}]*color:", halo_block), (
+        "the halo override must not also set colour; the neon stays"
+    )
     assert not re.search(r"\.de-head h1[^{]*\{[^}]*color:\s*transparent", css)
 
 

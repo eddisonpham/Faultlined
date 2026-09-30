@@ -15,9 +15,13 @@
  * 1. **Colour is never the only signal.** Every severity carries a word and a
  *    distinct glyph as well as a hue, because an instrument that relies on red
  *    alone is unusable for a red-green colourblind operator.
- * 2. **Nothing glows unless the theme asked for it.** Phosphor halos come from
- *    the vendored theme hooks, not from here, so a theme without CRT character
- *    does not get a fake one.
+ * 2. **No halos.** The vendored themes put a phosphor `text-shadow` on the big
+ *    readouts and the headings. It is overridden off at the bottom of this file.
+ *    The colours stay - this is a neon terminal, and neon is the point - but a
+ *    blurred copy of every number behind the real one reads as decoration, and
+ *    on a dense instrument page it costs legibility for a 1990s affectation.
+ *    `text-shadow` inherits, so clearing it on the two elements that set it
+ *    clears it from every descendant as well.
  * 3. **Motion is opt-in.** Every animation sits behind
  *    `prefers-reduced-motion: no-preference`.
  */
@@ -1486,4 +1490,41 @@ pre.de-json {
   fill: var(--de-dim);
   font-family: var(--de-mono);
   font-size: 9px;
+}
+
+/* ---- no halos (rule 2 above) ------------------------------------------------ */
+
+/* The two rules that produce a glow, from the vendored CRT themes:
+ *   [data-theme] .current-value            -> text-shadow: 0 0 8px accent
+ *   [data-theme] .fine-use-h1/-h2/-h3,     -> text-shadow: 0 0 3-4px currentColor
+ *     .fine-use-text
+ * Both are attribute-plus-class, and this file is linked after the theme, so
+ * matching their specificity and arriving later is enough to win. Overriding
+ * them here rather than editing the vendored sheets keeps third-party code
+ * unmodified and makes the decision ours and reviewable.
+ *
+ * `.current-value` covers the readouts, the unit `<small>` inside them and the
+ * `.text-success` / `.text-warning` / `.text-error` spans nested in them,
+ * because `text-shadow` is an inherited property - one declaration clears every
+ * one of them. `.de-section > h2` is the section legends, which the themes
+ * reach through `.fine-use-h2`; those never carry the class, so they are named
+ * directly.
+ */
+[data-theme] .current-value,
+[data-theme] .fine-use-h1,
+[data-theme] .fine-use-h2,
+[data-theme] .fine-use-h3,
+[data-theme] .fine-use-text,
+.de-head h1.fine-use-h1,
+.de-section > h2 {
+  text-shadow: none;
+}
+
+/* Belt and braces for anything a future theme reaches through a hook we have
+ * not enumerated: a shadow on a container is not decoration either. */
+.fine-use-app,
+.de-shell,
+.de-section,
+.de-nav {
+  text-shadow: none;
 }

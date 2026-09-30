@@ -183,6 +183,7 @@ human looked at the screen. The human found more.
 | # | severity | finding | remedy | status |
 |---|---|---|---|---|
 | 14 | major | `/ui/incidents` polled its own URL and ignored `X-Fragment`, so after the first tick the poller nested the entire page - second nav bar included - inside the panel (human-found) | the route honours `X-Fragment`; the orphaned `/ui/incidents/fragment` route is deleted; `tests/contract/test_ui_polling.py` asserts every polled page's own poll target answers bare | **fixed** |
+| 15 | minor | the vendored phosphor `text-shadow` halo on readouts and headings reads as cheap decoration (human-found) | overridden off in `faultlined.css` rule 2, scoped to `text-shadow` alone; the neon colours are untouched and a test pins that scope | **fixed** |
 
 ## 8. What the next stage actually delivered
 
