@@ -1925,10 +1925,10 @@ def _motion_trace(quality: dict[str, Any]) -> str:
     if hi - lo > 4:
         ticks.insert(1, (tick((lo + hi) / 2), f"{(lo + hi) / 2:.0f} s"))
     caption = f"{len(points)} points in {len(runs)} run(s)"
-    gaps = len(runs) - 1
-    if gaps:
-        noun = "gap" if gaps == 1 else "gaps"
-        caption += f"; the {gaps} {noun} between runs are recording dropouts, not stillness"
+    # Count-agnostic wording on purpose: one gap and five read the same, and a
+    # caption that conjugates itself is a caption that eventually gets it wrong.
+    if len(runs) > 1:
+        caption += "; gaps are recording dropouts, not stillness"
     else:
         caption += "; continuous recording"
     return line_chart(
