@@ -74,7 +74,7 @@ class EpisodeIngestService:
             metadata=metadata,
             job_id=job_id,
             episode_format="synthetic-json",
-            quality=analyze(_synthetic_series(episode)).to_dict(),
+            quality=analyze(_synthetic_series(episode), timestamps=episode["timestamps"]).to_dict(),
         )
 
     def ingest_path(

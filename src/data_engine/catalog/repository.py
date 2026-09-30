@@ -69,6 +69,16 @@ def canonical_json(value: Any) -> bytes:
     return _canonical_json(value)
 
 
+def _optional_float(value: Any) -> float | None:
+    """`None` stays `None`; it means "no clock was supplied", not "zero seconds"."""
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except TypeError, ValueError:
+        return None
+
+
 def _zscore(value: float, stats: dict[str, Any] | None) -> float:
     mean = (stats or {}).get("mean")
     std = (stats or {}).get("std")
@@ -804,8 +814,9 @@ class PostgresCatalog:
             row = connection.execute(
                 """INSERT INTO episode_quality
                        (episode_id, frame_count, movement_score, jerk_score,
-                        stall_ratio, verdict, dims)
-                   VALUES (%s, %s, %s, %s, %s, %s, %s)
+                        stall_ratio, verdict, dims, nonfinite, max_gap_seconds,
+                        gap_ratio, integrity, worst_verdict, worst_dim, judged_dims)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                    ON CONFLICT (episode_id) DO UPDATE
                        SET frame_count = EXCLUDED.frame_count,
                            movement_score = EXCLUDED.movement_score,
@@ -813,6 +824,13 @@ class PostgresCatalog:
                            stall_ratio = EXCLUDED.stall_ratio,
                            verdict = EXCLUDED.verdict,
                            dims = EXCLUDED.dims,
+                           nonfinite = EXCLUDED.nonfinite,
+                           max_gap_seconds = EXCLUDED.max_gap_seconds,
+                           gap_ratio = EXCLUDED.gap_ratio,
+                           integrity = EXCLUDED.integrity,
+                           worst_verdict = EXCLUDED.worst_verdict,
+                           worst_dim = EXCLUDED.worst_dim,
+                           judged_dims = EXCLUDED.judged_dims,
                            computed_at = now()
                    RETURNING episode_id""",
                 (
@@ -823,6 +841,13 @@ class PostgresCatalog:
                     float(quality["stall_ratio"]),
                     str(quality["verdict"]),
                     Jsonb(quality.get("dims") or []),
+                    int(quality.get("nonfinite") or 0),
+                    _optional_float(quality.get("max_gap_seconds")),
+                    float(quality.get("gap_ratio") or 0.0),
+                    str(quality.get("integrity") or "unknown"),
+                    str(quality.get("worst_verdict") or "unknown"),
+                    quality.get("worst_dim"),
+                    int(quality.get("judged_dims") or 0),
                 ),
             ).fetchone()
         if row is None:
@@ -840,6 +865,8 @@ class PostgresCatalog:
                 """SELECT q.episode_id, q.frame_count AS analysed_frames,
                           q.movement_score, q.jerk_score,
                           q.stall_ratio, q.verdict, q.dims, q.computed_at,
+                          q.nonfinite, q.max_gap_seconds, q.gap_ratio,
+                          q.integrity, q.worst_verdict, q.worst_dim, q.judged_dims,
                           (e.metadata->>'frame_count')::bigint AS frame_count
                    FROM episode_quality q JOIN episodes e ON e.id = q.episode_id
                    WHERE q.episode_id = %s""",
@@ -867,7 +894,9 @@ class PostgresCatalog:
                           (e.metadata->>'frame_count')::bigint AS frame_count,
                           q.frame_count AS analysed_frames,
                           q.movement_score,
-                          q.jerk_score, q.stall_ratio, q.verdict, q.dims
+                          q.jerk_score, q.stall_ratio, q.verdict, q.dims,
+                          q.integrity, q.max_gap_seconds, q.gap_ratio,
+                          q.worst_verdict, q.worst_dim, q.judged_dims
                    FROM episode_quality q JOIN episodes e ON e.id = q.episode_id
                    ORDER BY q.movement_score DESC"""
             ).fetchall()

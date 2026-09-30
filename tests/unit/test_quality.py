@@ -8,7 +8,7 @@ import pytest
 
 from data_engine.analysis.quality import (
     DimQuality,
-    _verdict,
+    _verdicts,
     analyze,
 )
 from data_engine.catalog.repository import _assemble_quality_summary, _zscore
@@ -84,20 +84,43 @@ def _dim(
 def test_verdict_uses_absolute_normalized_sigma_bands() -> None:
     """Absolute bands (ADR 0018); the visualizer's relative bands are degenerate."""
     smooth = [_dim("a", 0.005), _dim("b", 0.01)]
-    assert _verdict(smooth) == "smooth"
+    assert _verdicts(smooth)[0] == "smooth"
 
-    # One moderate dim lifts the episode to moderate; one jerky dim to jerky.
-    assert _verdict([*smooth, _dim("c", 0.05)]) == "moderate"
-    assert _verdict([*smooth, _dim("d", 0.2)]) == "jerky"
+    # A *majority* of rough dims lifts the episode; the median is what decides.
+    assert _verdicts([*smooth, _dim("c", 0.05)])[0] == "smooth"
+    assert _verdicts([*smooth, _dim("c", 0.05), _dim("d", 0.06)])[0] == "moderate"
 
     # A gripper's bang-bang open/close never drags the episode's verdict.
-    assert _verdict([*smooth, _dim("gripper", 0.5, gripper=True)]) == "smooth"
+    assert _verdicts([*smooth, _dim("gripper", 0.5, gripper=True)])[0] == "smooth"
 
     # Discrete dims are not judged at all.
-    assert _verdict([_dim("mode", 9.0, discrete=True)]) == "unknown"
+    assert _verdicts([_dim("mode", 9.0, discrete=True)])[0] == "unknown"
 
-    assert _verdict([]) == "unknown"
-    assert _verdict([_dim("flat", 0.0)]) == "smooth"
+    assert _verdicts([])[0] == "unknown"
+    assert _verdicts([_dim("flat", 0.0)])[0] == "smooth"
+
+
+@pytest.mark.unit
+def test_one_bad_dimension_does_not_condemn_the_episode_but_is_still_reported() -> None:
+    """The rule that changed after a real log had 17 clean joints and one noisy one.
+
+    Worst-case let a single miscalibrated encoder decide whether an episode was
+    usable, and the operator could not see which dimension had done it without
+    opening the JSON. The median fixes the verdict; `worst_*` keeps the strict
+    reading available so the change hides nothing.
+    """
+    joints = [_dim(f"joint_{i}", 0.005) for i in range(17)]
+    noisy = _dim("encoder_drift", 0.9)
+
+    verdict, worst_verdict, worst_dim, judged = _verdicts([*joints, noisy])
+    assert verdict == "smooth"
+    assert worst_verdict == "jerky"
+    assert worst_dim == "encoder_drift"
+    assert judged == 18
+
+    # When most of the arm really is rough, the verdict follows.
+    rough = [_dim(f"joint_{i}", 0.2) for i in range(9)]
+    assert _verdicts([*rough, *joints[:4]])[0] == "jerky"
 
 
 @pytest.mark.unit
@@ -110,19 +133,26 @@ def test_verdict_ignores_inactive_dims() -> None:
         norm_delta_std=0.0,
         mean_abs_delta_norm=0.0,
     )
-    assert _verdict([inactive]) == "unknown"
+    assert _verdicts([inactive])[0] == "unknown"
 
 
 @pytest.mark.unit
 def test_to_dict_is_json_ready() -> None:
     data = analyze({"action[0]": _ramp(10), "gripper": [0.0, 1.0] * 5}).to_dict()
-    assert set(data) == {
+    assert set(data) >= {
         "frame_count",
         "movement_score",
         "jerk_score",
         "stall_ratio",
         "verdict",
         "dims",
+        "nonfinite",
+        "max_gap_seconds",
+        "gap_ratio",
+        "integrity",
+        "worst_verdict",
+        "worst_dim",
+        "judged_dims",
     }
     assert all(set(dim) >= {"name", "active", "discrete", "gripper"} for dim in data["dims"])
 

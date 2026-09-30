@@ -76,6 +76,13 @@ CREATE TABLE IF NOT EXISTS episode_quality (
     stall_ratio double precision NOT NULL,
     verdict text NOT NULL,
     dims jsonb NOT NULL,
+    nonfinite integer NOT NULL DEFAULT 0,
+    max_gap_seconds double precision,
+    gap_ratio double precision NOT NULL DEFAULT 0,
+    integrity text NOT NULL DEFAULT 'unknown',
+    worst_verdict text NOT NULL DEFAULT 'unknown',
+    worst_dim text,
+    judged_dims integer NOT NULL DEFAULT 0,
     computed_at timestamptz NOT NULL DEFAULT now()
 );
 
@@ -197,6 +204,16 @@ CREATE UNIQUE INDEX IF NOT EXISTS episodes_source_key_idx ON episodes (source_ha
 CREATE INDEX IF NOT EXISTS episodes_state_idx ON episodes (state);
 ALTER TABLE validation_results ADD COLUMN IF NOT EXISTS profile_name text NOT NULL DEFAULT '';
 ALTER TABLE validation_results ADD COLUMN IF NOT EXISTS profile_version text NOT NULL DEFAULT '';
+-- Temporal and diagnostic half of the quality record (ADR 0018 addendum). A
+-- nullable max_gap_seconds is the honest "no clock was supplied", which is a
+-- different fact from "the recording had no gaps".
+ALTER TABLE episode_quality ADD COLUMN IF NOT EXISTS nonfinite integer NOT NULL DEFAULT 0;
+ALTER TABLE episode_quality ADD COLUMN IF NOT EXISTS max_gap_seconds double precision;
+ALTER TABLE episode_quality ADD COLUMN IF NOT EXISTS gap_ratio double precision NOT NULL DEFAULT 0;
+ALTER TABLE episode_quality ADD COLUMN IF NOT EXISTS integrity text NOT NULL DEFAULT 'unknown';
+ALTER TABLE episode_quality ADD COLUMN IF NOT EXISTS worst_verdict text NOT NULL DEFAULT 'unknown';
+ALTER TABLE episode_quality ADD COLUMN IF NOT EXISTS worst_dim text;
+ALTER TABLE episode_quality ADD COLUMN IF NOT EXISTS judged_dims integer NOT NULL DEFAULT 0;
 
 ALTER TABLE episode_slices ADD COLUMN IF NOT EXISTS name text NOT NULL DEFAULT '';
 ALTER TABLE episode_slices ADD COLUMN IF NOT EXISTS notes text NOT NULL DEFAULT '';

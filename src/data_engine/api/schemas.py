@@ -25,6 +25,15 @@ class SyntheticEpisode(BaseModel):
         count = len(self.timestamps)
         if len(self.observations) != count or len(self.actions) != count:
             raise ValueError("timestamps, observations, and actions must have equal lengths")
+        # Equal *length* of the outer lists is not enough. A ragged row validated
+        # cleanly and then killed the ingest job with an IndexError inside the
+        # series builder, which the worker classified as a retryable
+        # INTERNAL_ERROR and spent three attempts on. The payload was bad; the
+        # contract is where bad payloads are supposed to stop.
+        for name, rows in (("observations", self.observations), ("actions", self.actions)):
+            widths = {len(row) for row in rows}
+            if len(widths) > 1:
+                raise ValueError(f"{name} rows must all have the same width, saw {sorted(widths)}")
         if any(right < left for left, right in pairwise(self.timestamps)):
             raise ValueError("timestamps must be monotonic non-decreasing")
         return self
@@ -208,6 +217,14 @@ class EpisodeSummary(BaseModel):
     jerk_score: float | None = None
     stall_ratio: float | None = None
     verdict: str | None = None
+    integrity: str | None = None
+    """`ok` / `gapped` / `unknown` - whether the recording was continuous in time."""
+
+    max_gap_seconds: float | None = None
+    gap_ratio: float | None = None
+    worst_verdict: str | None = None
+    worst_dim: str | None = None
+    judged_dims: int | None = None
 
 
 class EpisodeListResponse(BaseModel):
@@ -323,7 +340,7 @@ class StatusResponse(BaseModel):
 
 
 class EpisodeQualityResponse(BaseModel):
-    """Motion-quality signals for one episode (ADR 0018)."""
+    """Motion-quality and temporal-integrity signals for one episode (ADR 0018)."""
 
     episode_id: str
     frame_count: int
@@ -334,6 +351,13 @@ class EpisodeQualityResponse(BaseModel):
     dims: list[dict[str, Any]]
     length_zscore: float = 0.0
     computed_at: datetime | None = None
+    nonfinite: int = 0
+    max_gap_seconds: float | None = None
+    gap_ratio: float = 0.0
+    integrity: str = "unknown"
+    worst_verdict: str = "unknown"
+    worst_dim: str | None = None
+    judged_dims: int = 0
 
 
 class QualitySummaryResponse(BaseModel):

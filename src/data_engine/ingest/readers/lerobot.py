@@ -231,7 +231,7 @@ class LeRobotReader:
             duration_seconds=max(t_end - t_start, 0.0),
             fps=_as_float(info.get("fps")),
             channels=_channels(table, record),
-            quality=analyze(_series(table)),
+            quality=analyze(_series(table), timestamps=_column(table, "timestamp")),
             dataset={
                 "root": str(path),
                 "codebase_version": version,

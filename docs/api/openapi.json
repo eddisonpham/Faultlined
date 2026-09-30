@@ -453,7 +453,7 @@
         "type": "object"
       },
       "EpisodeQualityResponse": {
-        "description": "Motion-quality signals for one episode (ADR 0018).",
+        "description": "Motion-quality and temporal-integrity signals for one episode (ADR 0018).",
         "properties": {
           "computed_at": {
             "anyOf": [
@@ -483,18 +483,49 @@
             "title": "Frame Count",
             "type": "integer"
           },
+          "gap_ratio": {
+            "default": 0.0,
+            "title": "Gap Ratio",
+            "type": "number"
+          },
+          "integrity": {
+            "default": "unknown",
+            "title": "Integrity",
+            "type": "string"
+          },
           "jerk_score": {
             "title": "Jerk Score",
             "type": "number"
+          },
+          "judged_dims": {
+            "default": 0,
+            "title": "Judged Dims",
+            "type": "integer"
           },
           "length_zscore": {
             "default": 0.0,
             "title": "Length Zscore",
             "type": "number"
           },
+          "max_gap_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Gap Seconds"
+          },
           "movement_score": {
             "title": "Movement Score",
             "type": "number"
+          },
+          "nonfinite": {
+            "default": 0,
+            "title": "Nonfinite",
+            "type": "integer"
           },
           "stall_ratio": {
             "title": "Stall Ratio",
@@ -502,6 +533,22 @@
           },
           "verdict": {
             "title": "Verdict",
+            "type": "string"
+          },
+          "worst_dim": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Worst Dim"
+          },
+          "worst_verdict": {
+            "default": "unknown",
+            "title": "Worst Verdict",
             "type": "string"
           }
         },
@@ -615,9 +662,31 @@
             ],
             "title": "Frame Count"
           },
+          "gap_ratio": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gap Ratio"
+          },
           "id": {
             "title": "Id",
             "type": "string"
+          },
+          "integrity": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Integrity"
           },
           "jerk_score": {
             "anyOf": [
@@ -629,6 +698,28 @@
               }
             ],
             "title": "Jerk Score"
+          },
+          "judged_dims": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Judged Dims"
+          },
+          "max_gap_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Gap Seconds"
           },
           "movement_score": {
             "anyOf": [
@@ -677,6 +768,28 @@
               }
             ],
             "title": "Verdict"
+          },
+          "worst_dim": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Worst Dim"
+          },
+          "worst_verdict": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Worst Verdict"
           }
         },
         "required": [

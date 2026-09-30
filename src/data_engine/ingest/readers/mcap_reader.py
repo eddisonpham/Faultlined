@@ -59,6 +59,9 @@ DECODABLE_ENCODINGS = frozenset({"json"})
 #: Values kept per dimension for motion analysis before the window starts decimating.
 QUALITY_WINDOW = 512
 
+#: Below this many sampled frames there is no interval to measure.
+MIN_QUALITY_FRAMES = 2
+
 #: Metadata keys the engine looks for, in order of preference.
 _ROBOT_KEYS = ("robot_type", "robot")
 _TASK_KEYS = ("task", "task_name")
@@ -90,6 +93,7 @@ class _Topic:
     """Everything one MCAP channel contributes, accumulated in a single pass."""
 
     __slots__ = (
+        "clock",
         "encoding",
         "first",
         "highest",
@@ -121,6 +125,13 @@ class _Topic:
         self.last = 0
         self.reference: tuple[str, ...] = ()
         self.windows: dict[str, _Window] = {}
+        self.clock: list[float] = []
+        """Log times of the messages that fed the quality window, decimated with it.
+
+        Grown in lockstep with `windows` - one entry appended per accepted message,
+        and halved on the same trigger - so the two stay index-aligned and the
+        timestamps describe exactly the frames the verdict was computed from.
+        """
 
     def stamp(self, log_time: int) -> None:
         if self.messages == 0:
@@ -133,7 +144,7 @@ class _Topic:
     def span_seconds(self) -> float:
         return max((self.last - self.first) / NANOSECONDS_PER_SECOND, 0.0)
 
-    def observe(self, payload: Any) -> None:
+    def observe(self, payload: Any, log_time: int = 0) -> None:
         dims = _dimensions(payload)
         if not dims:
             return
@@ -143,9 +154,9 @@ class _Topic:
             self.squares += value * value
             self.lowest = min(self.lowest, value)
             self.highest = max(self.highest, value)
-        self._sample(dims)
+        self._sample(dims, log_time)
 
-    def _sample(self, dims: dict[str, float]) -> None:
+    def _sample(self, dims: dict[str, float], log_time: int = 0) -> None:
         """Feed the quality window, keeping every dimension the same length.
 
         The first decodable message fixes the dimension set. Later messages are used
@@ -159,6 +170,12 @@ class _Topic:
             return
         for name in self.reference:
             self.windows[name].add(dims[name])
+        self._decimate_clock(log_time)
+
+    def _decimate_clock(self, log_time: int) -> None:
+        self.clock.append(log_time / 1e9)
+        if len(self.clock) > 2 * QUALITY_WINDOW:
+            self.clock = self.clock[::2]
 
     def rate(self) -> float | None:
         span = self.span_seconds()
@@ -183,6 +200,15 @@ class _Topic:
 
     def quality_series(self) -> dict[str, list[float]]:
         return {f"{self.topic}.{name}": window.values for name, window in self.windows.items()}
+
+    def quality_clock(self) -> list[float] | None:
+        """Timestamps aligned with `quality_series`, or None when nothing was sampled."""
+        if not self.windows or not self.clock:
+            return None
+        length = min(len(self.clock), min(len(w.values) for w in self.windows.values()))
+        if length < MIN_QUALITY_FRAMES:
+            return None
+        return self.clock[:length]
 
 
 class McapReader:
@@ -240,7 +266,7 @@ class McapReader:
                 latest = message.log_time
             seen_any = True
             if topic.encoding.lower() in DECODABLE_ENCODINGS:
-                topic.observe(_loads(message.data))
+                topic.observe(_loads(message.data), message.log_time)
 
         span = max((latest - earliest) / NANOSECONDS_PER_SECOND, 0.0) if seen_any else 0.0
         busiest = _busiest(topics)
@@ -261,7 +287,11 @@ class McapReader:
             channels=tuple(
                 topic.stats() for topic in sorted(topics.values(), key=lambda t: t.topic)
             ),
-            quality=analyze(judged.quality_series()) if judged is not None else None,
+            quality=(
+                analyze(judged.quality_series(), timestamps=judged.quality_clock())
+                if judged is not None
+                else None
+            ),
             dataset={
                 "root": str(path),
                 "profile": header.profile,
