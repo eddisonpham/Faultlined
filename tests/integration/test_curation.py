@@ -155,7 +155,10 @@ def test_a_slice_recomputes_membership_and_exports_identity(
     assert after is not None
     assert str(good["id"]) not in {item["id"] for item in after["items"]}
 
-    assert any(row["id"] == slice_id for row in catalog.list_slices(limit=500))
+    # Fetch the slice rather than scanning the capped slice list: this database is
+    # shared with the rest of the suite and that page keeps growing, so membership
+    # in it says nothing about this slice.
+    assert catalog.get_slice(slice_id) is not None
     updated = catalog.update_slice(slice_id, notes="retuned", filter_config={"state": "valid"})
     assert updated is not None
     assert updated["notes"] == "retuned"

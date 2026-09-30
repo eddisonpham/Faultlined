@@ -387,5 +387,12 @@ def test_lineage_and_validation_are_queryable_after_the_run(
     assert "TOO_FEW_FRAMES" in report["validation"]["reason_codes"]
     assert catalog.job_report("no-such-job") is None
 
-    rows = catalog.list_episodes(limit=500, state="quarantined")
-    assert any(row["id"] == episode_id and row["artifact_hash"] for row in rows)
+    # Fetch the episode itself rather than scanning the quarantined list. That list
+    # is a capped page of a database shared with the rest of the suite, and it has
+    # already grown past 500 rows, so membership in it says nothing about this
+    # episode - it only says how much other tests have left behind.
+    listed = catalog.get_episode(episode_id)
+    assert listed is not None
+    assert listed["state"] == "quarantined"
+    assert listed["artifact_hash"]
+    assert listed["episode_key"] == "episode_index=7"
