@@ -133,6 +133,8 @@ just api         # HTTP API only
 just worker      # ingest worker only (-- --once to process a single job)
 just doctor      # check database connectivity and catalog schema
 just hygiene     # relative links, ADRs, secrets, required structure
+just reset --yes # wipe the dev catalog, artifacts, and metrics (refuses *_test databases)
+python scripts/verify_e2e.py  # 145-check end-to-end run against `just run`; needs an empty catalog
 just ci          # lint + typecheck + test + hygiene
 ```
 
