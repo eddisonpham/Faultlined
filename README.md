@@ -116,9 +116,9 @@ Everything under `var/` is generated. Delete it any time.
 | Area | State |
 |---|---|
 | Ingest, validate, build | Working end to end |
-| Formats | LeRobot v2.1 and v3.0, MCAP with JSON channels |
-| Writing LeRobot dataset files | Not built yet |
-| Tests | 903 passing, coverage above 92% |
+| Formats read | LeRobot v2.1 and v3.0, MCAP with JSON channels |
+| Formats written | LeRobot v3 dataset directories |
+| Tests | 918 passing, coverage above 92% |
 | MCAP ingest speed | 10.8-18.3 MiB/s, target not met |
 
 ## Layout

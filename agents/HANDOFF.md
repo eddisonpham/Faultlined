@@ -41,6 +41,7 @@ Python 3.14, uv with a committed lock, just, Ruff, mypy, pytest with a 70% cover
 - **Validation**: hashed JSON profiles, a 7-rule engine, quarantine and re-validate without re-ingest ([ADR 0016](decisions/0016-json-validation-profiles.md)).
 - **Quality signals**: movement, jerk, stall ratio, length z-score, temporal integrity, verdict on the median judged dimension. Non-finite input stops the analysis instead of poisoning dataset statistics; all three readers supply a clock ([ADR 0023](decisions/0023-quality-metrics-honesty.md), which amends ADR 0018).
 - **Builds**: manifest hashed alone is the build identity, membership in `build_episodes`, graph in `lineage_edges`, reverse lineage at `GET /api/v1/episodes/{id}/builds`. NFR-004 asserted by 13 tests ([ADR 0007](decisions/0007-lineage-and-run-records.md)).
+- **LeRobot v3 export of a build**: an `export` job writes the build out as a real v3 dataset directory (`meta/info.json`, per-episode index shards, `data/chunk-*/file-*.parquet` with global row ranges reindexed per episode), so the engine hands a training script files rather than a manifest ([ADR 0025](decisions/0025-lerobot-v3-export-of-builds.md), `tests/unit/test_build_export.py`, `tests/unit/test_worker_export.py`).
 - **Run intelligence**: runtime metrics emitted at call sites, aggregated into percentiles and time series, served at `GET /api/v1/metrics` ([ADR 0017](decisions/0017-runtime-metrics-aggregation.md)); episode catalog, quality summary, job reports and export manifests; measured one workload per process ([ADR 0019](decisions/0019-benchmark-workload-isolation.md)).
 - **Curation**: named slices that recompute membership on read, a slice impact view attributing every drop, and a read-only failures view. Vocabulary shared in `data_engine/curation.py` ([telldown plan](implementation/telldown-plan.md)).
 - **Monitoring**: deterministic notifier, eleven rules, per-scope EWMA and median-MAD control limits over a versioned 26-feature vector, completion contracts, fingerprint dedup, cooldown, evidence and severity gates, hard alert budget. No model, no LLM call, no network in the detection path ([ADR 0020](decisions/0020-deterministic-monitoring-notifier.md), [plan](implementation/automated-monitoring-plan.md)).
@@ -50,10 +51,9 @@ Python 3.14, uv with a committed lock, just, Ruff, mypy, pytest with a 70% cover
 
 ### Not working
 
-- Materialising a build as LeRobot v3 dataset files on disk. The manifest and lineage are real; the dataset directory is not.
 - CDR and protobuf MCAP payload decoding. JSON channels only, by decision: a guessed struct layout would put wrong numbers in the catalog.
 - Multi-session bag segmentation. One file is one episode, deliberately.
-- Parquet metadata indexing, workload execution, retry backoff, worker leases, mid-run cancellation, orphan GC, formal database migrations.
+- Parquet metadata indexing, workload execution, retry backoff, worker leases, mid-run cancellation, formal database migrations, orphan GC.
 - Committed baselines for the run-intelligence workloads. Measured in [EXP-0002](experiments/0002-run-intelligence-workloads.md); committing needs the owner's green flag ([§13](#13-baseline-runbook-owner-green-flag-required)).
 
 More detail: [implementation status](implementation/status.md), [failure modes](testing/failure-modes.md).
