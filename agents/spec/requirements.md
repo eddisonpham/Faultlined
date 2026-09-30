@@ -33,7 +33,7 @@ ADR [0003](../decisions/0003-problem-selection.md)). Every requirement traces to
 
 | ID | Requirement (target) | Status | How we'll validate |
 |---|---|---|---|
-| NFR-001 | Ingest throughput ≥ 50 MB/s sustained per worker ingesting MCAP on local NVMe | provisional | Bench `ingest-throughput` (phase 06 harness), ≥ 5 runs, warmup excluded; baseline committed |
+| NFR-001 | **Revised 2026-09-30 (owner decision) from a single ≥ 50 MB/s whole-pipe target to per-stage targets**, because [EXP-0005](../experiments/0005-mcap-ingest-flatten-plan.md) measured that container iteration + JSON decode alone run at 42.6 MiB/s before the engine works, so the old target is unreachable by this design: (a) container iteration ≥ 100 MiB/s (measured 131), (b) JSON payload decode ≥ 35 MiB/s (measured 42.6), (c) engine whole-ingest ≥ 10 MiB/s P50 on the B-002 fixture (measured 10.8–18.3). A decode-avoiding reader (binary CDR/protobuf interpretation) is the recorded path back to ≥ 50 MB/s and remains deferred | revised with evidence | Bench `mcap-ingest` (B-002) plus EXP-0005's per-stage attribution method; baselines committed |
 | NFR-002 | Validation latency p95 ≤ 2 s per ≤ 60 s episode (rule-based checks) | provisional | Bench `validate-latency`, report p50/p95/p99 over ≥ 100 episodes |
 | NFR-003 | Metadata query latency p95 ≤ 200 ms over a 10k-episode catalog | provisional | Bench `query-latency` with seeded 10k-row catalog |
 | NFR-004 | Build determinism: identical content hash on rebuild — **100% or the release fails** | hard | Test (not a bench): rebuild twice in CI, compare manifests/hashes |

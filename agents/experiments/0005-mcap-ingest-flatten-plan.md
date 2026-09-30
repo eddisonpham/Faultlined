@@ -126,3 +126,14 @@ Two measurement caveats worth carrying forward:
 - If 50 MB/s must hold for JSON bags: the next lever is *decoding less*, not walking
   faster - score only channels that carry the quality signal and count the rest from
   framing metadata. Design change; ADR first.
+
+## Decision (2026-09-30, owner): the target re-scoped
+
+The follow-up above is resolved as the per-stage option. NFR-001 no longer asks one
+number of a pipeline that mixes a C decoder, a disk, and the engine: container
+iteration >= 100 MiB/s (measured 131), JSON payload decode >= 35 MiB/s (measured 42.6),
+engine whole-ingest >= 10 MiB/s P50 on this fixture (measured 10.8-18.3). All three
+stand as measured. A decode-avoiding reader remains the recorded path back to a
+whole-pipe >= 50 MB/s and stays deferred with its trigger (a deployment that actually
+serves JSON-heavy bags at that rate). The trial-ramp instrumentation follow-up stays
+open for the next harness pass.
