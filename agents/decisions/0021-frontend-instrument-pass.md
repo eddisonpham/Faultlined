@@ -263,6 +263,15 @@ left to right. A progress rule occludes nothing and is where someone already loo
 The blur is the load-bearing part, not decoration. A fade alone reads as a rendering glitch; a
 simultaneous defocus reads as "this is being replaced".
 
+**Correction (2026-09-30): the blur is removed.** The reasoning above is wrong on this page.
+The same stylesheet turns the vendored phosphor glow off because "a blurred copy of every number
+behind the real one reads as decoration", and a 3px blur over the *entire* page is that same
+blur at full-screen size. The operator reported it as a glow that had come back, and it is
+navigation-only by construction - a refresh adds no class - so it read as a rendering bug rather
+than as a style. The transition dims to 0.25 and scales to 0.995; a test now asserts no `filter`
+reaches <body> or the leaving class, so it cannot return quietly. The progress rule is unchanged:
+it is a status, not a glow.
+
 ## Addendum (2026-09-29): the form, and what it cost to add one
 
 The UI had no way to put data *into* the system. Ingest was a `curl` in the README, and the

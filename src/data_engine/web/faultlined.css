@@ -21,7 +21,9 @@
  *    blurred copy of every number behind the real one reads as decoration, and
  *    on a dense instrument page it costs legibility for a 1990s affectation.
  *    `text-shadow` inherits, so clearing it on the two elements that set it
- *    clears it from every descendant as well.
+ *    clears it from every descendant as well. The rule covers motion too: the
+ *    page transition dims but never blurs, because a blurred page is the same
+ *    glow at full-screen size.
  * 3. **Motion is opt-in.** Every animation sits behind
  *    `prefers-reduced-motion: no-preference`.
  */
@@ -370,26 +372,29 @@ body::before {
     animation: de-refresh var(--de-dur-medium2) var(--de-ease-standard-decelerate) none;
   }
 
-  /* The outgoing page recedes: it dims and goes slightly out of focus, so the
-     incoming page reads as closer rather than merely different. `filter` is
-     transitioned alongside opacity deliberately - the blur is the signal that
-     something is being replaced, and without it a fade alone looks like a
-     rendering glitch.
+  /* The outgoing page recedes: it dims and shrinks a hair, so the incoming
+     page reads as closer rather than merely different.
 
-     This was previously a transition on `opacity` that nothing ever changed,
-     so it did nothing at all: the page snapped and only the bars moved. */
+     It used to blur by 3px as well. Rule 2 (no halos) is not only about
+     `text-shadow`: on a neon terminal a blurred copy of the entire page is a
+     full-screen glow, and it was reported as exactly that - a phosphor halo
+     that had come back. It only ever appeared on navigation, because a
+     refresh adds no class, which made it look like a rendering bug rather
+     than a style. A dim is enough to say "this is being replaced", so the
+     blur is gone.
+
+     This class was also previously a transition on `opacity` that nothing ever
+     changed, so it did nothing at all: the page snapped and only the bars
+     moved. */
   body.de-leaving {
     opacity: 0.25;
-    filter: blur(3px);
     transform: scale(0.995);
     transition:
       opacity var(--de-dur-short4) var(--de-ease-emphasized-accelerate),
-      filter var(--de-dur-short4) var(--de-ease-emphasized-accelerate),
       transform var(--de-dur-short4) var(--de-ease-emphasized-accelerate);
-    /* Promote for the duration: animating a full-page blur repaints every
-       layer each frame otherwise, which is the difference between a smooth
-       transition and a visible stall on a dense page. */
-    will-change: opacity, filter;
+    /* Promote for the duration: the transform still animates a full-page
+       layer, and without the hint it repaints on every frame. */
+    will-change: opacity, transform;
   }
 }
 

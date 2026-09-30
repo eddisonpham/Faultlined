@@ -675,10 +675,32 @@ def test_the_transition_actually_recedes_the_page() -> None:
     css = layout_css()
     block = css.split("body.de-leaving {")[1].split("}")[0]
     assert re.search(r"\bopacity:\s*0\.", block), "the outgoing page must dim"
-    assert "filter: blur(" in block, "the outgoing page must go out of focus"
-    # And every animated property must be listed, or it snaps instead of easing.
-    for prop in ("opacity", "filter"):
+    # Every animated property must be listed, or it snaps instead of easing.
+    for prop in ("opacity", "transform"):
         assert prop in block, f"{prop} is animated but not transitioned"
+
+
+@pytest.mark.unit
+def test_the_page_is_never_blurred_while_it_is_leaving() -> None:
+    """Rule 2 (no halos) applies to motion, not only to text.
+
+    The outgoing page was dimmed to 25% *and* blurred by 3px. On a neon
+    terminal a blurred copy of the whole page is a full-screen glow: it was
+    reported as a phosphor halo that had come back, and it only appeared on
+    navigation, because a refresh adds no class. Nothing else on the page may
+    reintroduce it either, so the blur is banned from any rule that styles
+    <body> or <html>.
+    """
+    css = layout_css()
+    block = css.split("body.de-leaving {")[1].split("}")[0]
+    assert "filter" not in block, "a full-page blur is a glow, not a transition"
+    for selector in ("body {", "body.de-leaving {"):
+        rule = css.split(selector)[1].split("}")[0]
+        assert "filter" not in rule, f"{selector} must not filter the page"
+    # The nav's backdrop blur is a different thing - it sits behind the chrome,
+    # is present on every settled page, and is not a glow. Guard the distinction
+    # so a well-meaning future edit does not delete it by accident.
+    assert "backdrop-filter: blur(2px)" in css
 
 
 @pytest.mark.unit
