@@ -13,10 +13,42 @@ from pathlib import Path
 
 import pytest
 
+from data_engine.web import THEMES
 from data_engine.web.pages import NAV_LINKS
 
 SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "ui_audit.mjs"
 TEXT = SCRIPT.read_text(encoding="utf-8")
+
+
+@pytest.mark.unit
+def test_the_audit_covers_every_theme_not_just_the_default() -> None:
+    """A theme that is never checked is a theme nobody sees.
+
+    Two of the four vendored sheets ship a glow rule and two do not, and the
+    defect that matters only appears once the client has swapped themes at
+    runtime. Checking the default theme alone would have passed while amber
+    glowed, which is precisely what happened for a whole session.
+    """
+    for theme in THEMES:
+        assert f'"{theme}"' in TEXT, f"{theme} is offered but never audited"
+    assert "localStorage.setItem" in TEXT, "the stored theme is how a swap is triggered"
+    # The page must be rendered in a *different* theme, or the swap is a no-op
+    # and the whole pass measures nothing.
+    assert "?theme=" in TEXT, "each pass must force a swap"
+    assert "const seed =" in TEXT
+
+
+@pytest.mark.unit
+def test_the_audit_checks_the_cascade_not_just_the_computed_style() -> None:
+    """The duplicate stylesheet is the cause; the glow is the symptom.
+
+    Checking the symptom alone means a fix has to reproduce the exact glow. The
+    structural check - one theme sheet, loaded before ours - catches the class
+    of bug whatever the vendored rules happen to be.
+    """
+    assert "theme-sheet" in TEXT
+    assert "cascade-order" in TEXT
+    assert "themeSheets.length !== 1" in TEXT
 
 
 @pytest.mark.unit

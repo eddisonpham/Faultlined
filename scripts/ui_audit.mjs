@@ -29,6 +29,10 @@ import { join } from "node:path";
 
 const BASE = (process.argv[2] || "http://127.0.0.1:8000").replace(/\/$/, "");
 
+/* The themes the picker offers. Must match THEMES in web/app.js; a test asserts
+ * the two lists agree, because a theme nobody checks is a theme nobody sees. */
+const THEMES = ["vt220", "amber", "github-dark", "monochrome"];
+
 /* The pages the nav offers. Checked in the order an operator meets them. */
 const PAGES = [
   "/ui",
@@ -101,6 +105,34 @@ const AUDIT = `(() => {
         });
       }
     }
+  }
+
+  // Exactly one theme stylesheet, and it must not come after our own sheet.
+  //
+  // The theme switcher appends a probe link to the end of <head> to confirm the
+  // new sheet parses before committing it. If that probe is left behind it lands
+  // *after* faultlined.css and wins the cascade, which switched the vendored
+  // phosphor glow back on for every readout - invisible on a fresh load, since
+  // no probe is created until a theme is chosen. A duplicate sheet is the
+  // signature of that bug, and it is measurable from the page.
+  const themeSheets = [...document.querySelectorAll('link[rel="stylesheet"]')]
+    .filter((l) => (l.getAttribute("href") || "").includes("/vendor/terminal-ui/theme-"));
+  if (themeSheets.length !== 1) {
+    findings.push({
+      kind: "theme-sheet",
+      el: "head",
+      value: themeSheets.length + " theme stylesheets (expected 1)",
+    });
+  }
+  const sheets = [...document.querySelectorAll('link[rel="stylesheet"]')];
+  const ours = sheets.findIndex((l) => (l.getAttribute("href") || "").includes("faultlined.css"));
+  const theirs = themeSheets.length ? sheets.indexOf(themeSheets[0]) : -1;
+  if (ours >= 0 && theirs > ours) {
+    findings.push({
+      kind: "cascade-order",
+      el: "head",
+      value: "the theme sheet loads after faultlined.css and overrides it",
+    });
   }
 
   // The outgoing page during a navigation. This state exists only between a
@@ -270,6 +302,7 @@ async function main() {
   await preflight();
   const { child, profile, endpoint } = await launch();
   let failures = 0;
+  let checks = 0;
   try {
     const cdp = await Cdp.connect(endpoint);
     const { targetId } = await cdp.send("Target.createTarget", { url: "about:blank" });
@@ -277,28 +310,57 @@ async function main() {
     await cdp.send("Page.enable", {}, sessionId);
     await cdp.send("Runtime.enable", {}, sessionId);
 
-    for (const path of PAGES) {
+    async function visit(url) {
       const loaded = cdp.waitFor("Page.loadEventFired", sessionId);
-      await cdp.send("Page.navigate", { url: BASE + path }, sessionId);
+      await cdp.send("Page.navigate", { url }, sessionId);
       await loaded;
-      const evaluated = await cdp.send("Runtime.evaluate", {
-        expression: AUDIT,
-        returnByValue: true,
+      // The theme swap happens on boot, and the cascade only settles once the
+      // probe has been appended and committed. Half a second is generous for a
+      // local stylesheet and keeps the run honest.
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      return cdp.send("Runtime.evaluate", { expression: AUDIT, returnByValue: true }, sessionId);
+    }
+
+    /*
+     * Every page under every theme. The theme matters and is not redundant:
+     * two of the four vendored sheets ship a glow rule and two do not, and the
+     * stylesheet the client appends on a swap only exists once a theme has been
+     * chosen. A check on the default theme would have passed while amber glowed.
+     */
+    for (const theme of THEMES) {
+      /*
+       * Render every page in a *different* theme than the one stored, so the
+       * client-side swap actually runs on each load. That is not a contrivance:
+       * an operator who picked a theme gets plain URLs back from the server
+       * rendering the default, and the swap happens on every page they visit.
+       * Loading the theme that is already active makes the swap a no-op, so the
+       * vt220 pass - the one theme that ships a glow rule *and* is the server
+       * default - would silently test nothing. That gap is how this bug shipped.
+       */
+      const seed = theme === "vt220" ? "amber" : "vt220";
+      await visit(BASE + PAGES[0] + "?theme=" + seed);
+      await cdp.send("Runtime.evaluate", {
+        expression: "localStorage.setItem('faultlined.theme', " + JSON.stringify(theme) + ")",
       }, sessionId);
-      const result = evaluated.result.value;
-      if (!result) {
-        console.error("FAIL " + path + ": the page produced no result");
+
+      for (const path of PAGES) {
+        checks += 1;
+        const evaluated = await visit(BASE + path + "?theme=" + seed);
+        const result = evaluated.result.value;
+        if (!result) {
+          console.error("FAIL [" + theme + "] " + path + ": the page produced no result");
+          failures += 1;
+          continue;
+        }
+        if (result.findings.length === 0) {
+          console.log("ok   [" + theme + "] " + path);
+          continue;
+        }
         failures += 1;
-        continue;
-      }
-      if (result.findings.length === 0) {
-        console.log("ok   " + path);
-        continue;
-      }
-      failures += 1;
-      console.error("FAIL " + path);
-      for (const finding of result.findings) {
-        console.error("       " + finding.kind + ": " + finding.el + " -> " + finding.value);
+        console.error("FAIL [" + theme + "] " + path);
+        for (const finding of result.findings) {
+          console.error("       " + finding.kind + ": " + finding.el + " -> " + finding.value);
+        }
       }
     }
   } finally {
@@ -316,8 +378,8 @@ async function main() {
 
   console.log("");
   console.log(failures === 0
-    ? "UI audit clean across " + PAGES.length + " pages."
-    : "UI audit found problems on " + failures + " page(s).");
+    ? "UI audit clean: " + checks + " page loads across " + THEMES.length + " themes."
+    : "UI audit found problems in " + failures + " of " + checks + " loads.");
   process.exit(failures === 0 ? 0 : 1);
 }
 

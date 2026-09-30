@@ -45,7 +45,7 @@ Python 3.14, uv with a committed lock, just, Ruff, mypy, pytest with a 70% cover
 - **Curation**: named slices that recompute membership on read, a slice impact view attributing every drop, and a read-only failures view. Vocabulary shared in `data_engine/curation.py` ([telldown plan](implementation/telldown-plan.md)).
 - **Monitoring**: deterministic notifier, eleven rules, per-scope EWMA and median-MAD control limits over a versioned 26-feature vector, completion contracts, fingerprint dedup, cooldown, evidence and severity gates, hard alert budget. No model, no LLM call, no network in the detection path ([ADR 0020](decisions/0020-deterministic-monitoring-notifier.md), [plan](implementation/automated-monitoring-plan.md)).
 - **Chaos harness, first increment**: replay seams and labeled window scoring through the unmodified tick pipeline ([EXP-0006](experiments/0006-chaos-harness-first-increment.md)). No accuracy figure yet.
-- **Operator UI**: server-rendered, works with JavaScript disabled, visible failure policy in one client runtime, HTML error pages ([ADR 0014](decisions/0014-minimal-ui-server-rendered.md), [ADR 0021](decisions/0021-frontend-instrument-pass.md), [ADR 0024](decisions/0024-observability-visual-surface.md)). `/docs` and `/redoc` removed; `/openapi.json` kept for the drift gate. Charts are pure functions from data to markup, asserted on path coordinates and empty states rather than screenshots. No glow anywhere: no `text-shadow`, no `filter`, no `backdrop-filter`, and no navigation indicator.
+- **Operator UI**: server-rendered, works with JavaScript disabled, visible failure policy in one client runtime, HTML error pages ([ADR 0014](decisions/0014-minimal-ui-server-rendered.md), [ADR 0021](decisions/0021-frontend-instrument-pass.md), [ADR 0024](decisions/0024-observability-visual-surface.md)). `/docs` and `/redoc` removed; `/openapi.json` kept for the drift gate. Charts are pure functions from data to markup, asserted on path coordinates and empty states rather than screenshots. No glow anywhere: no `text-shadow`, no `filter`, no `backdrop-filter`, no navigation indicator, and exactly one theme stylesheet loaded before the layout sheet.
 - **Benchmarks**: schema v2, deterministic statistics, provenance capture, a CLI that refuses to publish from a failed run, and a `WORKLOADS` registry including the heavy-load workloads from [EXP-0007](experiments/0007-heavy-load-and-sink-tail-read.md).
 
 ### Not working
@@ -94,7 +94,7 @@ Done and closed: the baseline runbook (2026-09-28), clean-clone and secrets vali
 
 - Latest gates: format, lint, strict mypy over 64 modules, tests, hygiene and OpenAPI drift all pass. 903 passing, coverage above 92%.
 - Integration tests need `DE_DATABASE_URL` and skip cleanly without it; `just pg-up` plus the README DSN runs the whole suite with nothing skipped.
-- Visual defects are checked in a real browser by `just ui-audit` (Node 22+ and Chrome, against a running `just run`). It is deliberately not part of `just ci`: it needs a browser and a live server. Text assertions against the stylesheet cannot see a rule that only applies mid-navigation, which is how a full-page blur passed review twice.
+- Visual defects are checked in a real browser by `just ui-audit` (Node 22+ and Chrome, against a running `just run`). It loads all eleven pages under all four themes, 44 loads, each rendered in a different theme than the one stored so the client-side theme swap actually runs. It is deliberately not part of `just ci`: it needs a browser and a live server. Text assertions against the stylesheet cannot see a rule that only applies mid-navigation, nor a cascade that depends on what a script appended at runtime; both shipped.
 - A Starlette/httpx `TestClient` deprecation warning is non-blocking and deferred.
 - Repeat every gate after any change.
 
@@ -161,6 +161,7 @@ One line each. Detail in the linked record.
 | 2026-09-30 | Adversarial API probing: correlation-id sanitizing, page-limit clamping (F17, F18) | [failure modes](testing/failure-modes.md) |
 | 2026-09-30 | `just stop` added after a stale server on port 8000 made `just run` look broken; port preflight now reads `DE_API_PORT` (F19) | [scripts](../scripts) |
 | 2026-09-30 | Page-transition blur and navigation indicator removed, nav made opaque; `just ui-audit` measures computed styles in headless Chrome over all eleven pages | [ADR 0021](decisions/0021-frontend-instrument-pass.md) |
+| 2026-09-30 | Theme swap no longer leaves a duplicate stylesheet that re-enabled the vendor glow (F20); the audit now runs every page under every theme | [failure modes](testing/failure-modes.md) |
 
 ### Lessons worth keeping
 
