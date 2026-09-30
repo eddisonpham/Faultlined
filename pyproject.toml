@@ -17,6 +17,9 @@ dependencies = [
 [project.optional-dependencies]
 # GPU telemetry only (nvidia-ml-py); everything else works without it (ADR 0008).
 gpu = ["nvidia-ml-py>=13"]
+# Stage 2.5 clustering experiments only. Nothing in the engine imports numpy, so it is
+# deliberately not a runtime dependency: the engine must stay installable without it.
+experiments = ["numpy>=2"]
 
 [project.scripts]
 de = "data_engine.cli:main"

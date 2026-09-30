@@ -26,9 +26,13 @@ lint:
     uv run --all-extras ruff check .
     uv run --all-extras ruff format --check .
 
-# Strict type-check of all package modules
+# Strict type-check of all package modules.
+# `experiments` is checked separately: it is not an installed distribution, so
+# the `packages` setting in pyproject cannot reach it, but stage 2.5 code is held
+# to the same standard as the engine.
 typecheck:
     uv run --all-extras mypy
+    uv run --all-extras mypy experiments
 
 # Fast tests + coverage gate (unit/integration/contract/e2e; excludes slow+gpu)
 test:
@@ -45,6 +49,11 @@ t *ARGS:
 # Run benchmarks and compare against committed baselines (phase 06)
 bench *ARGS:
     uv run --all-extras python -m benchmarks.harness {{ARGS}}
+
+# Stage 2.5 task-string clustering experiments.
+# Subcommands: gold | centroids | views | factorial | audit | heldout | all
+cluster *ARGS:
+    uv run --all-extras python -m experiments.clustering.runner {{ARGS}}
 
 # Run the platform locally (API + worker in one process group)
 # Checks the port first: a second `just run` (or a forgotten background server)

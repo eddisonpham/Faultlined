@@ -1,0 +1,105 @@
+{
+  "ambiguous_pairs": [
+    {
+      "a": "pick up the red cube",
+      "b": "lift the red cube",
+      "note": "'pick up' and 'lift' are usually synonyms in manipulation, but they are different primitives in some robot stacks."
+    },
+    {
+      "a": "place the bowl",
+      "b": "put down the bowl",
+      "note": "'place' implies a target; 'put down' does not require one."
+    },
+    {
+      "a": "push the button",
+      "b": "press the button",
+      "note": "Often the same primitive, sometimes distinct (force vs. position control)."
+    },
+    {
+      "a": "turn the knob clockwise",
+      "b": "rotate the knob clockwise",
+      "note": "'turn' and 'rotate' are near-synonyms; the question is whether the engine treats them as one skill."
+    },
+    {
+      "a": "move the cup to the sink",
+      "b": "carry the cup to the sink",
+      "note": "'carry' implies the object is grasped; 'move' does not."
+    },
+    {
+      "a": "lift the lid",
+      "b": "raise the lid",
+      "note": "Largely synonymous, but not identical in every robot stack."
+    },
+    {
+      "a": "wipe the lens",
+      "b": "clean the lens",
+      "note": "Same physical outcome, possibly a different motion primitive."
+    },
+    {
+      "a": "hand over the pen",
+      "b": "give the pen",
+      "note": "Socially the same act; robotically they may need different grasps."
+    },
+    {
+      "a": "collect the samples",
+      "b": "gather the samples",
+      "note": "Synonyms, with no strong reason to separate them."
+    },
+    {
+      "a": "pick up the red cube",
+      "b": "pick up the red block",
+      "note": "A 'block' and a 'cube' are often the same object under two names."
+    },
+    {
+      "a": "pick up the bottle",
+      "b": "pick up the flask",
+      "note": "Usually the same object class, occasionally not."
+    },
+    {
+      "a": "wipe the table",
+      "b": "wipe the workbench",
+      "note": "Different furniture in most homes, the same surface in a lab."
+    },
+    {
+      "a": "push the cart",
+      "b": "push the cart to the left",
+      "note": "The second adds a direction. Same skill with a constraint, or a different task entirely."
+    },
+    {
+      "a": "pick up the red cube",
+      "b": "pick up the red cube and place it on the plate",
+      "note": "The second is a compound task, not a rephrasing of the first."
+    },
+    {
+      "a": "press the pedal",
+      "b": "step on the pedal",
+      "note": "Same effect, and possibly the same primitive under a different name."
+    },
+    {
+      "a": "sweep the crumbs into the bin",
+      "b": "push the crumbs into the bin",
+      "note": "'Sweep' implies a tool; 'push' implies a hand. Different motions, same outcome."
+    },
+    {
+      "a": "wipe the table with a cloth",
+      "b": "wipe the table",
+      "note": "The first adds the tool. A qualifier rather than a different task, but a filtering engine would treat them as different strings."
+    }
+  ],
+  "experiment": "gold",
+  "split": {
+    "clean": true,
+    "components": 28,
+    "dev_pairs": 26,
+    "heldout_pairs": 24,
+    "largest_component_pairs": 8,
+    "shared_components": 0
+  },
+  "summary": {
+    "action_decided": 37,
+    "ambiguous": 17,
+    "distinct_strings": 78,
+    "object_decided": 46,
+    "pairs": 50
+  }
+}
