@@ -25,6 +25,69 @@ NFR-004 is asserted by 13 tests, each pinning a way the hash can change without 
 **the first real-format benchmark baseline is committed** ([EXP-0004](experiments/0004-mcap-ingest-baseline.md),
 `benchmarks/baselines/mcap-ingest-windows.json`).
 
+
+**Update 2026-09-30 (stage 3: honest metrics, and a visual layer).** Two things happened, and the
+first one is the reason the second exists. An adversarial probe of the episode quality metrics
+([review](reviews/2026-09-30-metrics-and-visualization-assessment.md)) found **five defects**, all now
+fixed and pinned by 26 edge-case tests ([ADR 0023](decisions/0023-quality-metrics-honesty.md), which
+amends 0018 rather than editing it):
+
+- **One `NaN` from one encoder poisoned every dataset-level statistic.** A mean over a population
+  containing one non-finite value returns non-finite for the *whole dataset* — the mean movement
+  score, the monitoring baseline, every control limit derived from it. Non-finite input now stops
+  the analysis and reports the count, which is the only outcome that leaves the rest of the
+  product's arithmetic true.
+- **`sqrt(sum(d*d))` raised `OverflowError` above ~1e154** and failed a whole ingest over a detail of
+  the formula rather than of the data. `math.hypot` is specified not to overflow.
+- **One noisy joint out of eighteen condemned a clean episode**, with nothing in the API naming it.
+  The verdict is now the *median* judged dimension; the worst band is still published as `worst_dim`.
+- **`analyze()` had no concept of time.** A robot frozen for five minutes scored identically to one
+  moving continuously. It now takes timestamps and reports `integrity`, `max_gap_seconds` and
+  `gap_ratio` — the only signals in the product that distinguish "the robot was still" from "the
+  recorder stopped". All three readers supply a clock.
+- **Ragged synthetic rows** were accepted at the boundary and failed three layers down as a
+  retryable `INTERNAL_ERROR`, burning three attempts on input that could never succeed.
+
+**Then the end-to-end run immediately falsified the fix.** Re-running the 86-assertion driver from an
+empty catalog, the new temporal signal published the 20-minute MCAP log as `integrity=gapped` with a
+**501-second maximum gap**. The log is a clean 50 Hz stream; measured directly, its largest real
+interval is 20 ms. The clock buffer was being halved with `[::2]` in lockstep with the value windows,
+which is right for values (their statistics ignore order and spacing) and wrong for a clock: sample 0
+survives every halving, so the buffer degenerated into one ancient timestamp followed by dense recent
+ones and the gap detector read the distance between them as a dropout. The clock now trims its oldest
+half, and the reader additionally tracks the exact whole-log maximum in constant memory, because a
+bounded window cannot see a freeze that happened before it filled. Both regression tests were
+confirmed to **fail** against the stride-halving version. No unit test caught this, because every
+unit test used a series shorter than the window.
+
+**The visual layer** ([ADR 0024](decisions/0024-observability-visual-surface.md)) is built from that,
+and the review's most important finding drove its first step. `/ui/insights` was plotting
+`movement_score` — an L2 norm in the source's own units — so the driving fixture read `1.0e8` beside
+arm joints at `0.02` and four of five episodes collapsed onto the floor of a linear axis. **The chart
+was not misdrawn; it was showing nothing.** It now plots `jerk_score`, the same motion divided by each
+dimension's range, which `analyze` was already computing per dimension and which is therefore already
+dimensionless: the same five episodes land in a 4x band instead of a 4-billion-x one. The raw score
+stays in the table beside it, labelled with its unit. Four things then followed from eleven metric
+series that had been collected since scaffolding and displayed as five unlabelled squiggles:
+
+- **`/ui/metrics`** — real axes, units, the peak's clock time and event count, and a drilldown link.
+- **`/ui/schema`** — the catalog read **live** by introspection, with the entity graph built from the
+  real foreign keys, live row counts, and the path data takes through the system. A hand-drawn schema
+  is a snapshot that goes stale; this cannot, because it is the database asking about itself.
+- **`/ui/builds`** and `/ui/builds/{hash}` — lineage as the DAG it is, which until now existed only as
+  JSON an operator had to read.
+- **Recording reliability** rolled up on Insights: nothing in the pipeline counted how many of your
+  recordings dropped frames.
+
+Charts are a module of pure functions from data to markup, which is what makes them testable: **37
+tests assert path coordinates, tick labels and empty states instead of screenshots.** The scale picks
+log10 on its own above two decades, a recording gap breaks the trace rather than drawing motion across
+a dropout, and an unreachable catalog renders an explicit state rather than a 500. No new dependency,
+no CDN, no bundler, no build step. Writing the `referenced_by` test caught an inversion in the first
+cut — the page claimed `episodes` was referenced by `episode_quality` when the constraint says the
+opposite. Suite is at **777 passing, 91.96% coverage**, mypy strict clean over 62 modules, and the
+end-to-end driver is at **109/109 assertions from an empty catalog**.
+
 Three findings from this pass are worth more than the features, because each is a measurement that
 corrected something we believed:
 

@@ -166,8 +166,33 @@ no CDN and no third-party JavaScript, per ADR 0014.
 | 4 | major | No temporal signal: a frozen robot scored like a moving one | `integrity`, `max_gap_seconds`, `gap_ratio` (§5) | fixed |
 | 5 | major | Ragged synthetic rows failed as retryable `INTERNAL_ERROR` | rejected at the contract boundary (§6) | fixed |
 | 6 | blocker | Clock decimation invented a 501 s gap in a clean log | trim oldest half + exact whole-log max (§7, §8) | fixed |
-| 7 | major | `movement_score` is not comparable across datasets; the curation chart is meaningless | scale-free score | **open — next stage, step 1** |
-| 8 | major | Eleven metric series rendered as unlabelled squiggles | dashboard | **open — next stage, step 2** |
-| 9 | minor | No schema or data-flow view of 14 tables | introspection page | **open — next stage, step 3** |
-| 10 | minor | Lineage exists as a table, not a graph | DAG | **open — next stage, step 4** |
-| 11 | minor | Per-episode integrity is never rolled up | reliability aggregate | **open — next stage** |
+| 7 | major | `movement_score` is not comparable across datasets; the curation chart is meaningless | plot the dimensionless `jerk_score` | **fixed** |
+| 8 | major | Eleven metric series rendered as unlabelled squiggles | plots with axes, units, peak and drilldown | **fixed** |
+| 9 | minor | No schema or data-flow view of 14 tables | `/ui/schema`, introspected live | **fixed** |
+| 10 | minor | Lineage existed only as JSON | `/ui/builds` + a lineage DAG | **fixed** |
+| 11 | minor | Per-episode integrity was never rolled up | reliability aggregate on Insights | **fixed** |
+| 12 | major | The clock's stride-halving manufactured a 501 s gap in a clean log | trim the oldest half + exact whole-log max | **fixed** |
+| 13 | minor | `referenced_by` attached to the wrong side of each foreign key | attach to the referenced table | **fixed** |
+
+## 8. What the next stage actually delivered
+
+Findings 7–13 are closed. The order was not arbitrary: **the metric was fixed before it was
+charted**, because charting `movement_score` first would have shipped a broken chart with a
+confident appearance.
+
+The scale-free score turned out not to need a new column. `analyze` was already computing
+`mean_abs_delta_norm` — mean absolute delta divided by the dimension's own range — for every
+dimension, and `jerk_score` is its mean over the active ones. It was already dimensionless and
+already comparable; it was simply not the thing the chart was plotting. The reference run's five
+episodes, before and after:
+
+```
+movement_score : 100015978.5,  3.54,  2.31,  0.161,  0.022    (4.5 billion-x spread)
+jerk_score     :          0.0185,  0.0116,  0.0079,  0.0042     (4.4x spread)
+```
+
+**777 tests, 91.96% coverage, mypy strict clean over 62 modules, and 109/109 end-to-end
+assertions from an empty catalog** across all three readers, both build policies, and the new
+visual pages. Two defects in this stage (12 and 13) were found by the work of this stage itself: one
+by re-running the end-to-end driver, one by writing the test for a column nobody had looked at
+closely. Both are now pinned.
