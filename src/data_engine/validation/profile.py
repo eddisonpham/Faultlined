@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from data_engine.canonical import canonical_json
@@ -45,6 +45,12 @@ class ValidationProfile:
     """None means every registered rule runs; a set restricts it."""
 
     content_hash: str = field(default="", compare=False)
+    """The profile's content address, set by `profile_from_dict`.
+
+    Populated rather than left blank because a blank address is the failure mode
+    this field exists to prevent: a build manifest that cites a policy by
+    `hash: ""` looks like it pinned the policy and pinned nothing.
+    """
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -62,6 +68,7 @@ class ValidationProfile:
             "enabled_rules": (
                 sorted(self.enabled_rules) if self.enabled_rules is not None else None
             ),
+            "hash": self.content_hash,
         }
 
 
@@ -135,7 +142,7 @@ def profile_from_dict(document: dict[str, Any]) -> ValidationProfile:
         enabled_rules=None if enabled is None else frozenset(enabled),
     )
     _check_bounds(profile)
-    return profile
+    return replace(profile, content_hash=profile_hash(profile))
 
 
 def _check_bounds(profile: ValidationProfile) -> None:
@@ -157,8 +164,14 @@ def profile_from_json(raw: str) -> ValidationProfile:
 
 
 def profile_hash(profile: ValidationProfile) -> str:
-    """Content address: sha256 over the profile's canonical JSON."""
-    return hashlib.sha256(canonical_json(profile.to_dict())).hexdigest()
+    """Content address: sha256 over the profile's canonical JSON.
+
+    `hash` is excluded from the hashed body, or the address would be a function of
+    itself. The value is stable either way for a given policy, which is the only
+    property anything depends on - but a self-referential hash cannot be checked.
+    """
+    document = {key: value for key, value in profile.to_dict().items() if key != "hash"}
+    return hashlib.sha256(canonical_json(document)).hexdigest()
 
 
 __all__ = [

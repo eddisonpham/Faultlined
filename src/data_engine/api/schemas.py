@@ -192,6 +192,18 @@ class EpisodeSummary(BaseModel):
     state: str
     created_at: Any
     frame_count: int | None = None
+    """The episode's own length, as the reader declared it."""
+
+    analysed_frames: int | None = None
+    """How many frames the quality verdict was actually computed over.
+
+    Equal to `frame_count` for a reader that holds the whole episode, and much
+    smaller for a streaming one. The two were the same column until a bag read
+    1024 frames of 72 600 and the catalog reported the episode as 816 frames long,
+    so both numbers are published rather than one silently standing in for the
+    other.
+    """
+
     movement_score: float | None = None
     jerk_score: float | None = None
     stall_ratio: float | None = None
@@ -442,6 +454,18 @@ class FailingEpisodeRow(BaseModel):
     state: str
     created_at: Any
     frame_count: int | None = None
+    """The episode's own length, as the reader declared it."""
+
+    analysed_frames: int | None = None
+    """How many frames the quality verdict was actually computed over.
+
+    Equal to `frame_count` for a reader that holds the whole episode, and much
+    smaller for a streaming one. The two were the same column until a bag read
+    1024 frames of 72 600 and the catalog reported the episode as 816 frames long,
+    so both numbers are published rather than one silently standing in for the
+    other.
+    """
+
     movement_score: float | None = None
     jerk_score: float | None = None
     stall_ratio: float | None = None

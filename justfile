@@ -74,6 +74,12 @@ doctor:
 gc:
     uv run --all-extras de gc
 
+# Empty the development catalog, its artifact blobs, and the metrics log.
+# Refuses a *_test database and refuses to run without --yes: the recipe takes an
+# argument so the confirmation is deliberate rather than a habit.
+reset *ARGS:
+    uv run --all-extras python scripts/reset_data.py {{ARGS}}
+
 # Repository hygiene (structure, links, ADRs, secret patterns)
 hygiene:
     python scripts/check_repo_hygiene.py

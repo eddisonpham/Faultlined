@@ -16,7 +16,12 @@ from psycopg.types.json import Jsonb
 from data_engine.canonical import canonical_json as _canonical_json
 from data_engine.catalog.database import connect
 from data_engine.config import Settings
-from data_engine.curation import EPISODE_FLAGS, EPISODE_STATES, episode_predicates
+from data_engine.curation import (
+    EPISODE_FLAGS,
+    EPISODE_FRAMES_SQL,
+    EPISODE_STATES,
+    episode_predicates,
+)
 from data_engine.jobs.state import (
     ACTIVE_STATES,
     ALLOWED_TRANSITIONS,
@@ -73,13 +78,20 @@ def _zscore(value: float, stats: dict[str, Any] | None) -> float:
 
 
 def _assemble_quality_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
-    """Fold per-episode quality rows into distributions and outlier lists."""
-    lengths = [int(row["frame_count"]) for row in rows]
+    """Fold per-episode quality rows into distributions and outlier lists.
+
+    The length distribution uses each episode's *declared* length, not the number
+    of frames its quality analysis happened to see. An episode with no declared
+    length contributes to no length statistic rather than being counted as zero -
+    it is missing a measurement, not short.
+    """
+    measured = [row for row in rows if row.get("frame_count") is not None]
+    lengths = [int(row["frame_count"]) for row in measured]
     zscores = {
         str(row["episode_id"]): _zscore(
             row["frame_count"], {"mean": _mean(lengths), "std": _std(lengths)}
         )
-        for row in rows
+        for row in measured
     }
 
     dim_names = sorted({dim["name"] for row in rows for dim in row.get("dims") or []})
@@ -140,7 +152,7 @@ def _assemble_quality_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
                         "value": zscores[str(row["episode_id"])],
                         "verdict": row["verdict"],
                     }
-                    for row in rows
+                    for row in measured
                 ],
                 key=lambda item: abs(item["value"]),
                 reverse=True,
@@ -649,7 +661,10 @@ class PostgresCatalog:
             if job is None:
                 return None
             episodes = connection.execute(
-                """SELECT e.id, e.state, q.frame_count, q.movement_score,
+                """SELECT e.id, e.state,
+                          (e.metadata->>'frame_count')::bigint AS frame_count,
+                          q.frame_count AS analysed_frames,
+                          q.movement_score,
                           q.jerk_score, q.stall_ratio, q.verdict
                    FROM lineage_edges l
                    JOIN episodes e ON e.id = l.from_ref
@@ -755,7 +770,8 @@ class PostgresCatalog:
         """
         with connect(self.settings) as connection:
             rows = connection.execute(
-                """SELECT b.hash, b.name, b.episode_count, b.created_at
+                """SELECT b.hash, b.name, b.episode_count, b.profile_hash,
+                          b.code_commit, b.job_id, b.created_at
                    FROM build_episodes be
                    JOIN builds b ON b.hash = be.build_hash
                    WHERE be.episode_id = %s
@@ -821,14 +837,21 @@ class PostgresCatalog:
         """
         with connect(self.settings) as connection:
             row = connection.execute(
-                """SELECT episode_id, frame_count, movement_score, jerk_score,
-                          stall_ratio, verdict, dims, computed_at
-                   FROM episode_quality WHERE episode_id = %s""",
+                """SELECT q.episode_id, q.frame_count AS analysed_frames,
+                          q.movement_score, q.jerk_score,
+                          q.stall_ratio, q.verdict, q.dims, q.computed_at,
+                          (e.metadata->>'frame_count')::bigint AS frame_count
+                   FROM episode_quality q JOIN episodes e ON e.id = q.episode_id
+                   WHERE q.episode_id = %s""",
                 (episode_id,),
             ).fetchone()
+            # The z-score asks "how long is this episode relative to the others",
+            # so both sides are episode lengths. Scoring against analysed-sample
+            # counts would compare a sample against the population.
             stats = connection.execute(
-                """SELECT avg(frame_count) AS mean, stddev_samp(frame_count) AS std
-                   FROM episode_quality"""
+                """SELECT avg((metadata->>'frame_count')::bigint) AS mean,
+                          stddev_samp((metadata->>'frame_count')::bigint) AS std
+                   FROM episodes WHERE metadata ? 'frame_count'"""
             ).fetchone()
         if row is None:
             return None
@@ -840,7 +863,10 @@ class PostgresCatalog:
         """Dataset-level quality view for the insights page and curation triage."""
         with connect(self.settings) as connection:
             rows = connection.execute(
-                """SELECT q.episode_id, e.episode_key, q.frame_count, q.movement_score,
+                """SELECT q.episode_id, e.episode_key,
+                          (e.metadata->>'frame_count')::bigint AS frame_count,
+                          q.frame_count AS analysed_frames,
+                          q.movement_score,
                           q.jerk_score, q.stall_ratio, q.verdict, q.dims
                    FROM episode_quality q JOIN episodes e ON e.id = q.episode_id
                    ORDER BY q.movement_score DESC"""
@@ -858,11 +884,14 @@ class PostgresCatalog:
         """
         where, params, order = episode_predicates(state, flag, prefix="e.")
         clause = " WHERE " + " AND ".join(where) if where else ""
+        frames = EPISODE_FRAMES_SQL.format(prefix="e.")
         with connect(self.settings) as connection:
             rows = connection.execute(
                 f"""SELECT e.id, e.episode_key, e.source_hash, e.artifact_hash,
                            e.format, e.state, e.created_at,
-                           q.frame_count, q.movement_score, q.jerk_score,
+                           {frames} AS frame_count,
+                           q.frame_count AS analysed_frames,
+                           q.movement_score, q.jerk_score,
                            q.stall_ratio, q.verdict
                     FROM episodes e LEFT JOIN episode_quality q ON q.episode_id = e.id
                     {clause} ORDER BY {order} LIMIT %s""",
@@ -1253,10 +1282,12 @@ class PostgresCatalog:
                 "SELECT verdict, count(*) AS total FROM episode_quality GROUP BY verdict"
             ).fetchall()
             quality = connection.execute(
-                """SELECT avg(movement_score) AS movement, avg(jerk_score) AS jerk,
-                          avg(stall_ratio) AS stall,
-                          percentile_cont(0.5) WITHIN GROUP (ORDER BY frame_count) AS frames
-                   FROM episode_quality"""
+                """SELECT avg(q.movement_score) AS movement, avg(q.jerk_score) AS jerk,
+                          avg(q.stall_ratio) AS stall,
+                          percentile_cont(0.5) WITHIN GROUP (
+                              ORDER BY (e.metadata->>'frame_count')::bigint) AS frames
+                   FROM episode_quality q JOIN episodes e ON e.id = q.episode_id
+                   WHERE e.metadata ? 'frame_count'"""
             ).fetchone()
             recent = connection.execute(
                 """SELECT id, source_hash, metadata FROM episodes

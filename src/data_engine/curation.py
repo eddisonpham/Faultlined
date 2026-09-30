@@ -18,6 +18,16 @@ REASON_CODES: frozenset[str] = frozenset(
     {"TOO_FEW_FRAMES", "VALIDATION_FAILED", "MISSING_CHANNELS", "TOO_SHORT", "TOO_LONG"}
 )
 
+#: SQL for **the episode's own length**, from the metadata the reader produced.
+#:
+#: Not `episode_quality.frame_count`. That column is how many frames the quality
+#: analysis actually saw, which for a streaming reader is a bounded, decimated
+#: sample: a 72 600-message MCAP log is analysed over 1024 frames, so reading its
+#: "length" from the quality table under-reports it by ~70x. The two numbers are
+#: equal by coincidence for a non-streaming reader, which is exactly why the
+#: coincidence survived until a streaming format existed.
+EPISODE_FRAMES_SQL = "({prefix}metadata->>'frame_count')::bigint"
+
 
 def episode_predicates(
     state: str | None, flag: str | None, *, prefix: str = ""
@@ -43,7 +53,7 @@ def episode_predicates(
         where.append("q.stall_ratio >= 0.5")
         order = "q.stall_ratio DESC"
     elif flag == "short":
-        order = "COALESCE(q.frame_count, 0) ASC"
+        order = f"COALESCE({EPISODE_FRAMES_SQL.format(prefix=prefix)}, 0) ASC"
     elif flag == "long":
-        order = "COALESCE(q.frame_count, 0) DESC"
+        order = f"COALESCE({EPISODE_FRAMES_SQL.format(prefix=prefix)}, 0) DESC"
     return where, params, order

@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from data_engine.builds import BuildError, DatasetBuilder
-from data_engine.catalog.repository import PostgresCatalog
+from data_engine.catalog.repository import IdempotencyConflict, PostgresCatalog
 from data_engine.config import Settings
 from data_engine.ingest.readers.base import ReaderError
 from data_engine.ingest.service import EpisodeIngestService
@@ -40,10 +40,15 @@ class _JobTimedOut(Exception):
 #: payload the handler cannot parse, a job type nobody handles, or a source the reader
 #: rejects will fail identically on every attempt, so burning the retry budget only
 #: delays the operator's signal and inflates the failure metrics with noise.
+#: `IdempotencyConflict` belongs here for the same reason and was missing: a profile
+#: name/version that already resolves to different content is a property of the
+#: payload, so all three attempts failed identically while `jobs_failures_total`
+#: counted three failures for one operator mistake.
 _TERMINAL_FAILURES: tuple[type[Exception], ...] = (
     ReaderError,
     InvalidJobPayload,
     UnsupportedJobType,
+    IdempotencyConflict,
 )
 
 
@@ -119,13 +124,22 @@ class IngestWorker:
             return self._build(payload, job_id=str(job["id"]))
         raise UnsupportedJobType(f"unsupported job type: {job_type}")
 
-    def _selection(self, payload: dict[str, Any], *, field: str) -> list[str]:
-        """The episodes a job names, or every ingested episode if it names none.
+    def _selection(
+        self, payload: dict[str, Any], *, field: str, state: str | None = None
+    ) -> list[str]:
+        """The episodes a job names, or every episode in `state` if it names none.
 
         One rule for validate and build, so "empty means everything" cannot mean
-        two different things in two handlers. A singular `episode_id` is also
-        accepted: it is what the single-episode validate contract has always
-        used, and rejecting it would break every existing caller to no end.
+        two different things in two handlers - but *whose* everything is not the
+        same for the two, and this is where that difference lives. A build defaults
+        to the episodes that passed validation, because `BuildPayload` promises a
+        failing episode is excluded rather than silently included, and that promise
+        is only kept if the default selection filters on state. Validate passes
+        `state=None` and sees everything, which is the point of validating.
+
+        A singular `episode_id` is also accepted: it is what the single-episode
+        validate contract has always used, and rejecting it would break every
+        existing caller to no end.
         """
         singular = payload.get("episode_id")
         if isinstance(singular, str) and singular:
@@ -137,7 +151,7 @@ class IngestWorker:
             raise InvalidJobPayload(f"payload.{field} must be a list of episode ids")
         if raw:
             return [str(item) for item in raw]
-        return [str(row["id"]) for row in self.catalog.list_episodes(limit=10_000)]
+        return [str(row["id"]) for row in self.catalog.list_episodes(limit=10_000, state=state)]
 
     def _validate(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Record validation results for episodes already in the catalog (FR-002).
@@ -186,7 +200,7 @@ class IngestWorker:
         if not isinstance(name, str) or not name.strip():
             raise InvalidJobPayload("payload.name must be a non-empty build name")
 
-        selected = self._selection(payload, field="episode_ids")
+        selected = self._selection(payload, field="episode_ids", state="valid")
         episodes = self.catalog.get_episodes(selected)
         found = {str(row["id"]) for row in episodes}
         missing = [episode_id for episode_id in selected if episode_id not in found]

@@ -511,6 +511,7 @@ def create_app(
             "robot": (raw.get("robot") or [""])[0].strip(),
             "frames": (raw.get("frames") or [""])[0].strip(),
             "source": source,
+            "episode_key": (raw.get("episode_key") or [""])[0].strip(),
         }
         theme = theme_or_default((raw.get("theme") or [""])[0] or None)
 
@@ -526,7 +527,10 @@ def create_app(
                 if not source:
                     return fail("A dataset path is required when loading from disk.")
                 body = SubmitSourceJobRequest(
-                    type="ingest_source", payload=SourceIngestPayload(source=source)
+                    type="ingest_source",
+                    payload=SourceIngestPayload(
+                        source=source, episode_key=values["episode_key"] or None
+                    ),
                 )
             else:
                 if not values["task"] or not values["robot"]:

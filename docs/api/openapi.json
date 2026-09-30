@@ -570,6 +570,17 @@
       "EpisodeSummary": {
         "description": "Row in the episodes catalog; quality columns are null pre-analysis.",
         "properties": {
+          "analysed_frames": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Analysed Frames"
+          },
           "artifact_hash": {
             "anyOf": [
               {
@@ -701,6 +712,17 @@
       "FailingEpisodeRow": {
         "description": "One quarantined episode with its current failed validation result.",
         "properties": {
+          "analysed_frames": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Analysed Frames"
+          },
           "artifact_hash": {
             "anyOf": [
               {

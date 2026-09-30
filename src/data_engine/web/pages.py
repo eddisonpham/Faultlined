@@ -527,6 +527,14 @@ def _ingest_form(
             '<div class="de-field-row">'
             + field("source", "dataset path (optional)", "data/lerobot/my_dataset", wide=True)
             + "</div>"
+            '<div class="de-field-row">'
+            + field(
+                "episode_key",
+                "which episode (optional)",
+                "episode_index=7",
+                wide=True,
+            )
+            + "</div>"
             '<button type="submit" class="de-submit">queue ingest job</button>'
             '<p class="de-sub-note">The worker picks it up within a second. '
             "This is a no-op-safe form: submitting twice creates two jobs.</p>"
