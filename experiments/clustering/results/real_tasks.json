@@ -1,0 +1,555 @@
+{
+  "note": "task sentences harvested from the Hugging Face Hub; regenerate with `just cluster scale --refresh-real`",
+  "rows": [
+    [
+      "lerobot/pusht",
+      "Push the T-shaped block onto the T-shaped target."
+    ],
+    [
+      "lerobot/pusht_image",
+      "Push the T-shaped block onto the T-shaped target."
+    ],
+    [
+      "lerobot/aloha_sim_insertion_human",
+      "Insert the peg into the socket."
+    ],
+    [
+      "lerobot/aloha_sim_transfer_cube_human",
+      "Pick up the cube with the right arm and transfer it to the left arm."
+    ],
+    [
+      "lerobot/xarm_lift_medium",
+      "Pick up the cube and lift it."
+    ],
+    [
+      "lerobot/xarm_push_medium",
+      "Push the cube onto the target."
+    ],
+    [
+      "lerobot/libero",
+      "put the white mug on the left plate and put the yellow and white mug on the right plate"
+    ],
+    [
+      "lerobot/libero",
+      "put the white mug on the plate and put the chocolate pudding to the right of the plate"
+    ],
+    [
+      "lerobot/libero",
+      "put the yellow and white mug in the microwave and close it"
+    ],
+    [
+      "lerobot/libero",
+      "turn on the stove and put the moka pot on it"
+    ],
+    [
+      "lerobot/libero",
+      "put both the alphabet soup and the cream cheese box in the basket"
+    ],
+    [
+      "lerobot/libero",
+      "put both the alphabet soup and the tomato sauce in the basket"
+    ],
+    [
+      "lerobot/libero",
+      "put both moka pots on the stove"
+    ],
+    [
+      "lerobot/libero",
+      "put both the cream cheese box and the butter in the basket"
+    ],
+    [
+      "lerobot/libero",
+      "put the black bowl in the bottom drawer of the cabinet and close it"
+    ],
+    [
+      "lerobot/libero",
+      "pick up the book and place it in the back compartment of the caddy"
+    ],
+    [
+      "lerobot/libero",
+      "put the bowl on the plate"
+    ],
+    [
+      "lerobot/libero",
+      "put the wine bottle on the rack"
+    ],
+    [
+      "lerobot/libero",
+      "open the top drawer and put the bowl inside"
+    ],
+    [
+      "lerobot/libero",
+      "put the cream cheese in the bowl"
+    ],
+    [
+      "lerobot/libero",
+      "put the wine bottle on top of the cabinet"
+    ],
+    [
+      "lerobot/libero",
+      "push the plate to the front of the stove"
+    ],
+    [
+      "lerobot/libero",
+      "turn on the stove"
+    ],
+    [
+      "lerobot/libero",
+      "put the bowl on the stove"
+    ],
+    [
+      "lerobot/libero",
+      "put the bowl on top of the cabinet"
+    ],
+    [
+      "lerobot/libero",
+      "open the middle drawer of the cabinet"
+    ],
+    [
+      "lerobot/libero",
+      "pick up the orange juice and place it in the basket"
+    ],
+    [
+      "lerobot/libero",
+      "pick up the ketchup and place it in the basket"
+    ],
+    [
+      "lerobot/libero",
+      "pick up the cream cheese and place it in the basket"
+    ],
+    [
+      "lerobot/libero",
+      "pick up the bbq sauce and place it in the basket"
+    ],
+    [
+      "lerobot/libero",
+      "pick up the alphabet soup and place it in the basket"
+    ],
+    [
+      "lerobot/libero",
+      "pick up the milk and place it in the basket"
+    ],
+    [
+      "lerobot/libero",
+      "pick up the salad dressing and place it in the basket"
+    ],
+    [
+      "lerobot/libero",
+      "pick up the butter and place it in the basket"
+    ],
+    [
+      "lerobot/libero",
+      "pick up the tomato sauce and place it in the basket"
+    ],
+    [
+      "lerobot/libero",
+      "pick up the chocolate pudding and place it in the basket"
+    ],
+    [
+      "lerobot/libero",
+      "pick up the black bowl next to the cookie box and place it on the plate"
+    ],
+    [
+      "lerobot/libero",
+      "pick up the black bowl in the top drawer of the wooden cabinet and place it on the plate"
+    ],
+    [
+      "lerobot/libero",
+      "pick up the black bowl on the ramekin and place it on the plate"
+    ],
+    [
+      "lerobot/libero",
+      "pick up the black bowl on the stove and place it on the plate"
+    ],
+    [
+      "lerobot/libero",
+      "pick up the black bowl between the plate and the ramekin and place it on the plate"
+    ],
+    [
+      "lerobot/libero",
+      "pick up the black bowl on the cookie box and place it on the plate"
+    ],
+    [
+      "lerobot/libero",
+      "pick up the black bowl next to the plate and place it on the plate"
+    ],
+    [
+      "lerobot/libero",
+      "pick up the black bowl next to the ramekin and place it on the plate"
+    ],
+    [
+      "lerobot/libero",
+      "pick up the black bowl from table center and place it on the plate"
+    ],
+    [
+      "lerobot/libero",
+      "pick up the black bowl on the wooden cabinet and place it on the plate"
+    ],
+    [
+      "lerobot/libero_10",
+      "put the white mug on the left plate and put the yellow and white mug on the right plate"
+    ],
+    [
+      "lerobot/libero_10",
+      "put the white mug on the plate and put the chocolate pudding to the right of the plate"
+    ],
+    [
+      "lerobot/libero_10",
+      "put the yellow and white mug in the microwave and close it"
+    ],
+    [
+      "lerobot/libero_10",
+      "turn on the stove and put the moka pot on it"
+    ],
+    [
+      "lerobot/libero_10",
+      "put both the alphabet soup and the cream cheese box in the basket"
+    ],
+    [
+      "lerobot/libero_10",
+      "put both the alphabet soup and the tomato sauce in the basket"
+    ],
+    [
+      "lerobot/libero_10",
+      "put both moka pots on the stove"
+    ],
+    [
+      "lerobot/libero_10",
+      "put both the cream cheese box and the butter in the basket"
+    ],
+    [
+      "lerobot/libero_10",
+      "put the black bowl in the bottom drawer of the cabinet and close it"
+    ],
+    [
+      "lerobot/libero_10",
+      "pick up the book and place it in the back compartment of the caddy"
+    ],
+    [
+      "physical-intelligence/libero",
+      "put the white mug on the left plate and put the yellow and white mug on the right plate"
+    ],
+    [
+      "physical-intelligence/libero",
+      "put the white mug on the plate and put the chocolate pudding to the right of the plate"
+    ],
+    [
+      "physical-intelligence/libero",
+      "put the yellow and white mug in the microwave and close it"
+    ],
+    [
+      "physical-intelligence/libero",
+      "turn on the stove and put the moka pot on it"
+    ],
+    [
+      "physical-intelligence/libero",
+      "put both the alphabet soup and the cream cheese box in the basket"
+    ],
+    [
+      "physical-intelligence/libero",
+      "put both the alphabet soup and the tomato sauce in the basket"
+    ],
+    [
+      "physical-intelligence/libero",
+      "put both moka pots on the stove"
+    ],
+    [
+      "physical-intelligence/libero",
+      "put both the cream cheese box and the butter in the basket"
+    ],
+    [
+      "physical-intelligence/libero",
+      "put the black bowl in the bottom drawer of the cabinet and close it"
+    ],
+    [
+      "physical-intelligence/libero",
+      "pick up the book and place it in the back compartment of the caddy"
+    ],
+    [
+      "physical-intelligence/libero",
+      "put the bowl on the plate"
+    ],
+    [
+      "physical-intelligence/libero",
+      "put the wine bottle on the rack"
+    ],
+    [
+      "physical-intelligence/libero",
+      "open the top drawer and put the bowl inside"
+    ],
+    [
+      "physical-intelligence/libero",
+      "put the cream cheese in the bowl"
+    ],
+    [
+      "physical-intelligence/libero",
+      "put the wine bottle on top of the cabinet"
+    ],
+    [
+      "physical-intelligence/libero",
+      "push the plate to the front of the stove"
+    ],
+    [
+      "physical-intelligence/libero",
+      "turn on the stove"
+    ],
+    [
+      "physical-intelligence/libero",
+      "put the bowl on the stove"
+    ],
+    [
+      "physical-intelligence/libero",
+      "put the bowl on top of the cabinet"
+    ],
+    [
+      "physical-intelligence/libero",
+      "open the middle drawer of the cabinet"
+    ],
+    [
+      "physical-intelligence/libero",
+      "pick up the orange juice and place it in the basket"
+    ],
+    [
+      "physical-intelligence/libero",
+      "pick up the ketchup and place it in the basket"
+    ],
+    [
+      "physical-intelligence/libero",
+      "pick up the cream cheese and place it in the basket"
+    ],
+    [
+      "physical-intelligence/libero",
+      "pick up the bbq sauce and place it in the basket"
+    ],
+    [
+      "physical-intelligence/libero",
+      "pick up the alphabet soup and place it in the basket"
+    ],
+    [
+      "physical-intelligence/libero",
+      "pick up the milk and place it in the basket"
+    ],
+    [
+      "physical-intelligence/libero",
+      "pick up the salad dressing and place it in the basket"
+    ],
+    [
+      "physical-intelligence/libero",
+      "pick up the butter and place it in the basket"
+    ],
+    [
+      "physical-intelligence/libero",
+      "pick up the tomato sauce and place it in the basket"
+    ],
+    [
+      "physical-intelligence/libero",
+      "pick up the chocolate pudding and place it in the basket"
+    ],
+    [
+      "physical-intelligence/libero",
+      "pick up the black bowl next to the cookie box and place it on the plate"
+    ],
+    [
+      "physical-intelligence/libero",
+      "pick up the black bowl in the top drawer of the wooden cabinet and place it on the plate"
+    ],
+    [
+      "physical-intelligence/libero",
+      "pick up the black bowl on the ramekin and place it on the plate"
+    ],
+    [
+      "physical-intelligence/libero",
+      "pick up the black bowl on the stove and place it on the plate"
+    ],
+    [
+      "physical-intelligence/libero",
+      "pick up the black bowl between the plate and the ramekin and place it on the plate"
+    ],
+    [
+      "physical-intelligence/libero",
+      "pick up the black bowl on the cookie box and place it on the plate"
+    ],
+    [
+      "physical-intelligence/libero",
+      "pick up the black bowl next to the plate and place it on the plate"
+    ],
+    [
+      "physical-intelligence/libero",
+      "pick up the black bowl next to the ramekin and place it on the plate"
+    ],
+    [
+      "physical-intelligence/libero",
+      "pick up the black bowl from table center and place it on the plate"
+    ],
+    [
+      "physical-intelligence/libero",
+      "pick up the black bowl on the wooden cabinet and place it on the plate"
+    ],
+    [
+      "lerobot/svla_so101_pickplace",
+      "pink lego brick into the transparent box"
+    ]
+  ],
+  "resolved": [
+    "lerobot/pusht",
+    "lerobot/pusht_image",
+    "lerobot/aloha_sim_insertion_human",
+    "lerobot/aloha_sim_transfer_cube_human",
+    "lerobot/xarm_lift_medium",
+    "lerobot/xarm_push_medium",
+    "lerobot/libero",
+    "lerobot/libero_10",
+    "physical-intelligence/libero",
+    "lerobot/svla_so101_pickplace"
+  ],
+  "failed": [
+    [
+      "lerobot/pusht_keyboard",
+      "meta/tasks.parquet: RepositoryNotFoundError"
+    ],
+    [
+      "lerobot/aloha_sim_chat_insertion_human",
+      "meta/tasks.parquet: RepositoryNotFoundError"
+    ],
+    [
+      "lerobot/aloha_sim_insertion_human_ruyu",
+      "meta/tasks.parquet: RepositoryNotFoundError"
+    ],
+    [
+      "lerobot/aloha_static_bread_pick_and_place",
+      "meta/tasks.parquet: RepositoryNotFoundError"
+    ],
+    [
+      "lerobot/aloha_static_teddy_bear_pick_and_place",
+      "meta/tasks.parquet: RepositoryNotFoundError"
+    ],
+    [
+      "lerobot/aloha_static_ziploc_pick_and_place",
+      "meta/tasks.parquet: RepositoryNotFoundError"
+    ],
+    [
+      "lerobot/aloha_static_coffee_pod",
+      "meta/tasks.parquet: RepositoryNotFoundError"
+    ],
+    [
+      "lerobot/aloha_static_hanging_shirt",
+      "meta/tasks.parquet: RepositoryNotFoundError"
+    ],
+    [
+      "lerobot/aloha_static_tote_bag",
+      "meta/tasks.parquet: RepositoryNotFoundError"
+    ],
+    [
+      "lerobot/xarm_lift_small",
+      "meta/tasks.parquet: RepositoryNotFoundError"
+    ],
+    [
+      "lerobot/xarm_lift_large",
+      "meta/tasks.parquet: RepositoryNotFoundError"
+    ],
+    [
+      "lerobot/xarm_sponges",
+      "meta/tasks.parquet: RepositoryNotFoundError"
+    ],
+    [
+      "lerobot/xarm_transfer_blocks",
+      "meta/tasks.parquet: RepositoryNotFoundError"
+    ],
+    [
+      "lerobot/xarm_place_medium",
+      "meta/tasks.parquet: RepositoryNotFoundError"
+    ],
+    [
+      "lerobot/xarm_place_small",
+      "meta/tasks.parquet: RepositoryNotFoundError"
+    ],
+    [
+      "lerobot/xarm_place_large",
+      "meta/tasks.parquet: RepositoryNotFoundError"
+    ],
+    [
+      "physical-intelligence/libero_10",
+      "meta/tasks.parquet: RepositoryNotFoundError"
+    ],
+    [
+      "physical-intelligence/libero_spatial",
+      "meta/tasks.parquet: RepositoryNotFoundError"
+    ],
+    [
+      "physical-intelligence/libero_object",
+      "meta/tasks.parquet: RepositoryNotFoundError"
+    ],
+    [
+      "physical-intelligence/libero_goal",
+      "meta/tasks.parquet: RepositoryNotFoundError"
+    ],
+    [
+      "physical-intelligence/libero_90",
+      "meta/tasks.parquet: RepositoryNotFoundError"
+    ],
+    [
+      "lerobot/so101_pickplace",
+      "meta/tasks.parquet: RepositoryNotFoundError"
+    ],
+    [
+      "lerobot/so101_stacking",
+      "meta/tasks.parquet: RepositoryNotFoundError"
+    ],
+    [
+      "lerobot/so101_pick_place",
+      "meta/tasks.parquet: RepositoryNotFoundError"
+    ],
+    [
+      "lerobot/svla_so101_stacking",
+      "meta/tasks.parquet: RepositoryNotFoundError"
+    ],
+    [
+      "lerobot/driving_school",
+      "meta/tasks.parquet: RepositoryNotFoundError"
+    ],
+    [
+      "lerobot/furniture_bench",
+      "meta/tasks.parquet: RepositoryNotFoundError"
+    ],
+    [
+      "lerobot/robohouse",
+      "meta/tasks.parquet: RepositoryNotFoundError"
+    ],
+    [
+      "lerobot/open_loop_human",
+      "meta/tasks.parquet: RepositoryNotFoundError"
+    ],
+    [
+      "lerobot/human_grasping",
+      "meta/tasks.parquet: RepositoryNotFoundError"
+    ],
+    [
+      "lerobot/ucsd_pick_and_place_dataset_v2",
+      "meta/tasks.parquet: RepositoryNotFoundError"
+    ],
+    [
+      "lerobot/bridge_orig_lerobot",
+      "meta/tasks.parquet: RepositoryNotFoundError"
+    ],
+    [
+      "lerobot/asim",
+      "meta/tasks.parquet: RepositoryNotFoundError"
+    ],
+    [
+      "IPEC-COMMUNITY/panoptic_take_three",
+      "meta/tasks.parquet: RepositoryNotFoundError"
+    ],
+    [
+      "IPEC-COMMUNITY/panoptic_take_two",
+      "meta/tasks.parquet: RepositoryNotFoundError"
+    ],
+    [
+      "lerobot/nyu_bddx",
+      "meta/tasks.parquet: RepositoryNotFoundError"
+    ],
+    [
+      "lerobot/dROID",
+      "meta/tasks.parquet: RepositoryNotFoundError"
+    ]
+  ]
+}

@@ -15,7 +15,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from collections.abc import Callable, Sequence
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -657,6 +659,34 @@ def sep_all(vectors: Any, texts: Sequence[str]) -> dict[str, Any]:
     return all_vectors(vectors, texts)
 
 
+def cmd_watch(args: argparse.Namespace) -> int:
+    """Stream task strings through the frozen clustering and serve a live view.
+
+    The one property an offline metric cannot show is that a confirmed cluster
+    stops moving, so this watches it happen: feed strings, click confirm, and the
+    figures re-render after every arrival.
+    """
+    from experiments.clustering import watch
+
+    encoder = embeddings.get(args.embedding)
+    if not embeddings.is_semantic(encoder):
+        print("the null backend has nothing to watch; pick a real encoder")
+        return 1
+    source = args.source
+    if source is None and not sys.stdin.isatty():
+        source = "-"
+    return watch.run(
+        source,
+        args.port,
+        encoder=encoder,
+        radius=args.radius,
+        colour_weight=args.colour_weight,
+        mask_verbs=args.mask_verbs,
+        rule=args.rule,
+        max_clusters=args.max_clusters,
+    )
+
+
 def cmd_separability(args: argparse.Namespace) -> int:
     """Premise check: are same-pairs and different-pairs separable at all?
 
@@ -730,9 +760,349 @@ def cmd_separability(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_scale(args: argparse.Namespace) -> int:
+    """Run the frozen configuration over a thousand strings and report what breaks.
+
+    Three passes, because each answers a different question:
+
+    * **synthetic only** - the scale curve, the radius/masking sweep, and the label
+      metrics, all on strings whose gold object class is known.
+    * **real only** - the LeRobot task sentences, which have no labels and are
+      reported as cluster count, singleton rate and cohesion.
+    * **mixed** - both in one stream, to see whether 46 sentences of text nobody tuned
+      against disturb the 48 synthetic classes.
+
+    Everything is written to `results/scale.json`; the tables printed here are
+    generated from that file so the two cannot disagree.
+    """
+    from experiments.clustering import corpus, figures, scale
+
+    config = scale.Config(
+        encoder=args.embedding,
+        radius=args.radius,
+        colour_weight=args.colour_weight,
+        mask_verbs=args.mask_verbs,
+        rule=args.rule,
+    )
+    encoder = embeddings.get(config.encoder)
+    if not embeddings.is_semantic(encoder):
+        print("the null backend has nothing to scale; pick a real encoder")
+        return 1
+
+    synthetic = corpus.synthetic_corpus(args.target)
+    real = corpus.real_strings(use_hub=not args.no_real, refresh=args.refresh_real)
+    real = tuple(item for item in real if item.text not in {s.text for s in synthetic})
+    print(f"corpus: {len(synthetic)} synthetic + {len(real)} real Hub strings")
+
+    gold_synthetic = [item.label for item in synthetic]
+    shuffled_items = corpus.shuffled(synthetic)
+    # One encode per verb setting, in one fixed order, reused by every pass below.
+    # Re-encoding per pass would let batch composition decide the cluster count.
+    matrices: dict[bool, np.ndarray] = {}
+    encode_seconds = 0.0
+    for mask in (True, False):
+        matrices[mask], seconds = scale.encode(
+            shuffled_items, encoder, replace(config, mask_verbs=mask)
+        )
+        if mask == config.mask_verbs:
+            encode_seconds = seconds
+    vectors = matrices[config.mask_verbs]
+
+    headline = scale.stream(
+        shuffled_items,
+        vectors,
+        config,
+        name="synthetic",
+        order="shuffled",
+        confirm_top=args.confirm_top,
+    )
+    curve = scale.scale_curve(shuffled_items, vectors, config)
+    sweep_runs = scale.sweep(synthetic, matrices, config)
+    batches = scale.batch_sensitivity(synthetic, encoder, config)
+    geometry = scale.geometry_report(shuffled_items, vectors, config.radius)
+
+    control_items = corpus.minimal_corpus(args.control)
+    control_vectors, _ = scale.encode(control_items, encoder, config)
+    core = scale.core_run(synthetic, encoder, config)
+    control = scale.stream(
+        corpus.shuffled(control_items),
+        control_vectors,
+        config,
+        name="control",
+        order="shuffled",
+        confirm_top=args.confirm_top,
+    )
+
+    rule_runs = scale.rule_sweep(synthetic, vectors, config)
+    order = scale.order_sensitivity(shuffled_items, vectors, config)
+
+    real_vectors, real_encode_seconds = (vectors[:0], 0.0)
+    real_run: dict[str, object] = {}
+    mixed_run: dict[str, object] = {}
+    mixed_quality: dict[str, float] = {}
+    if real:
+        real_vectors, real_encode_seconds = scale.encode(real, encoder, config)
+        real_run = scale.summary(
+            scale.stream(
+                corpus.shuffled(real),
+                real_vectors,
+                config,
+                name="real",
+                order="shuffled",
+                confirm_top=args.confirm_top,
+            )
+        )
+        mixed_items = list(shuffled_items) + list(corpus.shuffled(real))
+        mixed_matrix = np.concatenate([vectors, real_vectors], axis=0)
+        mixed = scale.stream(
+            mixed_items,
+            mixed_matrix,
+            config,
+            name="mixed",
+            order="shuffled",
+            confirm_top=args.confirm_top,
+        )
+        mixed_run = scale.summary(mixed)
+        # Scored on the synthetic rows only: the real rows have no gold class, and
+        # inventing one for them would be exactly the circularity this run avoids.
+        mixed_quality = scale.score_subset(mixed, mixed_items, "synthetic")
+        mixed_run["synthetic_b_cubed"] = round(mixed_quality.get("b_cubed", 0.0), 4)
+        mixed_run["synthetic_clusters"] = mixed_run["clusters"]
+
+    payload: dict[str, Any] = {
+        "config": config.describe(),
+        "corpus": {
+            "synthetic": len(synthetic),
+            "real": len(real),
+            "labels": len(set(gold_synthetic)),
+            "coverage": scale.coverage_note(synthetic),
+            "balance": corpus.balance(synthetic),
+        },
+        "cost": {
+            "encode_seconds_synthetic": round(encode_seconds, 2),
+            "encode_seconds_real": round(real_encode_seconds, 2),
+            "strings_per_second": round(
+                len(synthetic) / encode_seconds if encode_seconds else 0.0, 1
+            ),
+            "cluster_seconds": round(headline.cluster_seconds, 3),
+        },
+        "synthetic": scale.summary(headline, gold_synthetic),
+        "scale_curve": [scale.summary(run, gold_synthetic[: run.n]) for run in curve],
+        "sweep": [scale.summary(run, gold_synthetic) for run in sweep_runs],
+        "rule_sweep": [scale.summary(run, gold_synthetic) for run in rule_runs],
+        "diagnosis": {
+            attribute: scale.fragmentation_by_attribute(headline, shuffled_items, attribute)
+            for attribute in scale.ATTRIBUTES
+        },
+        "subsets": {
+            f"{attribute}={value}": scale.subset_quality(headline, shuffled_items, attribute, value)
+            for attribute in scale.ATTRIBUTES
+            for value in ("none", "plastic", "red", "on the table", "pick up")
+        },
+        "order_sensitivity": order,
+        "batch_sensitivity": batches,
+        "geometry": geometry,
+        "axes": scale.axis_report(shuffled_items, vectors),
+        "axis_isolation": scale.axis_isolation(encoder, config),
+        "control": scale.summary(control, [item.label for item in control_items]),
+        "core": scale.summary(core, [item.label for item in synthetic]),
+        "core_coverage": round(
+            sum(1 for item in corpus.core_corpus(synthetic) if item.text == item.label)
+            / len(synthetic),
+            4,
+        ),
+        "real": real_run,
+        "mixed": mixed_run,
+    }
+
+    path = _write("scale", payload)
+    _print_scale_report(payload)
+    print(f"\nwrote {path}")
+
+    if args.figures:
+        figures_for = (
+            (mixed_items, mixed_matrix, mixed) if real else (shuffled_items, vectors, headline)
+        )
+        names = figures_for[2].arrival_labels
+        base = Path("experiments/clustering/results")
+        base.mkdir(parents=True, exist_ok=True)
+        sizes: dict[int, int] = {}
+        for label in names:
+            sizes[label] = sizes.get(label, 0) + 1
+        ordered = sorted(sizes)
+        row_labels = [f"c{index}" for index in ordered]
+        tags = {item.text: [f"colour:{attributes.colour_of(item.text)}"] for item in figures_for[0]}
+        colours = sorted({tag for values in tags.values() for tag in values})
+        members: dict[int, list[str]] = {}
+        for label, item in zip(names, figures_for[0], strict=True):
+            members.setdefault(label, []).append(item.text)
+        matrix = figures.cluster_attribute_matrix(members, tags, colours)
+        title = (
+            f"{config.encoder} - {len(figures_for[0])} strings, "
+            f"{len(ordered)} clusters, r={config.radius}"
+        )
+        for name, svg in (
+            (
+                "scale-treemap",
+                figures.render_treemap([sizes[i] for i in ordered], row_labels, title),
+            ),
+            ("scale-map", figures.render_map(figures_for[1], names, title)),
+            ("scale-heatmap", figures.render_heatmap(matrix, row_labels, colours, title)),
+        ):
+            (base / f"{name}.svg").write_text(svg, encoding="utf-8")
+            print(f"wrote {base / f'{name}.svg'}")
+    return 0
+
+
+def _print_scale_report(payload: dict[str, Any]) -> None:
+    """Tables straight from the payload, so the prose and the JSON cannot disagree."""
+
+    def row(label: str, values: dict[str, object]) -> str:
+        cells = " | ".join(f"{key}={value}" for key, value in values.items())
+        return f"| {label} | {cells} |"
+
+    print("\n## scale curve (synthetic, shuffled arrival order)")
+    print("| n | clusters | singletons | largest | b_cubed | fragmentation | impure |")
+    print("|---|---|---|---|---|---|---|")
+    for entry in payload["scale_curve"]:
+        print(
+            row(
+                str(entry["strings"]),
+                {
+                    "clusters": entry["clusters"],
+                    "singletons": entry["singletons"],
+                    "largest": entry["largest_cluster"],
+                    "b_cubed": entry.get("b_cubed"),
+                    "frag": entry.get("fragmentation"),
+                    "impure": entry.get("impure_clusters"),
+                },
+            )
+        )
+
+    print("\n## radius and verb masking sweep (full synthetic corpus)")
+    print("| run | clusters | singletons | largest | b_cubed | fragmentation | impure |")
+    print("|---|---|---|---|---|---|---|")
+    for entry in payload["sweep"]:
+        print(
+            row(
+                str(entry["name"]),
+                {
+                    "clusters": entry["clusters"],
+                    "singletons": entry["singletons"],
+                    "largest": entry["largest_cluster"],
+                    "b_cubed": entry.get("b_cubed"),
+                    "frag": entry.get("fragmentation"),
+                    "impure": entry.get("impure_clusters"),
+                },
+            )
+        )
+
+    print("\n## centroid rule at scale")
+    print("| run | clusters | singletons | largest | b_cubed | fragmentation | impure |")
+    print("|---|---|---|---|---|---|---|")
+    for entry in payload["rule_sweep"]:
+        print(
+            row(
+                str(entry["name"]),
+                {
+                    "clusters": entry["clusters"],
+                    "singletons": entry["singletons"],
+                    "largest": entry["largest_cluster"],
+                    "b_cubed": entry.get("b_cubed"),
+                    "frag": entry.get("fragmentation"),
+                    "impure": entry.get("impure_clusters"),
+                },
+            )
+        )
+
+    print("\n## where it fragments, by attribute")
+    print("| attribute=value | strings | clusters | modal share |")
+    print("|---|---|---|---|")
+    for attribute, buckets in payload["diagnosis"].items():
+        for value, stats in buckets.items():
+            print(row(f"{attribute}={value}", stats))
+
+    print("\n## quality by subset")
+    print("| subset | strings | b_cubed | fragmentation | impure |")
+    print("|---|---|---|---|---|")
+    for name, stats in payload["subsets"].items():
+        if stats:
+            print(row(name, stats))
+
+    print("\n## object core (verb, colour, adjective and location stripped)")
+    print(json.dumps(payload["core"], indent=2, sort_keys=True))
+    print(f"core strings equal to the gold object: {payload['core_coverage']}")
+
+    print("\n## control corpus (verb and colour variation only)")
+    print(json.dumps(payload["control"], indent=2, sort_keys=True))
+
+    print("\n## distance geometry at the shipped radius")
+    print(json.dumps(payload["geometry"], indent=2, sort_keys=True))
+
+    print("\n## separability per axis (everything else held identical)")
+    print("| axis | same-object mean | different-object mean | margin | separable |")
+    print("|---|---|---|---|---|")
+    for axis, stats in payload["axes"].items():
+        print(
+            f"| {axis} | {stats['same_object_mean']} | {stats['different_object_mean']} "
+            f"| {stats['margin']} | {stats['separable']} |"
+        )
+
+    print("\n## one axis at a time (48 objects, everything else fixed)")
+    print("| axis | strings | same-object mean | different-object mean | margin | separable |")
+    print("|---|---|---|---|---|---|")
+    for axis, stats in payload["axis_isolation"].items():
+        print(
+            f"| {axis} | {int(stats['strings'])} | {stats['same_object_mean']} "
+            f"| {stats['different_object_mean']} | {stats['margin']} "
+            f"| {stats['separable']} |"
+        )
+
+    print("\n## headline and order")
+    print(json.dumps(payload["synthetic"], indent=2, sort_keys=True))
+    print(json.dumps(payload["order_sensitivity"], indent=2, sort_keys=True))
+    print(json.dumps(payload["batch_sensitivity"], indent=2, sort_keys=True))
+    print(json.dumps(payload["cost"], indent=2, sort_keys=True))
+    if payload.get("real"):
+        print("\n## real LeRobot sentences (no labels)")
+        print(json.dumps(payload["real"], indent=2, sort_keys=True))
+    if payload.get("mixed"):
+        print("\n## mixed stream")
+        print(json.dumps(payload["mixed"], indent=2, sort_keys=True))
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="experiments.clustering")
     subparsers = parser.add_subparsers(dest="command", required=True)
+    watch_parser = subparsers.add_parser(
+        "watch", help="stream task strings and serve a live, confirmable clustering"
+    )
+    watch_parser.add_argument("--embedding", default="minilm")
+    watch_parser.add_argument("--source", default=None, help="file of task strings, one per line")
+    watch_parser.add_argument("--port", type=int, default=8765)
+    watch_parser.add_argument("--rule", default="sliding_8")
+    watch_parser.add_argument("--radius", type=float, default=0.15)
+    watch_parser.add_argument("--colour-weight", type=float, default=1.0)
+    watch_parser.add_argument("--mask-verbs", action="store_true")
+    watch_parser.add_argument("--max-clusters", type=int, default=64)
+    watch_parser.set_defaults(run=cmd_watch)
+
+    scale_parser = subparsers.add_parser(
+        "scale", help="run the frozen configuration over a thousand strings"
+    )
+    scale_parser.add_argument("--embedding", default="minilm")
+    scale_parser.add_argument("--target", type=int, default=1200)
+    scale_parser.add_argument("--rule", default="sliding_8")
+    scale_parser.add_argument("--radius", type=float, default=0.15)
+    scale_parser.add_argument("--colour-weight", type=float, default=1.0)
+    scale_parser.add_argument("--mask-verbs", action="store_true")
+    scale_parser.add_argument("--confirm-top", type=int, default=5)
+    scale_parser.add_argument("--control", type=int, default=480)
+    scale_parser.add_argument("--no-real", action="store_true")
+    scale_parser.add_argument("--refresh-real", action="store_true")
+    scale_parser.add_argument("--figures", action="store_true")
+    scale_parser.set_defaults(run=cmd_scale)
+
     gold_parser = subparsers.add_parser("gold", help="report a gold set and its split")
     gold_parser.add_argument("--set", dest="set_name", default="hand", choices=GOLD_SETS)
     gold_parser.set_defaults(run=cmd_gold)

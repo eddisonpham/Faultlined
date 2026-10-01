@@ -3,7 +3,7 @@
 Current state of Faultlined for whoever picks it up next. Recent slices are listed in [§14](#14-recent-slices); detail lives in the linked ADR, experiment and review records.
 
 - Stage: production baseline, open since 2026-09-30. MVP complete, all 27 criteria evidenced ([definition of done](spec/definition-of-done.md)).
-- Suite: 1102 passing, coverage 92.37%, mypy strict clean, OpenAPI contract matches.
+- Suite: 1188 passing, coverage 92.26%, mypy strict clean, OpenAPI contract matches.
 - Everything is committed on `main`. Do not tag `scaffold-complete` until the open items in [§6](#6-known-technical-risks) and [§7](#7-next-steps) close.
 
 ## 1. Problem
@@ -69,7 +69,7 @@ More detail: [implementation status](implementation/status.md), [failure modes](
 
 ## 7. Next steps
 
-1. **Integrate the object view** into the engine as a proposal surface: `minilm`, cosine, colour facet at weight ~1.0 plus **verb masking** before embedding, radius re-derived per representation (0.15-0.30), online centroids with `sliding_8`, human confirmation. All 42 constructed clusters object-pure and colour-pure; zero false merges on both gold sets. Configuration and evidence in [stage 2.5 findings](../experiments/clustering/results/README.md).
+1. **Integrate cluster proposals** into the engine, but over *extracted* task strings rather than sentence embeddings. EXP-2.5-08 (1200 strings, 46 real sentences) showed the shipped embedding configuration shatters at scale - 533 clusters for 48 classes, B-cubed 0.073, zero intact classes, and an adjusted Rand of -0.0005 between two arrival orders of the same strings - while extracting the object core first gives 47 clusters, B-cubed 0.986 and zero singletons. The proposal surface must therefore group on the extracted string, use the online centroids only for incremental updates and frozen confirmations, and show fragmentation and singleton rate on every proposal. The open risk is extractor coverage on real operator text, which has no labels to measure it with. Evidence in [stage 2.5 findings](../experiments/clustering/results/README.md).
 2. **Re-establish held-out independence.** The held-out sets have now been read three times (colour off, colour on, colour+verb off), each read choosing a configuration. The reported 1.000 and 0.987 are development figures, not a clean estimate. A fresh split or a real corpus is needed before they mean anything.
 3. **Fragmentation is still open.** 27 clusters from 46 hand-set strings, and that set has only 25 distinct nouns so its ceiling is low. Real-corpus scale is untested.
 4. Run the §6 fault-injection campaign against `just run` to produce the notifier accuracy figure, including the real-kill `WORKER_LOST` variant and clean replicates. Backlog B-016.
@@ -80,6 +80,7 @@ Done and closed: the baseline runbook (2026-09-28), clean-clone and secrets vali
 
 ## 8. Open questions
 
+- **Can the object core be extracted from real operator text?** This is now the load-bearing question for clustering, replacing the action view. The lexicons that strip verbs, colours, adjectives and locations recover the gold object on 100% of the synthetic corpus because that corpus was generated from them; on the 46 real LeRobot sentences there is no label to check against, and 37 of the 47 candidate Hub datasets did not resolve. A learned extractor, or a larger labelled real sample, is the untried route.
 - **Can the action view be solved at all?** Stage 2.5 answered no for a linear projection over general-purpose embeddings: the information is present (a pair probe reaches 0.784 held-out) but not expressible as a distance (threshold 0.724, projection 0.687, unprojected clustering F1 0.488). A representation trained for this task is the untried route.
 - **Should the object view drop the verb entirely?** Answered on 2026-09-30: yes. Masking the verb before embedding removed all three verb-synonym false splits and made all 42 constructed clusters object-pure. The cost is that the view can now say nothing about actions at all, which is what the two-view design already implied.
 - Fixture versioning for LeRobot at full episode size. The current fixture is the 203-frame tabular slice, not the video shards. For MCAP the fixture is a closed-form generator versioned by its arguments and SHA-256, so no download sits in the measurement path.
@@ -96,7 +97,7 @@ Done and closed: the baseline runbook (2026-09-28), clean-clone and secrets vali
 
 ## 10. Testing
 
-- Latest gates: format, lint, strict mypy over 64 modules, tests, hygiene and OpenAPI drift all pass. 903 passing, coverage above 92%.
+- Latest gates: format, lint, strict mypy over 64 modules, tests, hygiene and OpenAPI drift all pass. 1188 passing, coverage above 92%.
 - Integration tests need `DE_DATABASE_URL` and skip cleanly without it; `just pg-up` plus the README DSN runs the whole suite with nothing skipped.
 - The `network` tests are the only ones that touch the Hugging Face Hub. Two mechanisms that made the hosted runner go red for reasons unrelated to the code are now closed: a truncated body is detected against `Content-Length` and retried rather than written as a fixture (`IncompleteRead` is an `http.client` exception and used to escape the retry entirely), and the real-dataset assertions read their expected values from the dataset's own published index rather than from constants copied out of a live repository. The fetcher has its own unit tests against a local HTTP server, so the behaviour is checked without egress.
 - **There is no hosted runner.** `.github/workflows/` was removed on 2026-09-30 after four consecutive red runs whose cause could not be pinned down from outside the machine (the job log is behind a login). Every gate still exists and still passes locally; `just ci` runs all of them. The difference is that nothing enforces it but the person committing, and the pre-commit hooks cover lint, types and hygiene on changed files only.
@@ -157,6 +158,8 @@ One line each. Detail in the linked record.
 | 2026-09-30 | Stage 2.5 clustering assessment end to end. Corrected a broken ceiling diagnostic, added a constructed gold set, and concluded: object view ships, action view does not, learned projection rejected | [findings](../experiments/clustering/results/README.md) |
 | 2026-09-30 | Colour facet removes both false merges; treemap, PCA map and heatmap render the frozen clustering and exposed a fragmentation the metrics scored as success | [findings](../experiments/clustering/results/README.md) |
 | 2026-09-30 | Verb masking before embedding. All 42 constructed clusters now object-pure and colour-pure; verb-synonym splits and verb-pure clusters gone | [findings](../experiments/clustering/results/README.md) |
+| 2026-09-30 | Live clustering demo: `just cluster watch` streams task strings into the frozen configuration and serves a page where a confirmed cluster visibly stops moving. Stdlib `http.server`, no new dependency | [findings](../experiments/clustering/results/README.md) |
+| 2026-10-01 | Full-scale run over 1200 labelled strings plus 46 real Hub task sentences: the shipped sentence-embedding object view shatters (533 clusters for 48 classes, B-cubed 0.073, zero intact classes), order decides the partition (ARI -0.0005), and extracting the object core before embedding fixes it (47 clusters, B-cubed 0.986). Decision: extract, do not embed | [findings](../experiments/clustering/results/README.md) |
 | 2026-09-29 | Deterministic monitoring notifier, eleven rules, alert budget | [ADR 0020](decisions/0020-deterministic-monitoring-notifier.md), [EXP-0003](experiments/0003-deterministic-notifier-latency.md) |
 | 2026-09-29 | Instrument UI pass: theme hooks, visible failure policy, HTML error pages | [ADR 0021](decisions/0021-frontend-instrument-pass.md) |
 | 2026-09-29 | MVP complete: content-addressed builds and the MCAP reader | [ADR 0022](decisions/0022-mcap-ingest-reader.md), [EXP-0004](experiments/0004-mcap-ingest-baseline.md) |

@@ -653,6 +653,193 @@ just cluster final --set hand --embedding minilm --view object --rule sliding_8 
 just cluster final --set constructed --embedding minilm --view object --rule sliding_8 --radius 0.15 --colour-weight 1.0 --mask-verbs
 ```
 
+## EXP-2.5-08: at 1200 strings the shipped object view shatters
+
+Everything above ran on 46 hand-written strings or 494 constructed ones. This runs the
+frozen configuration over **1200 labelled synthetic strings plus 46 real LeRobot task
+sentences**, and the headline is a negative result that the small corpora could not
+have produced: the object view does not survive its own scale.
+
+```bash
+just cluster scale --mask-verbs --target 1200 --confirm-top 5 --figures
+```
+
+**The corpus.** 1200 strings from a grammar over 48 objects x 16 known verbs x 6
+out-of-lexicon verbs x 4 colour cells x 7 modifiers x 11 sites, balanced by stride
+(24-27 strings per object, colour cells within 60 of each other, 27% of rows using a
+verb the masking lexicon has never seen). Real text: 46 distinct task sentences
+harvested from 10 LeRobot datasets on the Hub, cached in `real_tasks.json` with the 37
+repositories that did not resolve recorded alongside them. Verb coverage measured over
+the corpus is **0.82**, against the 1.00 that the hand-written strings reported.
+
+### It gets worse with more data, not better
+
+| n | clusters | singletons | largest | b_cubed | fragmentation | impure |
+|---|---|---|---|---|---|---|
+| 50 | 47 | 45 | 3 | 0.120 | 16.0 | 1 |
+| 100 | 89 | 81 | 4 | 0.119 | 16.0 | 6 |
+| 200 | 160 | 131 | 9 | 0.109 | 17.4 | 23 |
+| 400 | 274 | 201 | 13 | 0.106 | 17.4 | 68 |
+| 800 | 427 | 279 | 21 | 0.098 | 17.3 | 144 |
+| 1200 | 533 | 302 | 31 | 0.073 | 23.4 | 228 |
+
+At 1200 strings: **533 clusters for 48 classes**, 302 singletons (25%), B-cubed 0.073,
+23.4 clusters per class, and **zero of the 48 classes entirely inside one cluster**.
+The method is not converging; it is accumulating one cluster per arrival.
+
+### No radius fixes it, and the centroid rule is not why
+
+| run | clusters | singletons | b_cubed | fragmentation | impure |
+|---|---|---|---|---|---|
+| r=0.10 masked | 896 | 656 | 0.077 | 24.7 | 237 |
+| r=0.15 masked (shipped) | 533 | 302 | 0.073 | 23.4 | 228 |
+| r=0.20 masked | 315 | 142 | 0.066 | 21.3 | 173 |
+| r=0.30 masked | 107 | 37 | 0.056 | 14.6 | 70 |
+
+Widening the radius trades fragmentation for merges and B-cubed gets *worse* at every
+step; tightening it shatters further. Verb masking still helps at every radius (masked
+is 15-27% fewer clusters than kept), so EXP-2.5-07 survives, at a much smaller effect
+size than 46 strings suggested. Across all six centroid rules at r=0.15 the spread is
+531-607 clusters: `sliding_8` was chosen on a corpus where a window of eight points was
+nearly the whole corpus, and at this scale it is not the problem.
+
+### Where it fragments, precisely
+
+| subset | strings | b_cubed | fragmentation |
+|---|---|---|---|
+| one verb, nothing else varying | 57 | 0.808 | 1.19 |
+| one site tail added | 96 | 0.652 | 1.50 |
+| no site tail | 144 | 0.530 | 2.69 |
+| one adjective added | 192 | 0.358-0.395 | 3.40-3.64 |
+| the whole corpus | 1200 | 0.073 | 23.44 |
+
+Every extra axis of variation multiplies fragmentation. Held to a single verb, the same
+method and the same encoder reach B-cubed 0.81 with 1.2 clusters per class.
+
+### The geometry says why, and it is not a threshold problem
+
+48 objects, one axis varied at a time, everything else identical:
+
+| axis | same-object mean distance | different-object mean | margin | separable |
+|---|---|---|---|---|
+| colour | 0.396 | 0.704 | 0.308 | yes |
+| modifier | 0.184 | 0.682 | 0.497 | yes |
+| site | 0.257 | 0.677 | 0.420 | yes |
+| verb | 0.127 | 0.735 | 0.608 | yes |
+
+Every axis is separable, so the representation does carry object identity. The problem
+is the *scale* of the distances: same-object pairs sit at 0.13-0.40 depending on the
+axis, while the shipped radius is 0.15. As an object classifier that radius has
+precision 0.956 and recall 0.052 - it is confidently right about the few pairs it keeps.
+Any radius that captures most same-object pairs also captures the different-object tail
+(p10 = 0.355), which is why the sweep above has no good column.
+
+### Order decides the answer
+
+Adjusted Rand between a shuffled arrival order and the adversarial one where every
+member of a class arrives together: **-0.0005**, with both orders producing 533
+clusters. The partition is a property of the schedule, not of the data. At 46 strings
+this was invisible because there were few enough arrivals to matter.
+
+Batch composition is *not* a factor: rotating the arrival order through three different
+batch groupings changes the cluster count by 0. The instability is order, not encoding.
+
+### The freeze guarantee holds at scale
+
+Five clusters confirmed halfway through the stream: **0 moved afterwards**, while 150
+unconfirmed centroids moved and 71 later arrivals joined a frozen cluster. The promise
+in `methods/online_centroids.py` is real; it is also the only thing standing between an
+operator and a partition that rearranges itself on every ingest.
+
+### Real text: 46 sentences, 34 clusters, 30 singletons
+
+65% of genuinely distinct operator sentences become their own cluster. The largest
+cluster has 9 members and is the LIBERO "pick up the X and place it in the basket"
+template family - the only things that group are near-identical templates. Real text
+has no gold labels and cannot be scored, which is exactly why this number is reported
+instead of a quality claim.
+
+### The headroom: extract, do not embed
+
+Strip the verb phrase, lift the colour, drop the adjectives and the location tail, and
+cluster what is left - same method, same encoder, same arrival order:
+
+| pipeline | clusters | singletons | b_cubed | fragmentation | impure | classes intact |
+|---|---|---|---|---|---|---|
+| embed the sentence | 534 | 303 | 0.073 | 23.4 | 228 | 0 of 48 |
+| embed the extracted core | 47 | 0 | 0.986 | 1.0 | 1 | 48 of 48 |
+
+The entire scale failure is variation the method was never asked to ignore, and the
+sentence encoder faithfully encodes what it was given.
+
+**What that number is not.** Core extraction recovers the gold object on 100% of the
+synthetic strings, because the strippers use the same lexicons the corpus was generated
+from. On real operator text the coverage of those lexicons is unknown and there are no
+labels to measure it with. The honest statement is: *if* the object can be extracted,
+the clustering is solved; *whether* it can be extracted at scale on real text is the
+open question, and it is a lexicon problem, not a clustering one.
+
+### Cost
+
+1200 strings encoded in 2.45 s (489/s on CPU, no GPU), the online pass in 0.70 s, all
+twelve sweep configurations and both arrival orders in one command. Cost is not the
+constraint; correctness is.
+
+**Decision.** The sentence-embedding object view does not ship as a cluster proposer.
+The Clusters surface proposes clusters over **extracted task strings**, groups them with
+the online centroids for incremental updates and frozen confirmations, and reports
+fragmentation and singleton rate on every proposal so an operator sees what the numbers
+above show rather than a confident-looking cluster count. Sentence embeddings remain the
+fallback for strings the extractor cannot reduce, clearly labelled as such.
+
+**Reproduce.** `just cluster scale --mask-verbs --target 1200 --confirm-top 5 --figures`
+writes `results/scale.json` plus three SVGs, and every table above is generated from
+that file. `tests/unit/test_clustering_corpus.py` and `tests/unit/test_clustering_scale.py`
+assert the corpus balance, the metric arithmetic and the headroom claim without a model.
+
+**Caveats, unchanged and extended.** The synthetic grammar is mine, so its purity
+numbers are close to circular and are reported as behaviour under load. Held-out has
+been read three times already; this experiment adds no held-out claim. Verb coverage is
+0.82 here against 1.00 before, which is the first honest coverage number in the study.
+
+## Watching it work: `just cluster watch`
+
+Every experiment above is one pass over a frozen set followed by a number. The one
+property they cannot show is why the method is online at all: **a cluster a person
+confirms stops moving**. Order-dependence and cluster-count instability are abstract
+until you watch a cluster you just named get renamed by the next episode.
+
+`just cluster watch` streams it instead. It runs the shipped configuration
+(`minilm`, object view, colour facet, verb masking, `sliding_8`), admits one task
+string at a time, and serves a page that re-renders the treemap, the PCA map and the
+cluster-by-colour heatmap after every arrival.
+
+```bash
+just cluster watch --mask-verbs                 # 20 seed strings, then type your own
+just cluster watch --mask-verbs --radius 0.30   # the hand-set radius
+just cluster watch --mask-verbs --source tasks.txt
+```
+
+Open `http://127.0.0.1:8765`. Each cluster gets a chip with a **confirm** button.
+Confirming freezes it: later arrivals still join it, the centroid does not move, and
+the arrival log marks the entry `(frozen cluster)` while the unconfirmed clusters
+around it keep reshaping. That is the claim in `methods/online_centroids.py`, watched
+rather than asserted.
+
+Two caveats. The seed list is 20 hand-written strings, not a corpus, so what this
+demonstrates is the freeze behaviour and not cluster quality — the quality numbers are
+the held-out F1 figures above. And the default `--radius 0.15` is the constructed-set
+value; on the hand set 0.30 is the derived one. Figures are re-rendered per arrival,
+so it is for watching a few hundred strings, not for measuring (that is what the rest
+of this directory is for).
+
+**Checked offline.** `tests/unit/test_clustering_watch.py` asserts the same behaviour
+against a deterministic encoder: arrivals join rather than respawn, a confirmed
+centroid is bit-identical after two further members while an unconfirmed neighbour
+still moves, freezing does not widen the radius, the arrival log stays bounded, every
+figure parses, and the page only fetches routes the server answers. So the demo is
+verified in CI even though no browser is.
+
 ## Not yet run
 
 - MVP integration of the object view into the engine. Unblocked; not started.
