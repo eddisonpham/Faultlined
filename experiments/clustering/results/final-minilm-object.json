@@ -1,96 +1,17 @@
 {
   "boundary_cases": [
     {
-      "cluster": 9,
-      "cluster_size": 2,
-      "distance_to_centroid": 0.2429,
-      "gold_says": [
-        "same as hand over the pen"
-      ],
-      "merged_with": [
-        "hand over the pen"
-      ],
-      "radius": 0.3,
-      "text": "give the pen"
-    },
-    {
-      "cluster": 12,
-      "cluster_size": 5,
-      "distance_to_centroid": 0.2207,
-      "gold_says": [
-        "same as place the bowl"
-      ],
-      "merged_with": [
-        "place the bowl",
-        "place the bowl on the plate",
-        "put down the bowl"
-      ],
-      "radius": 0.3,
-      "text": "lift the bowl"
-    },
-    {
-      "cluster": 19,
-      "cluster_size": 2,
-      "distance_to_centroid": 0.2201,
-      "gold_says": [],
-      "merged_with": [
-        "push the cart to the left"
-      ],
-      "radius": 0.3,
-      "text": "push the cart"
-    },
-    {
       "cluster": 2,
-      "cluster_size": 3,
-      "distance_to_centroid": 0.2102,
+      "cluster_size": 2,
+      "distance_to_centroid": 0.1793,
       "gold_says": [
         "same as open the bottle"
       ],
       "merged_with": [
-        "open the bottle",
-        "pick up the bottle"
+        "open the bottle"
       ],
-      "radius": 0.3,
+      "radius": 0.2,
       "text": "close the bottle"
-    },
-    {
-      "cluster": 18,
-      "cluster_size": 2,
-      "distance_to_centroid": 0.2015,
-      "gold_says": [
-        "same as step on the pedal"
-      ],
-      "merged_with": [
-        "step on the pedal"
-      ],
-      "radius": 0.3,
-      "text": "press the pedal"
-    },
-    {
-      "cluster": 17,
-      "cluster_size": 2,
-      "distance_to_centroid": 0.1934,
-      "gold_says": [
-        "different as press the red button"
-      ],
-      "merged_with": [
-        "press the red button"
-      ],
-      "radius": 0.3,
-      "text": "press the blue button"
-    },
-    {
-      "cluster": 24,
-      "cluster_size": 2,
-      "distance_to_centroid": 0.173,
-      "gold_says": [
-        "different as sort the red blocks into the bin"
-      ],
-      "merged_with": [
-        "sort the red blocks into the bin"
-      ],
-      "radius": 0.3,
-      "text": "sort the blue blocks into the bin"
     },
     {
       "cluster": 5,
@@ -102,8 +23,35 @@
       "merged_with": [
         "turn the valve"
       ],
-      "radius": 0.3,
+      "radius": 0.2,
       "text": "close the valve"
+    },
+    {
+      "cluster": 28,
+      "cluster_size": 2,
+      "distance_to_centroid": 0.1305,
+      "gold_says": [
+        "same as lift the bowl",
+        "same as put down the bowl"
+      ],
+      "merged_with": [
+        "put down the bowl"
+      ],
+      "radius": 0.2,
+      "text": "place the bowl"
+    },
+    {
+      "cluster": 30,
+      "cluster_size": 2,
+      "distance_to_centroid": 0.1207,
+      "gold_says": [
+        "same as shut the lid"
+      ],
+      "merged_with": [
+        "shut the lid"
+      ],
+      "radius": 0.2,
+      "text": "close the lid"
     },
     {
       "cluster": 3,
@@ -115,38 +63,8 @@
       "merged_with": [
         "shut the door"
       ],
-      "radius": 0.3,
+      "radius": 0.2,
       "text": "close the door"
-    },
-    {
-      "cluster": 12,
-      "cluster_size": 5,
-      "distance_to_centroid": 0.1092,
-      "gold_says": [
-        "same as place the bowl"
-      ],
-      "merged_with": [
-        "lift the bowl",
-        "place the bowl",
-        "place the bowl on the plate"
-      ],
-      "radius": 0.3,
-      "text": "put down the bowl"
-    },
-    {
-      "cluster": 4,
-      "cluster_size": 4,
-      "distance_to_centroid": 0.1087,
-      "gold_says": [
-        "same as shut the lid"
-      ],
-      "merged_with": [
-        "lift the lid",
-        "raise the lid",
-        "shut the lid"
-      ],
-      "radius": 0.3,
-      "text": "close the lid"
     },
     {
       "cluster": 1,
@@ -158,26 +76,11 @@
       "merged_with": [
         "wipe the lens"
       ],
-      "radius": 0.3,
+      "radius": 0.2,
       "text": "clean the lens"
     },
     {
-      "cluster": 4,
-      "cluster_size": 4,
-      "distance_to_centroid": 0.1059,
-      "gold_says": [
-        "same as close the lid"
-      ],
-      "merged_with": [
-        "close the lid",
-        "lift the lid",
-        "raise the lid"
-      ],
-      "radius": 0.3,
-      "text": "shut the lid"
-    },
-    {
-      "cluster": 23,
+      "cluster": 29,
       "cluster_size": 2,
       "distance_to_centroid": 0.1053,
       "gold_says": [
@@ -186,7 +89,7 @@
       "merged_with": [
         "turn the knob clockwise"
       ],
-      "radius": 0.3,
+      "radius": 0.2,
       "text": "rotate the knob clockwise"
     },
     {
@@ -199,7 +102,7 @@
       "merged_with": [
         "move the cup to the sink"
       ],
-      "radius": 0.3,
+      "radius": 0.2,
       "text": "carry the cup to the sink"
     },
     {
@@ -212,37 +115,11 @@
       "merged_with": [
         "gather the samples"
       ],
-      "radius": 0.3,
+      "radius": 0.2,
       "text": "collect the samples"
     },
     {
-      "cluster": 2,
-      "cluster_size": 3,
-      "distance_to_centroid": 0.0681,
-      "gold_says": [
-        "same as close the bottle"
-      ],
-      "merged_with": [
-        "close the bottle",
-        "pick up the bottle"
-      ],
-      "radius": 0.3,
-      "text": "open the bottle"
-    },
-    {
-      "cluster": 2,
-      "cluster_size": 3,
-      "distance_to_centroid": 0.0681,
-      "gold_says": [],
-      "merged_with": [
-        "close the bottle",
-        "open the bottle"
-      ],
-      "radius": 0.3,
-      "text": "pick up the bottle"
-    },
-    {
-      "cluster": 21,
+      "cluster": 26,
       "cluster_size": 2,
       "distance_to_centroid": 0.0628,
       "gold_says": [
@@ -251,106 +128,82 @@
       "merged_with": [
         "sweep the crumbs into the bin"
       ],
-      "radius": 0.3,
+      "radius": 0.2,
       "text": "push the crumbs into the bin"
     },
     {
-      "cluster": 12,
-      "cluster_size": 5,
-      "distance_to_centroid": 0.0627,
+      "cluster": 4,
+      "cluster_size": 2,
+      "distance_to_centroid": 0.0259,
       "gold_says": [
-        "same as lift the bowl",
-        "same as put down the bowl"
+        "same as raise the lid"
       ],
       "merged_with": [
-        "lift the bowl",
-        "place the bowl on the plate",
-        "put down the bowl"
+        "raise the lid"
       ],
-      "radius": 0.3,
-      "text": "place the bowl"
+      "radius": 0.2,
+      "text": "lift the lid"
     },
     {
-      "cluster": 12,
-      "cluster_size": 5,
-      "distance_to_centroid": 0.0608,
+      "cluster": 4,
+      "cluster_size": 2,
+      "distance_to_centroid": 0.0259,
+      "gold_says": [
+        "same as lift the lid"
+      ],
+      "merged_with": [
+        "lift the lid"
+      ],
+      "radius": 0.2,
+      "text": "raise the lid"
+    },
+    {
+      "cluster": 16,
+      "cluster_size": 2,
+      "distance_to_centroid": 0.0043,
       "gold_says": [
         "same as put the bowl on the plate",
         "different as place the cup on the plate"
       ],
       "merged_with": [
-        "lift the bowl",
-        "place the bowl",
-        "put down the bowl"
+        "put the bowl on the plate"
       ],
-      "radius": 0.3,
+      "radius": 0.2,
       "text": "place the bowl on the plate"
     },
     {
-      "cluster": 4,
-      "cluster_size": 4,
-      "distance_to_centroid": 0.0582,
-      "gold_says": [
-        "same as lift the lid"
-      ],
-      "merged_with": [
-        "close the lid",
-        "lift the lid",
-        "shut the lid"
-      ],
-      "radius": 0.3,
-      "text": "raise the lid"
-    },
-    {
-      "cluster": 12,
-      "cluster_size": 5,
-      "distance_to_centroid": 0.0502,
+      "cluster": 16,
+      "cluster_size": 2,
+      "distance_to_centroid": 0.0043,
       "gold_says": [
         "same as place the bowl on the plate"
       ],
       "merged_with": [
-        "lift the bowl",
-        "place the bowl",
         "place the bowl on the plate"
       ],
-      "radius": 0.3,
+      "radius": 0.2,
       "text": "put the bowl on the plate"
-    },
-    {
-      "cluster": 4,
-      "cluster_size": 4,
-      "distance_to_centroid": 0.0457,
-      "gold_says": [
-        "same as raise the lid"
-      ],
-      "merged_with": [
-        "close the lid",
-        "raise the lid",
-        "shut the lid"
-      ],
-      "radius": 0.3,
-      "text": "lift the lid"
     },
     {
       "cluster": 7,
       "cluster_size": 1,
-      "distance_to_centroid": 0.0,
+      "distance_to_centroid": -0.0,
       "gold_says": [
         "different as fold the shirt"
       ],
       "merged_with": [],
-      "radius": 0.3,
+      "radius": 0.2,
       "text": "fold the pants"
     },
     {
       "cluster": 8,
       "cluster_size": 1,
-      "distance_to_centroid": 0.0,
+      "distance_to_centroid": -0.0,
       "gold_says": [
         "different as fold the pants"
       ],
       "merged_with": [],
-      "radius": 0.3,
+      "radius": 0.2,
       "text": "fold the shirt"
     },
     {
@@ -363,186 +216,288 @@
       "merged_with": [
         "collect the samples"
       ],
-      "radius": 0.3,
+      "radius": 0.2,
       "text": "gather the samples"
     },
     {
       "cluster": 9,
-      "cluster_size": 2,
+      "cluster_size": 1,
       "distance_to_centroid": 0.0,
       "gold_says": [
-        "same as give the pen"
+        "same as hand over the pen"
       ],
-      "merged_with": [
-        "give the pen"
-      ],
-      "radius": 0.3,
-      "text": "hand over the pen"
+      "merged_with": [],
+      "radius": 0.2,
+      "text": "give the pen"
     },
     {
       "cluster": 10,
       "cluster_size": 1,
       "distance_to_centroid": 0.0,
       "gold_says": [
-        "different as insert the rod"
+        "same as give the pen"
       ],
       "merged_with": [],
-      "radius": 0.3,
-      "text": "insert the peg"
+      "radius": 0.2,
+      "text": "hand over the pen"
     },
     {
       "cluster": 11,
       "cluster_size": 1,
-      "distance_to_centroid": 0.0,
+      "distance_to_centroid": -0.0,
+      "gold_says": [
+        "different as insert the rod"
+      ],
+      "merged_with": [],
+      "radius": 0.2,
+      "text": "insert the peg"
+    },
+    {
+      "cluster": 12,
+      "cluster_size": 1,
+      "distance_to_centroid": -0.0,
       "gold_says": [
         "different as insert the peg"
       ],
       "merged_with": [],
-      "radius": 0.3,
+      "radius": 0.2,
       "text": "insert the rod"
+    },
+    {
+      "cluster": 13,
+      "cluster_size": 1,
+      "distance_to_centroid": 0.0,
+      "gold_says": [
+        "same as place the bowl"
+      ],
+      "merged_with": [],
+      "radius": 0.2,
+      "text": "lift the bowl"
     },
     {
       "cluster": 0,
       "cluster_size": 2,
-      "distance_to_centroid": -0.0,
+      "distance_to_centroid": 0.0,
       "gold_says": [
         "same as carry the cup to the sink"
       ],
       "merged_with": [
         "carry the cup to the sink"
       ],
-      "radius": 0.3,
+      "radius": 0.2,
       "text": "move the cup to the sink"
     },
     {
-      "cluster": 13,
+      "cluster": 2,
+      "cluster_size": 2,
+      "distance_to_centroid": 0.0,
+      "gold_says": [
+        "same as close the bottle"
+      ],
+      "merged_with": [
+        "close the bottle"
+      ],
+      "radius": 0.2,
+      "text": "open the bottle"
+    },
+    {
+      "cluster": 14,
       "cluster_size": 1,
       "distance_to_centroid": 0.0,
       "gold_says": [],
       "merged_with": [],
-      "radius": 0.3,
+      "radius": 0.2,
+      "text": "pick up the bottle"
+    },
+    {
+      "cluster": 15,
+      "cluster_size": 1,
+      "distance_to_centroid": 0.0,
+      "gold_says": [],
+      "merged_with": [],
+      "radius": 0.2,
       "text": "pick up the flask"
     },
     {
-      "cluster": 14,
+      "cluster": 17,
       "cluster_size": 1,
       "distance_to_centroid": -0.0,
       "gold_says": [
         "different as place the bowl on the plate"
       ],
       "merged_with": [],
-      "radius": 0.3,
+      "radius": 0.2,
       "text": "place the cup on the plate"
     },
     {
-      "cluster": 15,
+      "cluster": 18,
       "cluster_size": 1,
-      "distance_to_centroid": -0.0,
+      "distance_to_centroid": 0.0,
       "gold_says": [
         "different as pour the oil"
       ],
       "merged_with": [],
-      "radius": 0.3,
+      "radius": 0.2,
       "text": "pour the milk"
     },
     {
-      "cluster": 16,
+      "cluster": 19,
       "cluster_size": 1,
       "distance_to_centroid": 0.0,
       "gold_says": [
         "different as pour the milk"
       ],
       "merged_with": [],
-      "radius": 0.3,
+      "radius": 0.2,
       "text": "pour the oil"
     },
     {
-      "cluster": 17,
-      "cluster_size": 2,
+      "cluster": 20,
+      "cluster_size": 1,
+      "distance_to_centroid": -0.0,
+      "gold_says": [
+        "different as press the red button"
+      ],
+      "merged_with": [],
+      "radius": 0.2,
+      "text": "press the blue button"
+    },
+    {
+      "cluster": 21,
+      "cluster_size": 1,
+      "distance_to_centroid": 0.0,
+      "gold_says": [
+        "same as step on the pedal"
+      ],
+      "merged_with": [],
+      "radius": 0.2,
+      "text": "press the pedal"
+    },
+    {
+      "cluster": 22,
+      "cluster_size": 1,
       "distance_to_centroid": -0.0,
       "gold_says": [
         "different as press the blue button"
       ],
-      "merged_with": [
-        "press the blue button"
-      ],
-      "radius": 0.3,
+      "merged_with": [],
+      "radius": 0.2,
       "text": "press the red button"
     },
     {
-      "cluster": 19,
-      "cluster_size": 2,
+      "cluster": 23,
+      "cluster_size": 1,
+      "distance_to_centroid": -0.0,
+      "gold_says": [],
+      "merged_with": [],
+      "radius": 0.2,
+      "text": "push the cart"
+    },
+    {
+      "cluster": 24,
+      "cluster_size": 1,
       "distance_to_centroid": 0.0,
       "gold_says": [],
-      "merged_with": [
-        "push the cart"
-      ],
-      "radius": 0.3,
+      "merged_with": [],
+      "radius": 0.2,
       "text": "push the cart to the left"
     },
     {
-      "cluster": 20,
+      "cluster": 25,
       "cluster_size": 1,
       "distance_to_centroid": 0.0,
       "gold_says": [
         "different as push the trolley"
       ],
       "merged_with": [],
-      "radius": 0.3,
+      "radius": 0.2,
       "text": "push the crate"
     },
     {
-      "cluster": 22,
+      "cluster": 27,
       "cluster_size": 1,
-      "distance_to_centroid": 0.0,
+      "distance_to_centroid": -0.0,
       "gold_says": [
         "different as push the crate"
       ],
       "merged_with": [],
-      "radius": 0.3,
+      "radius": 0.2,
       "text": "push the trolley"
+    },
+    {
+      "cluster": 28,
+      "cluster_size": 2,
+      "distance_to_centroid": -0.0,
+      "gold_says": [
+        "same as place the bowl"
+      ],
+      "merged_with": [
+        "place the bowl"
+      ],
+      "radius": 0.2,
+      "text": "put down the bowl"
     },
     {
       "cluster": 3,
       "cluster_size": 2,
-      "distance_to_centroid": -0.0,
+      "distance_to_centroid": 0.0,
       "gold_says": [
         "same as close the door"
       ],
       "merged_with": [
         "close the door"
       ],
-      "radius": 0.3,
+      "radius": 0.2,
       "text": "shut the door"
     },
     {
-      "cluster": 24,
+      "cluster": 30,
       "cluster_size": 2,
+      "distance_to_centroid": -0.0,
+      "gold_says": [
+        "same as close the lid"
+      ],
+      "merged_with": [
+        "close the lid"
+      ],
+      "radius": 0.2,
+      "text": "shut the lid"
+    },
+    {
+      "cluster": 31,
+      "cluster_size": 1,
+      "distance_to_centroid": 0.0,
+      "gold_says": [
+        "different as sort the red blocks into the bin"
+      ],
+      "merged_with": [],
+      "radius": 0.2,
+      "text": "sort the blue blocks into the bin"
+    },
+    {
+      "cluster": 32,
+      "cluster_size": 1,
       "distance_to_centroid": 0.0,
       "gold_says": [
         "different as sort the blue blocks into the bin"
       ],
-      "merged_with": [
-        "sort the blue blocks into the bin"
-      ],
-      "radius": 0.3,
+      "merged_with": [],
+      "radius": 0.2,
       "text": "sort the red blocks into the bin"
     },
     {
-      "cluster": 18,
-      "cluster_size": 2,
+      "cluster": 33,
+      "cluster_size": 1,
       "distance_to_centroid": 0.0,
       "gold_says": [
         "same as press the pedal"
       ],
-      "merged_with": [
-        "press the pedal"
-      ],
-      "radius": 0.3,
+      "merged_with": [],
+      "radius": 0.2,
       "text": "step on the pedal"
     },
     {
-      "cluster": 21,
+      "cluster": 26,
       "cluster_size": 2,
       "distance_to_centroid": -0.0,
       "gold_says": [
@@ -551,11 +506,11 @@
       "merged_with": [
         "push the crumbs into the bin"
       ],
-      "radius": 0.3,
+      "radius": 0.2,
       "text": "sweep the crumbs into the bin"
     },
     {
-      "cluster": 23,
+      "cluster": 29,
       "cluster_size": 2,
       "distance_to_centroid": 0.0,
       "gold_says": [
@@ -564,37 +519,38 @@
       "merged_with": [
         "rotate the knob clockwise"
       ],
-      "radius": 0.3,
+      "radius": 0.2,
       "text": "turn the knob clockwise"
     },
     {
       "cluster": 5,
       "cluster_size": 2,
-      "distance_to_centroid": 0.0,
+      "distance_to_centroid": -0.0,
       "gold_says": [
         "same as close the valve"
       ],
       "merged_with": [
         "close the valve"
       ],
-      "radius": 0.3,
+      "radius": 0.2,
       "text": "turn the valve"
     },
     {
       "cluster": 1,
       "cluster_size": 2,
-      "distance_to_centroid": 0.0,
+      "distance_to_centroid": -0.0,
       "gold_says": [
         "same as clean the lens"
       ],
       "merged_with": [
         "clean the lens"
       ],
-      "radius": 0.3,
+      "radius": 0.2,
       "text": "wipe the lens"
     }
   ],
   "configuration": {
+    "colour_weight": 1.0,
     "embedding": {
       "backend": "minilm",
       "contextual": true,
@@ -605,32 +561,36 @@
     },
     "frozen_before_scoring": true,
     "gold_set": "hand",
-    "radius": 0.3,
+    "radius": 0.2,
     "rule": "sliding_8",
     "view": "object"
   },
   "experiment": "final",
   "heldout": {
-    "clusters": 25,
-    "false_merges": 2,
-    "false_splits": 0,
-    "over_merge_rate": 0.2857142857142857,
-    "over_merged_pairs": [
-      {
-        "a": "press the red button",
-        "b": "press the blue button"
-      },
-      {
-        "a": "sort the red blocks into the bin",
-        "b": "sort the blue blocks into the bin"
-      }
-    ],
-    "pair_f1": 0.9375,
+    "clusters": 34,
+    "false_merges": 0,
+    "false_splits": 3,
+    "over_merge_rate": 0.0,
+    "over_merged_pairs": [],
+    "pair_f1": 0.888888888888889,
     "pairs": 24,
     "strings": 46,
     "unassigned": [],
-    "under_merge_rate": 0.0,
-    "under_merged_pairs": []
+    "under_merge_rate": 0.2,
+    "under_merged_pairs": [
+      {
+        "a": "place the bowl",
+        "b": "lift the bowl"
+      },
+      {
+        "a": "hand over the pen",
+        "b": "give the pen"
+      },
+      {
+        "a": "press the pedal",
+        "b": "step on the pedal"
+      }
+    ]
   },
   "split": {
     "clean": true,

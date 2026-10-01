@@ -3,7 +3,7 @@
 Current state of Faultlined for whoever picks it up next. Recent slices are listed in [§14](#14-recent-slices); detail lives in the linked ADR, experiment and review records.
 
 - Stage: production baseline, open since 2026-09-30. MVP complete, all 27 criteria evidenced ([definition of done](spec/definition-of-done.md)).
-- Suite: 1051 passing, coverage 92.37%, mypy strict clean, OpenAPI contract matches.
+- Suite: 1065 passing, coverage 92.37%, mypy strict clean, OpenAPI contract matches.
 - Everything is committed on `main`. Do not tag `scaffold-complete` until the open items in [§6](#6-known-technical-risks) and [§7](#7-next-steps) close.
 
 ## 1. Problem
@@ -69,8 +69,8 @@ More detail: [implementation status](implementation/status.md), [failure modes](
 
 ## 7. Next steps
 
-1. **Integrate the object view** into the engine as a proposal surface: `minilm`, cosine, radius ~0.30, online centroids with `sliding_8`, human confirmation. F1 0.947 constructed / 0.938 hand, zero false merges on the constructed set. Configuration and evidence in [stage 2.5 findings](../experiments/clustering/results/README.md).
-2. **Handle colour adjectives before embedding, or as a separate facet.** The only two false merges measured are `red button`/`blue button` and `red blocks`/`blue blocks` - the pair differs by one colour word and a contextual encoder calls them identical.
+1. **Integrate the object view** into the engine as a proposal surface: `minilm`, cosine, colour facet at weight ~0.5-1.0, radius 0.20-0.30, online centroids with `sliding_8`, human confirmation. Zero false merges on both gold sets; F1 0.968 constructed / 0.889 hand. Configuration and evidence in [stage 2.5 findings](../experiments/clustering/results/README.md).
+2. **Decide whether the object view should ignore the verb.** Three false splits survive after the colour fix - `place the bowl`/`lift the bowl`, `hand over the pen`/`give the pen`, `press the pedal`/`step on the pedal` - all verb synonyms of the same object. The view is not purely object-driven.
 3. Run the §6 fault-injection campaign against `just run` to produce the notifier accuracy figure, including the real-kill `WORKER_LOST` variant and clean replicates. Backlog B-016.
 4. Write down the per-stage ingest targets the owner prefers, replacing the unreachable 50 MB/s one.
 5. Consider formal catalog migrations; inline DDL plus an `ALTER TABLE` block is the current mechanism.
@@ -80,6 +80,7 @@ Done and closed: the baseline runbook (2026-09-28), clean-clone and secrets vali
 ## 8. Open questions
 
 - **Can the action view be solved at all?** Stage 2.5 answered no for a linear projection over general-purpose embeddings: the information is present (a pair probe reaches 0.784 held-out) but not expressible as a distance (threshold 0.724, projection 0.687, unprojected clustering F1 0.488). A representation trained for this task is the untried route.
+- **Should the object view drop the verb entirely?** Clustering on a representation that contains no verb would fix the surviving verb-synonym false splits, at the cost of not being able to say anything about actions.
 - Fixture versioning for LeRobot at full episode size. The current fixture is the 203-frame tabular slice, not the video shards. For MCAP the fixture is a closed-form generator versioned by its arguments and SHA-256, so no download sits in the measurement path.
 - What catalog migration and transaction or outbox strategy reconciles artifact writes with database state?
 - What retry, lease and cancel semantics, and worker concurrency limits, land first?

@@ -392,14 +392,15 @@ answer to "how many tasks are there" depends on arrival order. The online method
 again — but this is exactly the case for it: an engine that proposes clusters and
 lets a human confirm them, rather than one that asserts a number.
 
-**Decision.**
+**Decision** (as at EXP-2.5-04; the colour row is updated by EXP-2.5-05 below).
 
 | | |
 |---|---|
-| **Ship** | Object view, `minilm`, cosine, radius ≈0.30, online centroids with `sliding_8`, human confirmation. F1 0.947 / 0.938, no false merges on constructed, 2 colour-adjective merges on hand. |
+| **Ship** | Object view, `minilm`, cosine, colour facet at weight ≈0.5–1.0, radius 0.20–0.30, online centroids with `sliding_8`, human confirmation. F1 0.968 constructed / 0.889 hand, **zero false merges on both**. |
 | **Do not ship** | The learned projection (EXP-2.5-03). It overfits and it degrades the one view that works. |
 | **Do not ship** | The action view. F1 0.488 is a coin flip, and no representation tried separates it. |
-| **Blocked on** | Colour adjectives. Any deployment needs them either stripped before embedding or carried as a separate facet outside the embedding. This is a one-line change with a measurable target, and it is the highest-value follow-up. |
+| **Resolved** | Colour adjectives (EXP-2.5-05). Lifted out of the embedding onto their own axis. Both false merges gone. |
+| **Still open** | Whether the object view should ignore the verb. Three verb-synonym false splits (`place the bowl`/`lift the bowl`) say it currently does not. |
 | **Needs a human** | Cluster count. Never assert it; propose it. |
 
 **What would change these conclusions.** A representation trained on this task
@@ -418,6 +419,93 @@ just cluster final --set hand --embedding minilm --view object --rule sliding_8 
 just cluster final --set constructed --embedding minilm --view action --rule sliding_8 --radius 0.30
 ```
 
+## EXP-2.5-05: the colour facet removes both false merges
+
+**Question.** EXP-2.5-04's only two false merges were pairs differing by a colour
+adjective. Can that be fixed without touching the encoder?
+
+**Method.** Colour is lifted *out of* the embedding and appended as its own
+orthogonal component. The encoder sees the sentence with the colour removed —
+because colour's contribution there is arbitrary, being whichever of two
+near-synonymous token vectors the tokeniser happened to produce — and a colour
+indicator is concatenated. Weight and radius are swept together on dev, because
+adding a facet rescales every cosine distance and a radius tuned without one is
+wrong for it. Held-out is read once, per gold set, with both frozen.
+
+**The obvious fix was the wrong one, and it is worth writing down.** Stripping the
+colour word before embedding sends "press the red button" and "press the blue
+button" to the *same string*. That does not weaken the merge, it guarantees it.
+Colour has to remain and become explicit; deleting the information and then
+reporting that it went missing is not a fix. There is a test for exactly this, using
+a deliberately colour-blind encoder.
+
+**Result — held-out, once, frozen:**
+
+| gold set | config | pair F1 | false merges | false splits |
+|---|---|---|---|---|
+| constructed, before | weight 0, radius 0.30 | 0.947 | 0 | 8 |
+| constructed, after | weight 0.5, radius 0.30 | **0.968** | **0** | **5** |
+| hand, before | weight 0, radius 0.30 | 0.938 | **2** | 0 |
+| hand, after | weight 1, radius 0.20 | 0.889 | **0** | 3 |
+
+Both target pairs are now in different clusters:
+
+```
+press the red button              -> cluster 22      press the blue button             -> cluster 20
+sort the red blocks into the bin  -> cluster 32      sort the blue blocks into the bin -> cluster 31
+```
+
+**Finding 1. Both false merges are gone, and the hand set's over-merge rate goes
+from 0.286 to zero.** The facet does the job it was built for.
+
+**Finding 2. On the hand set F1 falls, from 0.938 to 0.889, and that is the correct
+trade.** The three false splits that replace the two false merges are all verb
+synonyms: `place the bowl`/`lift the bowl`, `hand over the pen`/`give the pen`,
+`press the pedal`/`step on the pedal`. A false split shows up as two small clusters
+a human merges in seconds; a false merge silently mixes two tasks into a build.
+Trading three of the first for two of the second is what the error-direction
+argument predicts, and it is why over-merge is ranked first throughout.
+
+**Finding 3. The constructed set barely benefits, exactly as its own caveat
+predicted.** 0.941 -> 0.945 on dev, where the hand set goes 0.966 -> 1.000. The
+grid draws its colour pairs from a balanced noun list rather than pairing them
+adversarially, so it never asked the hard question. Two gold sets disagreeing, with
+the smaller and harder one giving the stronger signal, is the case for keeping both.
+
+**Finding 4. The facet reveals a residual failure the false merges were hiding.**
+Those verb-synonym splits are the object view's real weak spot: it is not purely
+object-driven, because the verb still moves the embedding, so "place the bowl" and
+"lift the bowl" land apart despite naming the same object. This was invisible while
+the colour merges dominated the error budget.
+
+**Limitations, stated rather than assumed away.**
+
+- **The lexicon is hand-written.** It covers common colour words and will miss
+  "amber" before it is fixed (see below), and anything a particular site calls its
+  own parts. Every entry is one somebody had to type.
+- **No ordering.** "red" and "blue" are orthogonal, which is the safe default, but a
+  domain that genuinely treats "dark blue" as a variant of "blue" has to say so
+  explicitly.
+- **Multi-colour is approximate.** Sharing one of two colours gives half a unit of
+  overlap, not a clean match.
+- The weight is tuned on one hand set of 24 held-out pairs. It is a small sample and
+  the direction of the effect, not the exact weight, is the transferable result.
+
+**One bug this found in itself.** `colour_index` took its index straight from the
+sorted colour list, so "amber" — alphabetically first — was assigned slot 0, the
+same slot reserved for "no colour". Every sentence mentioning an amber part would
+have been recorded as uncoloured. Caught by asserting that no colour maps to a
+reserved slot, and it is the argument for writing tests against the slot table
+rather than against the one example that motivated the feature.
+
+**Reproduce.**
+
+```bash
+just cluster colours --set hand --embedding minilm --view object --rule sliding_8
+just cluster final --set hand --embedding minilm --view object --rule sliding_8 --radius 0.20 --colour-weight 1.0
+just cluster final --set constructed --embedding minilm --view object --rule sliding_8 --radius 0.30 --colour-weight 0.5
+```
+
 ## Not yet run
 
 - MVP integration of the object view into the engine, and the cluster visualisation.
@@ -425,3 +513,6 @@ just cluster final --set constructed --embedding minilm --view action --rule sli
   started.
 - A representation trained for this task, which is the only remaining route to the
   action view.
+- A learned attribute extractor to replace the colour lexicon, and a decision about
+  whether the object view should ignore the verb entirely — which is what the three
+  verb-synonym false splits are asking for.

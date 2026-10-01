@@ -21,7 +21,7 @@ from typing import Any
 
 import numpy as np
 
-from experiments.clustering import embeddings
+from experiments.clustering import attributes, embeddings
 from experiments.clustering.evaluation import gold, splits
 from experiments.clustering.evaluation.metrics import PairScores
 
@@ -299,6 +299,84 @@ def cmd_projection(args: argparse.Namespace) -> int:
 BOUNDARY_MARGIN = 1.5
 
 
+#: Candidate colour-facet weights. Zero is the current behaviour and is included so
+#: the sweep can report what the facet buys rather than only that it was tried.
+COLOUR_WEIGHTS = (0.0, 0.25, 0.5, 1.0, 2.0, 4.0)
+
+
+def cmd_colours(args: argparse.Namespace) -> int:
+    """Choose the colour-facet weight on dev, sweeping the radius with it.
+
+    The two are coupled - adding a facet changes the scale of every cosine distance,
+    so a radius tuned without one is wrong for it - and they are therefore swept
+    together rather than in sequence. Selection is on dev pairs only.
+    """
+    from experiments.clustering import attributes, centroid_experiment
+    from experiments.clustering.evaluation import evaluation as ev
+    from experiments.clustering.methods.online_centroids import OnlineCentroids
+
+    encoder = embeddings.get(args.embedding)
+    if not embeddings.is_semantic(encoder):
+        print("refusing to fit a colour facet on the null backend: no semantics to offset")
+        return 1
+
+    split = _split_for(args.set_name)
+    texts = sorted({t for pair in split.dev for t in (pair.a, pair.b)})
+    scorer = ev.pair_scorer(split.dev, args.view)
+
+    rows: list[tuple[float, float, float, float, float, int]] = []
+    for weight in COLOUR_WEIGHTS:
+        by_text = attributes.encode_with_colours(encoder, texts, weight)
+        matrix = np.stack([by_text[text] for text in texts])
+        for radius in RADIUS_GRID:
+            model = OnlineCentroids(
+                radius=radius, rule_factory=centroid_experiment.RULES[args.rule]
+            )
+            result = model.fit(matrix, texts)
+            scores = scorer(result.labels, texts, args.rule)
+            rows.append(
+                (
+                    scores.over_merge_rate,
+                    -scores.pair_f1,
+                    weight,
+                    radius,
+                    scores.pair_f1,
+                    len(scores.over_merged),
+                )
+            )
+
+    best = min(rows)
+    payload = {
+        "experiment": "colours",
+        "embedding": embeddings.describe(encoder),
+        "gold_set": args.set_name,
+        "view": args.view,
+        "rule": args.rule,
+        "chosen": {"weight": best[2], "radius": best[3]},
+        "sweep": [
+            {
+                "weight": row[2],
+                "radius": row[3],
+                "dev_pair_f1": row[4],
+                "dev_false_merges": row[5],
+            }
+            for row in rows
+        ],
+        "split": "dev",
+    }
+    suffix = "" if args.set_name == "hand" else f"-{args.set_name}"
+    path = _write(f"colours-{encoder.name}-{args.view}{suffix}", payload)
+
+    print(f"embedding {encoder.name}  view={args.view}  gold={args.set_name}  rule={args.rule}")
+    print(f"{'weight':>7s} {'radius':>7s} {'dev F1':>8s} {'dev over':>9s}")
+    for row in sorted(rows, key=lambda item: (item[2], item[3])):
+        marker = "  <-" if (row[2], row[3]) == (best[2], best[3]) else ""
+        print(f"{row[2]:7.2f} {row[3]:7.2f} {row[4]:8.3f} {row[5]:9d}{marker}")
+    print(f"\nchosen: colour weight {best[2]:g}, radius {best[3]:g}")
+    print(f"wrote {path.relative_to(Path.cwd())}")
+    return 0
+
+
 def cmd_final(args: argparse.Namespace) -> int:
     """Score the frozen configuration on held-out pairs, once, and audit its edges.
 
@@ -323,8 +401,8 @@ def cmd_final(args: argparse.Namespace) -> int:
         return 1
 
     split = _split_for(args.set_name)
-    vectors = embeddings.encode_all(encoder, sorted(_vocab_for(args.set_name)))
-    by_text = sep_all(vectors, sorted(_vocab_for(args.set_name)))
+    vocabulary = sorted(_vocab_for(args.set_name))
+    by_text = attributes.encode_with_colours(encoder, vocabulary, args.colour_weight)
 
     heldout_texts = sorted({t for pair in split.heldout for t in (pair.a, pair.b)})
     heldout_vectors = np.stack([by_text[text] for text in heldout_texts])
@@ -356,7 +434,16 @@ def cmd_final(args: argparse.Namespace) -> int:
     boundary: list[dict[str, Any]] = []
     for text in heldout_texts:
         label = centroid_of[text]
-        distance = float(1.0 - by_text[text] @ centroids[label])
+        # A true cosine distance, normalised on both sides. The clustering's own
+        # `1 - dot` assumes unit points, and a centroid is a mean rather than a
+        # point, so reporting that expression here would print a number the radius
+        # is not actually compared against.
+        point = by_text[text]
+        centre = centroids[label]
+        cosine = float(point @ centre) / (
+            float(np.linalg.norm(point)) * float(np.linalg.norm(centre))
+        )
+        distance = 1.0 - cosine
         if distance > args.radius * BOUNDARY_MARGIN:
             continue
         peers = [peer for peer in members[label] if peer != text]
@@ -381,6 +468,7 @@ def cmd_final(args: argparse.Namespace) -> int:
             "gold_set": args.set_name,
             "rule": args.rule,
             "radius": args.radius,
+            "colour_weight": args.colour_weight,
             "frozen_before_scoring": True,
         },
         "split": split.report(),
@@ -540,7 +628,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     final.add_argument("--set", dest="set_name", default="hand", choices=GOLD_SETS)
     final.add_argument("--rule", default="sliding_8")
     final.add_argument("--radius", type=float, default=0.30)
+    final.add_argument("--colour-weight", type=float, default=0.0)
     final.set_defaults(run=cmd_final)
+
+    colours = subparsers.add_parser(
+        "colours", help="choose the colour-facet weight on dev, sweeping the radius"
+    )
+    colours.add_argument("--embedding", default="minilm")
+    colours.add_argument("--view", default="object", choices=("action", "object"))
+    colours.add_argument("--set", dest="set_name", default="hand", choices=GOLD_SETS)
+    colours.add_argument("--rule", default="sliding_8")
+    colours.set_defaults(run=cmd_colours)
 
     args = parser.parse_args(argv)
     result: int = args.run(args)
