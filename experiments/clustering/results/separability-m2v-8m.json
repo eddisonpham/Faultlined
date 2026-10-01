@@ -1,16 +1,4 @@
 {
-  "ceilings": {
-    "action": {
-      "labelled_pairs": 74,
-      "supervised_balanced_accuracy": 0.7371212121212121,
-      "view": "action"
-    },
-    "object": {
-      "labelled_pairs": 92,
-      "supervised_balanced_accuracy": 0.565625,
-      "view": "object"
-    }
-  },
   "embedding": {
     "backend": "m2v-8m",
     "contextual": false,
@@ -20,6 +8,39 @@
     "semantic": true
   },
   "experiment": "separability",
+  "gold_set": "hand",
+  "probes": {
+    "action": {
+      "alpha": 1.0,
+      "dev_balanced_accuracy": 0.9583333333333333,
+      "dev_cv_balanced_accuracy": 0.6916666666666667,
+      "dev_pairs": 22,
+      "generalisation_gap": 0.06666666666666665,
+      "headroom": 0.125,
+      "heldout_balanced_accuracy": 0.625,
+      "heldout_pairs": 15,
+      "view": "action"
+    },
+    "object": {
+      "alpha": 0.1,
+      "dev_balanced_accuracy": 1.0,
+      "dev_cv_balanced_accuracy": 0.7777777777777778,
+      "dev_pairs": 24,
+      "generalisation_gap": 0.025396825396825418,
+      "headroom": 0.2523809523809524,
+      "heldout_balanced_accuracy": 0.7523809523809524,
+      "heldout_pairs": 22,
+      "view": "object"
+    }
+  },
+  "split": {
+    "clean": true,
+    "components": 28,
+    "dev_pairs": 26,
+    "heldout_pairs": 24,
+    "largest_component_pairs": 8,
+    "shared_components": 0
+  },
   "verification": {
     "checks": [
       "shape and finiteness",

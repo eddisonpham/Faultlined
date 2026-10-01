@@ -32,20 +32,59 @@ def _write(name: str, payload: dict[str, Any]) -> Path:
     return path
 
 
-def cmd_gold(_args: argparse.Namespace) -> int:
-    """Report the gold set and the leakage report for the dev/held-out split."""
-    result = splits.split()
+#: The two gold sets. `hand` is realistic and small; `constructed` has labels
+#: that are exact by construction and is an upper bound. Both are available to
+#: every scoring command, because a conclusion is only worth stating when the two
+#: agree - see `evaluation/gold_grid.py` for what each one can and cannot answer.
+GOLD_SETS = ("hand", "constructed")
+
+
+def _gold_for(name: str) -> tuple[gold.GoldPair, ...]:
+    if name == "hand":
+        return gold.GOLD_PAIRS
+    from experiments.clustering.evaluation import gold_grid
+
+    return gold_grid.as_gold_pairs(gold_grid.constructed_pairs())
+
+
+def _vocab_for(name: str) -> tuple[str, ...]:
+    if name == "hand":
+        return gold.vocab()
+    from experiments.clustering.evaluation import gold_grid
+
+    return gold_grid.vocab(gold_grid.constructed_pairs())
+
+
+def _split_for(name: str) -> splits.Split:
+    if name == "hand":
+        return splits.split()
+    from experiments.clustering.evaluation import gold_grid
+
+    result: splits.Split = gold_grid.split(gold_grid.constructed_pairs())[2]
+    return result
+
+
+def cmd_gold(args: argparse.Namespace) -> int:
+    """Report a gold set and the leakage report for its dev/held-out split."""
+    result = _split_for(args.set_name)
+    pairs = _gold_for(args.set_name)
+    from experiments.clustering.evaluation import gold_grid
+
+    summary = (
+        gold.summary()
+        if args.set_name == "hand"
+        else gold_grid.summary(gold_grid.constructed_pairs())
+    )
     payload = {
         "experiment": "gold",
-        "summary": gold.summary(),
+        "set": args.set_name,
+        "summary": summary,
         "split": result.report(),
         "ambiguous_pairs": [
-            {"a": pair.a, "b": pair.b, "note": pair.note}
-            for pair in gold.GOLD_PAIRS
-            if pair.ambiguous
+            {"a": pair.a, "b": pair.b, "note": pair.note} for pair in pairs if pair.ambiguous
         ],
     }
-    path = _write("gold", payload)
+    path = _write("gold" if args.set_name == "hand" else f"gold-{args.set_name}", payload)
     print(json.dumps({k: payload[k] for k in ("summary", "split")}, indent=2))
     print(f"\nwrote {path.relative_to(Path.cwd())}")
     if not result.clean:
@@ -71,7 +110,7 @@ def cmd_centroids(args: argparse.Namespace) -> int:
         )
         return 1
 
-    split = splits.split()
+    split = _split_for(args.set_name)
     texts = sorted({t for pair in split.dev for t in (pair.a, pair.b)})
     scorer = ev.pair_scorer(split.dev, "action")
 
@@ -90,6 +129,7 @@ def cmd_centroids(args: argparse.Namespace) -> int:
     payload = {
         "experiment": "centroids",
         "embedding": embeddings.describe(encoder),
+        "gold_set": args.set_name,
         "radius": args.radius,
         "split": "dev",
         "inputs": len(texts),
@@ -129,23 +169,31 @@ def cmd_separability(args: argparse.Namespace) -> int:
             print(f"  - {failure}")
         return 1
 
-    texts = sorted(gold.vocab())
+    pairs = _gold_for(args.set_name)
+    texts = sorted(_vocab_for(args.set_name))
     vectors = embeddings.encode_all(encoder, texts)
     by_text = sep.all_vectors(vectors, texts)
-    report = sep.separability(by_text)
-    ceilings = sep.ceilings(by_text)
+    report = sep.separability(by_text, pairs)
+    split = _split_for(args.set_name)
+    probes = sep.probes(by_text, split.dev, split.heldout, split.dev_pair_groups)
 
     payload = {
         "experiment": "separability",
         "embedding": embeddings.describe(encoder),
+        "gold_set": args.set_name,
         "verification": check.as_dict(),
+        "split": split.report(),
         "views": {name: value.as_dict() for name, value in report.items()},
-        "ceilings": {name: value.as_dict() for name, value in ceilings.items()},
+        "probes": {name: value.as_dict() for name, value in probes.items()},
     }
-    path = _write(f"separability-{encoder.name}", payload)
+    suffix = "" if args.set_name == "hand" else f"-{args.set_name}"
+    path = _write(f"separability-{encoder.name}{suffix}", payload)
 
     kind = "contextual" if embeddings.is_contextual(encoder) else "static"
-    print(f"embedding {encoder.name} ({kind}) dim={encoder.dim}  strings={len(texts)}")
+    print(
+        f"embedding {encoder.name} ({kind}) dim={encoder.dim}  strings={len(texts)}  "
+        f"gold={args.set_name}"
+    )
     print(f"verified: {'ok' if check.ok else 'FAILED'} {list(check.checks)}")
     print(
         f"{'view':7s} {'pos n':>5s} {'neg n':>5s} {'pos_min':>8s} {'pos_mean':>9s} "
@@ -160,7 +208,7 @@ def cmd_separability(args: argparse.Namespace) -> int:
             f"{value.false_merges:6d} {value.false_splits:6d}"
         )
     for value in report.values():
-        ceiling = ceilings[value.view]
+        probe = probes[value.view]
         verdict = (
             f"clean below {value.clean_threshold:.3f}"
             if value.clean_threshold is not None
@@ -168,9 +216,10 @@ def cmd_separability(args: argparse.Namespace) -> int:
         )
         print(f"  {value.view}: {verdict}")
         print(
-            f"    supervised ceiling (LOO 1-NN on the labels): "
-            f"{ceiling.supervised_balanced_accuracy:.3f} "
-            f"over {ceiling.labelled_pairs} labelled items"
+            f"    linear probe, fit on {probe.dev_pairs} dev pairs and scored on "
+            f"{probe.heldout_pairs} held-out: {probe.heldout_balanced_accuracy:.3f} "
+            f"(dev component-CV {probe.dev_cv_balanced_accuracy:.3f}, "
+            f"dev train {probe.dev_balanced_accuracy:.3f}, alpha {probe.alpha:g})"
         )
     print(f"\nwrote {path.relative_to(Path.cwd())}")
     return 0
@@ -179,18 +228,21 @@ def cmd_separability(args: argparse.Namespace) -> int:
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="experiments.clustering")
     subparsers = parser.add_subparsers(dest="command", required=True)
-    subparsers.add_parser("gold", help="report the gold set and its split").set_defaults(
-        run=cmd_gold
-    )
+    gold_parser = subparsers.add_parser("gold", help="report a gold set and its split")
+    gold_parser.add_argument("--set", dest="set_name", default="hand", choices=GOLD_SETS)
+    gold_parser.set_defaults(run=cmd_gold)
+
     centroids = subparsers.add_parser("centroids", help="decide the centroid rule on the dev split")
     centroids.add_argument("--embedding", default="m2v-8m")
     centroids.add_argument("--radius", type=float, default=0.35)
+    centroids.add_argument("--set", dest="set_name", default="hand", choices=GOLD_SETS)
     centroids.set_defaults(run=cmd_centroids)
 
     separate = subparsers.add_parser(
         "separability", help="check whether the two gold classes separate at all"
     )
     separate.add_argument("--embedding", default="m2v-8m")
+    separate.add_argument("--set", dest="set_name", default="hand", choices=GOLD_SETS)
     separate.set_defaults(run=cmd_separability)
 
     args = parser.parse_args(argv)

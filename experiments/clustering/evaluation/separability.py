@@ -16,10 +16,15 @@ So this reports the full picture - both distributions, the best threshold, and
 what that threshold still gets wrong - rather than a single score that would look
 fine either way.
 
-It also reports the same measurement per view, because that is the whole reason
-for the two-view design: the action view may be separable while the object view
-is not, or the reverse, and that asymmetry is the finding that decides whether
-clustering on embeddings is viable at all.
+It also reports a linear **probe** fitted on dev pairs and scored on held-out
+pairs. That second number is what distinguishes "the information is not in these
+vectors" from "a single threshold cannot reach it", and it is the budget any
+learned action/object projection has to work within.
+
+Both measurements are reported per view, because that is the whole reason for the
+two-view design: the action view may be separable while the object view is not,
+or the reverse, and that asymmetry is the finding that decides whether clustering
+on embeddings is viable at all.
 """
 
 from __future__ import annotations
@@ -144,97 +149,262 @@ def separability(
 
 
 @dataclass(frozen=True, slots=True)
-class Ceiling:
-    """The best any method on these features could do, measured not assumed.
+class Probe:
+    """How far a *learned* method could get on these vectors, measured not assumed.
 
-    Separability above answers whether a *single threshold on raw similarity*
+    Separability above answers whether a **single threshold on raw similarity**
     works. It cannot say whether the information is absent from the features or
-    merely not exposed by distance. A leave-one-out 1-nearest-neighbour on the
-    gold labels does: it is the most generous thing the representation can do,
-    because it is allowed to see the answer.
+    merely not exposed by distance. This does: it fits a linear probe on pair
+    differences and scores it on pairs the fit never saw.
 
-    If the supervised ceiling is also low, the labels or the representation are
-    at fault and no encoder will fix it. If the ceiling is high while the
-    threshold score is low, the information is there and a *learned* method -
-    which is what the action/object projection would be - could get at it.
+    Read it as the budget for a learned projection. If the held-out probe is near
+    chance, no projection over these vectors can work and the encoder is the
+    wrong place to spend effort. If it is high while the threshold score is low,
+    the information is there and a projection is worth building.
     """
 
     view: str
-    supervised_balanced_accuracy: float
-    labelled_pairs: int
+    #: Leave-one-component-out balanced accuracy inside dev. This is what chose
+    #: `alpha`, and it is the honest estimate of what the probe does on unseen
+    #: material - the training score next to it only shows the size of the gap.
+    dev_cv_balanced_accuracy: float
+    #: Balanced accuracy on the pairs the probe was fitted on. Shown to expose
+    #: overfitting, never quoted as a result.
+    dev_balanced_accuracy: float
+    #: Balanced accuracy on the held-out pairs. This is the number to quote; the
+    #: dev number only shows how much of it is overfitting.
+    heldout_balanced_accuracy: float
+    alpha: float
+    dev_pairs: int
+    heldout_pairs: int
+
+    @property
+    def headroom(self) -> float:
+        """Held-out balanced accuracy above the 0.5 a coin flip would score."""
+        return self.heldout_balanced_accuracy - 0.5
+
+    @property
+    def generalisation_gap(self) -> float:
+        return self.dev_cv_balanced_accuracy - self.heldout_balanced_accuracy
 
     def as_dict(self) -> dict[str, object]:
         return {
             "view": self.view,
-            "supervised_balanced_accuracy": self.supervised_balanced_accuracy,
-            "labelled_pairs": self.labelled_pairs,
+            "dev_cv_balanced_accuracy": self.dev_cv_balanced_accuracy,
+            "dev_balanced_accuracy": self.dev_balanced_accuracy,
+            "heldout_balanced_accuracy": self.heldout_balanced_accuracy,
+            "headroom": self.headroom,
+            "generalisation_gap": self.generalisation_gap,
+            "alpha": self.alpha,
+            "dev_pairs": self.dev_pairs,
+            "heldout_pairs": self.heldout_pairs,
         }
 
 
-def supervised_ceiling(
-    vectors_by_text: dict[str, np.ndarray],
-    pairs: Sequence[GoldPair],
-    view: str,
-) -> Ceiling:
-    """Leave-one-out 1-NN balanced accuracy on the gold labels.
+#: Ridge strengths tried on dev. Small values overfit the pair set, large ones
+#: collapse to the mean; both ends are reported through the dev/held-out gap.
+_ALPHAS = (0.01, 0.1, 1.0, 10.0, 100.0)
 
-    Each pair contributes its two strings as two items carrying the pair's label.
-    Predicting an item means the most similar *other* item should carry the same
-    label. This is not a method anyone would ship - it needs the labels - but it
-    is the honest ceiling for what these vectors encode.
+
+def _features(
+    vectors: dict[str, np.ndarray], pairs: Sequence[GoldPair], view: str
+) -> tuple[np.ndarray, np.ndarray]:
+    """Difference vectors plus their length, with +-1 targets, globally scaled.
+
+    The difference of the two vectors is the natural feature for "are these the
+    same": it is antisymmetric, so swapping the pair flips the sign rather than
+    silently changing the answer.
+
+    Two things about the magnitude, both learned the hard way:
+
+    Normalising each row away throws out the primary signal. For unit-norm
+    embeddings the length of the difference is a monotone function of cosine
+    distance - the same evidence - so scaling it out leaves only the direction,
+    which says less.
+
+    Passing the difference alone is still not enough, because magnitude is not a
+    linear function of the difference. A linear probe needs one fixed direction to
+    score highly in; if two near-identical strings sit close together but along
+    some arbitrary axis, no such direction exists and the probe scores chance on a
+    distinction a cosine threshold would have caught. So the length is appended as
+    its own column. That guarantees the probe is at least as informative as the
+    threshold it is meant to improve on - a probe that loses to a threshold would
+    be an artefact of the features, not a fact about the encoder.
+
+    A constant column closes the last gap. The decision rule is "score above
+    zero", so without an intercept the boundary is pinned to the origin and no
+    weight can separate *small* values from *large* ones - a coefficient on the
+    length column alone scores both classes the same sign and lands at exactly
+    0.500. With an intercept the boundary can sit between a paraphrase's near-zero
+    difference and a different task's large one.
+
+    A single global scale is applied to the non-constant columns, so the ridge
+    penalty is not chasing the units of whatever encoder produced the vectors.
     """
     attribute = f"same_{view}"
-    items: list[np.ndarray] = []
-    labels: list[int] = []
+    rows: list[np.ndarray] = []
+    lengths: list[float] = []
+    targets: list[float] = []
     for pair in pairs:
         verdict = getattr(pair, attribute)
         if verdict is None:
             continue
-        # Two strings per pair and they share one label, so the label is appended
-        # twice. Appending it once made `labels` half the length of `items` and
-        # the nearest-neighbour lookup indexed out of bounds.
-        items.append(vectors_by_text[pair.a])
-        items.append(vectors_by_text[pair.b])
-        labels.extend([1 if verdict else 0, 1 if verdict else 0])
-    if not items:
+        difference = vectors[pair.a] - vectors[pair.b]
+        norm = float(np.linalg.norm(difference))
+        if norm == 0.0:
+            # Identical vectors carry no evidence either way, and a zero row
+            # would contribute a divide-by-zero later.
+            continue
+        rows.append(difference)
+        lengths.append(norm)
+        targets.append(1.0 if verdict else -1.0)
+    if not rows:
         raise ValueError(f"view {view!r} has no decided pairs")
-    if len(items) != len(labels):
-        raise ValueError(f"{len(items)} items but {len(labels)} labels")
 
-    matrix = np.stack(items)
-    truth = np.array(labels)
-    similarity = matrix @ matrix.T
-    # Own row is the only one to exclude; everything else is fair game.
-    np.fill_diagonal(similarity, -np.inf)
+    stacked = np.stack(rows)
+    scale = float(np.sqrt((stacked**2).sum(axis=1).mean()))
+    if scale > 0.0:
+        stacked = stacked / scale
+    length_column = np.asarray(lengths, dtype=float).reshape(-1, 1)
+    length_scale = float(np.sqrt((length_column**2).mean()))
+    if length_scale > 0.0:
+        length_column = length_column / length_scale
+    features = np.hstack([stacked, length_column, np.ones((len(stacked), 1))])
+    return features, np.array(targets)
 
-    positives = truth == 1
+
+def _balanced_accuracy(scores: np.ndarray, targets: np.ndarray) -> float:
+    """Balanced accuracy at sign zero.
+
+    The features carry a constant column, so zero is a real fitted intercept
+    rather than a forced boundary through the origin, and the model predicts
+    "same" exactly when it scores above zero. There is no threshold to tune here,
+    which matters: tuning one on the held-out pairs would quietly spend the
+    held-out set.
+    """
+    positives = targets > 0
     negatives = ~positives
-    correct = np.zeros(len(truth), dtype=bool)
-    for index in range(len(truth)):
-        correct[index] = truth[int(np.argmax(similarity[index]))] == truth[index]
-
-    true_positive = float(correct[positives].sum())
-    true_negative = float(correct[negatives].sum())
-    balanced = 0.5 * (
-        (true_positive / int(positives.sum()) if positives.any() else 0.0)
-        + (true_negative / int(negatives.sum()) if negatives.any() else 0.0)
-    )
-    return Ceiling(
-        view=view,
-        supervised_balanced_accuracy=float(balanced),
-        labelled_pairs=len(truth),
-    )
+    if not positives.any() or not negatives.any():
+        raise ValueError("probe scoring needs both classes")
+    return 0.5 * (float((scores[positives] > 0).mean()) + float((scores[negatives] <= 0).mean()))
 
 
-def ceilings(
+def _loo_scores(kernel: np.ndarray, targets: np.ndarray, alpha: float) -> np.ndarray:
+    """Leave-one-out decision residuals for ridge, in closed form.
+
+    Refitting once per dev pair is affordable but pointless: for a kernel ridge
+    fit the hat matrix gives every leave-one-out residual directly as
+    ``(y_i - f_i) / (1 - h_ii)``. One solve, all the folds.
+
+    Validated against explicit per-fold refitting in
+    `tests/unit/test_clustering_methods.py`; taking ``1 - h_ii`` from the solved
+    dual weights instead of the inverse diagonal scores every model at exactly
+    0.500.
+    """
+    regularised = kernel + alpha * np.eye(len(kernel))
+    inverse: np.ndarray = np.linalg.solve(regularised, np.eye(len(kernel)))
+    fitted: np.ndarray = kernel @ (inverse @ targets)
+    # The smoother is S = K(K+aI)^-1 = I - a(K+aI)^-1, so 1 - S_ii is the scaled
+    # diagonal of the inverse.
+    one_minus_s: np.ndarray = alpha * np.diag(inverse)
+    residual: np.ndarray = (targets - fitted) / one_minus_s
+    return residual
+
+
+def _group_cv_score(
+    kernel: np.ndarray, targets: np.ndarray, groups: np.ndarray, alpha: float
+) -> float:
+    """Leave-one-*component*-out balanced accuracy.
+
+    Plain leave-one-pair-out scores 1.000 on the constructed dev set, which is not
+    a good result but a contaminated one: 195 dev pairs sit in roughly fifty
+    leakage components, so holding out one pair leaves its paraphrases in training
+    and the model simply recognises the task. The component is the unit of
+    independence this whole harness already uses for the split, so it is the unit
+    the fold uses too.
+    """
+    scores = np.empty(len(targets), dtype=float)
+    for group in np.unique(groups):
+        held = groups == group
+        train = ~held
+        if not train.any() or not held.any():  # pragma: no cover - defensive
+            continue
+        sub = kernel[np.ix_(train, train)] + alpha * np.eye(int(train.sum()))
+        dual: np.ndarray = np.linalg.solve(sub, targets[train])
+        scores[held] = kernel[np.ix_(held, train)] @ dual
+    return _balanced_accuracy(scores, targets)
+
+
+def probe(
     vectors_by_text: dict[str, np.ndarray],
-    pairs: Sequence[GoldPair] | None = None,
-) -> dict[str, Ceiling]:
-    from experiments.clustering.evaluation import gold
+    dev: Sequence[GoldPair],
+    heldout: Sequence[GoldPair],
+    view: str,
+    dev_groups: Sequence[int] = (),
+) -> Probe:
+    """Fit a linear probe on dev pairs, score it on held-out pairs.
 
-    chosen = tuple(pairs) if pairs is not None else gold.GOLD_PAIRS
+    A closed-form ridge regression rather than a logistic solver: the answer is a
+    linear separability question, the fit is exact and deterministic, and it adds
+    no dependency to an experiment package that is otherwise numpy alone.
+
+    The label belongs to the **pair**, which is why this is not a per-string
+    nearest-neighbour score. A string appears in many pairs carrying opposite
+    labels - "pick up the red cube" is the same action as "grab the red cube" and
+    a different action from "push the red cube" - so a per-string classifier is
+    being asked a question with no consistent answer and scores at chance. That
+    was the first implementation's bug, and it reported 0.478 on the action view
+    where the real answer is well above chance.
+    """
+    dev_x, dev_y = _features(vectors_by_text, dev, view)
+    heldout_x, heldout_y = _features(vectors_by_text, heldout, view)
+
+    gram = dev_x @ dev_x.T
+    eye = np.eye(len(dev_x))
+    if len(dev_groups) == len(dev_x):
+        fold_units: np.ndarray = np.asarray(dev_groups)
+    else:
+        # No group information supplied: fall back to per-pair folds rather than
+        # inventing an independence the caller did not provide.
+        fold_units = np.arange(len(dev_x))
+    # (CV score, alpha). alpha is chosen by cross-validation *inside dev*, so
+    # neither the dev pairs nor the held-out pairs influence it; held-out is read
+    # once, at the end, for the alpha already fixed.
+    best: tuple[float, float] | None = None
+    for alpha in _ALPHAS:
+        cv_score = _group_cv_score(gram, dev_y, fold_units, alpha)
+        if best is None or cv_score > best[0]:
+            best = (cv_score, alpha)
+    if best is None:  # pragma: no cover - _ALPHAS is a non-empty constant
+        raise ValueError(f"view {view!r} fitted no probe")
+
+    cv_score, alpha = best
+    # Solved in sample space, which is the cheap form: the Gram matrix is
+    # n-by-n rather than 256-by-256. That yields dual weights over the dev
+    # pairs, so they are mapped back to feature space before scoring.
+    weights = dev_x.T @ np.linalg.solve(gram + alpha * eye, dev_y)
+    dev_score = _balanced_accuracy(dev_x @ weights, dev_y)
+    heldout_score = _balanced_accuracy(heldout_x @ weights, heldout_y)
+    return Probe(
+        view=view,
+        dev_cv_balanced_accuracy=float(cv_score),
+        dev_balanced_accuracy=float(dev_score),
+        heldout_balanced_accuracy=float(heldout_score),
+        alpha=float(alpha),
+        dev_pairs=len(dev_x),
+        heldout_pairs=len(heldout_x),
+    )
+
+
+def probes(
+    vectors_by_text: dict[str, np.ndarray],
+    dev: Sequence[GoldPair],
+    heldout: Sequence[GoldPair],
+    dev_groups: Sequence[int] = (),
+) -> dict[str, Probe]:
     return {
-        view: supervised_ceiling(vectors_by_text, chosen, view) for view in ("action", "object")
+        view: probe(vectors_by_text, dev, heldout, view, dev_groups)
+        for view in ("action", "object")
     }
 
 

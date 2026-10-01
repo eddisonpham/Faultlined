@@ -71,6 +71,14 @@ class Split:
     #: Largest component, in pairs. Large values mean the set is highly
     #: interconnected and no split can be balanced.
     largest_component: int
+    #: Leakage component of each pair in `dev`, positionally aligned.
+    #: Carried so that cross-validation inside dev can use the *component* as its
+    #: fold unit - pairs inside one component are paraphrases of each other, so
+    #: holding out a single pair while its siblings stay in training makes the
+    #: validation score meaningless.
+    dev_pair_groups: tuple[int, ...] = ()
+    #: Leakage component of each pair in `heldout`, positionally aligned.
+    heldout_pair_groups: tuple[int, ...] = ()
 
     @property
     def clean(self) -> bool:
@@ -197,6 +205,10 @@ def split() -> Split:
         heldout_components=frozenset(sizes) - dev_components,
         components=len(sizes),
         largest_component=max(sizes.values()) if sizes else 0,
+        dev_pair_groups=tuple(min(comps) for pair, comps in labelled if comps & dev_components),
+        heldout_pair_groups=tuple(
+            min(comps) for pair, comps in labelled if not comps & dev_components
+        ),
     )
 
 

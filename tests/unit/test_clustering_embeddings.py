@@ -96,42 +96,80 @@ def test_a_view_with_no_decided_pairs_is_refused() -> None:
         sep.separability({"a": _unit(_POS_A), "b": _unit(_POS_B)}, ())
 
 
-@pytest.mark.unit
-def test_the_ceiling_reproduces_a_learnable_pattern() -> None:
-    """Sanity check on the diagnostic itself: two clusters must ceiling at 1.0.
+def _probe_fixture():
+    """Eight same-task pairs and eight different-task pairs, cleanly split.
 
-    Without this, a ceiling of 0.77 in EXP-2.5-01 could just mean the measurement
-    is broken rather than the representation being weak. Uses the clustered
-    geometry, because a threshold and a nearest-neighbour rule disagree about what
-    a "different" pair should look like.
+    A same pair is a point and a near-copy of itself; a different pair is a point
+    and its negation. Both classes are present on both sides of the split, because
+    balanced accuracy is undefined with only one.
     """
-    pairs = (
-        GoldPair("a", "b", True, True),
-        GoldPair("c", "d", True, True),
-        GoldPair("g", "h", False, False),
-    )
-    ceiling = sep.supervised_ceiling(_clustered_negatives(), pairs, "action")
-    assert ceiling.supervised_balanced_accuracy == pytest.approx(1.0)
-    # Two strings per pair, each carrying the pair's label.
-    assert ceiling.labelled_pairs == 6
+    rng = np.random.default_rng(4)
+    vectors: dict[str, np.ndarray] = {}
+    same: list[GoldPair] = []
+    different: list[GoldPair] = []
+    for index in range(8):
+        centre = rng.normal(size=6).astype(np.float32)
+        centre = _unit(centre)
+        near = _unit(centre + 0.01 * rng.normal(size=6).astype(np.float32))
+        vectors[f"same_a{index}"] = centre
+        vectors[f"same_b{index}"] = near
+        same.append(GoldPair(f"same_a{index}", f"same_b{index}", True, True))
+        vectors[f"diff_a{index}"] = centre
+        vectors[f"diff_b{index}"] = _unit(-centre)
+        different.append(GoldPair(f"diff_a{index}", f"diff_b{index}", False, False))
+    pairs = tuple(same) + tuple(different)
+    dev = (same[:4], different[:4])
+    heldout = (same[4:], different[4:])
+    return vectors, pairs, dev, heldout
 
 
 @pytest.mark.unit
-def test_the_ceiling_cannot_silently_misalign_items_and_labels() -> None:
-    """Both strings of a pair share one label, so the lengths must match.
+def test_the_probe_reproduces_a_learnable_pattern() -> None:
+    """Sanity check on the diagnostic itself: a separable set must probe at 1.0.
 
-    The first implementation appended the label once and indexed out of bounds.
+    Without this, a probe of 0.82 in the experiment record could just mean the
+    measurement is broken rather than the representation being good.
     """
-    pairs = (GoldPair("a", "b", True, True), GoldPair("e", "f", False, False))
-    ceiling = sep.supervised_ceiling(_two_classes(), pairs, "action")
-    assert ceiling.labelled_pairs == 4
+    vectors, _pairs, (dev_same, dev_diff), (held_same, held_diff) = _probe_fixture()
+    dev = dev_same + dev_diff
+    heldout = held_same + held_diff
+    result = sep.probe(vectors, dev, heldout, "action", range(len(dev)))
+    assert result.heldout_balanced_accuracy == pytest.approx(1.0)
+    assert result.headroom == pytest.approx(0.5)
+    assert result.dev_pairs == len(dev)
+    assert result.heldout_pairs == len(heldout)
 
 
 @pytest.mark.unit
-def test_ambiguous_pairs_are_excluded_from_the_ceiling() -> None:
+def test_the_probe_scores_pairs_not_strings() -> None:
+    """The label belongs to the pair, so the counts are pairs.
+
+    The first implementation scored a per-string nearest neighbour, which stamped
+    each pair's label onto both of its strings. 27% of the constructed set's
+    strings carry both labels that way, so it answered at chance and was wrong.
+    """
+    vectors, _pairs, (dev_same, dev_diff), (held_same, held_diff) = _probe_fixture()
+    dev = dev_same + dev_diff
+    heldout = held_same + held_diff
+    result = sep.probe(vectors, dev, heldout, "action", range(len(dev)))
+    assert result.dev_pairs == len(dev) == 8
+    assert result.heldout_pairs == len(heldout) == 8
+
+
+@pytest.mark.unit
+def test_the_probe_beats_a_threshold_on_the_separable_fixture() -> None:
+    """A probe that loses to a plain threshold would be a feature-set artefact."""
+    vectors, pairs, _dev, _heldout = _probe_fixture()
+    report = sep.separability(vectors, pairs)["action"]
+    assert report.false_merges == 0
+    assert report.false_splits == 0
+
+
+@pytest.mark.unit
+def test_ambiguous_pairs_are_excluded_from_the_probe() -> None:
     pairs = (GoldPair("a", "b", None, True, "arguable"),)
     with pytest.raises(ValueError, match="no decided pairs"):
-        sep.supervised_ceiling(_two_classes(), pairs, "action")
+        sep.probe(_two_classes(), pairs, (), "action")
 
 
 @pytest.mark.unit

@@ -1,0 +1,83 @@
+{
+  "embedding": {
+    "backend": "null",
+    "contextual": false,
+    "dim": 64,
+    "fingerprint": "null-v1-dim64-seed0",
+    "model": null,
+    "semantic": false
+  },
+  "experiment": "separability",
+  "gold_set": "constructed",
+  "probes": {
+    "action": {
+      "alpha": 0.01,
+      "dev_balanced_accuracy": 0.9281578947368421,
+      "dev_cv_balanced_accuracy": 0.8505263157894737,
+      "dev_pairs": 195,
+      "generalisation_gap": 0.034923478910041106,
+      "headroom": 0.3156028368794326,
+      "heldout_balanced_accuracy": 0.8156028368794326,
+      "heldout_pairs": 190,
+      "view": "action"
+    },
+    "object": {
+      "alpha": 0.1,
+      "dev_balanced_accuracy": 0.9091008293321694,
+      "dev_cv_balanced_accuracy": 0.83085988651244,
+      "dev_pairs": 195,
+      "generalisation_gap": 0.0450644319669854,
+      "headroom": 0.28579545454545463,
+      "heldout_balanced_accuracy": 0.7857954545454546,
+      "heldout_pairs": 190,
+      "view": "object"
+    }
+  },
+  "split": {
+    "clean": true,
+    "components": 93,
+    "dev_pairs": 195,
+    "heldout_pairs": 190,
+    "largest_component_pairs": 28,
+    "shared_components": 0
+  },
+  "verification": {
+    "checks": [
+      "shape and finiteness",
+      "determinism",
+      "orders identical above unrelated"
+    ],
+    "failures": [],
+    "ok": true
+  },
+  "views": {
+    "action": {
+      "best_accuracy": 0.7647392290249433,
+      "best_threshold": 0.5773502588272095,
+      "clean_threshold": null,
+      "false_merges": 87,
+      "false_splits": 2,
+      "negative_max": 0.8944271802902222,
+      "negative_mean": 0.4726955066755335,
+      "negatives": 189,
+      "positive_mean": 0.6610185954035545,
+      "positive_min": 0.5,
+      "positives": 196,
+      "view": "action"
+    },
+    "object": {
+      "best_accuracy": 0.7411186696900982,
+      "best_threshold": 0.547722578048706,
+      "clean_threshold": null,
+      "false_merges": 94,
+      "false_splits": 4,
+      "negative_max": 0.9000000357627869,
+      "negative_mean": 0.4813760729536178,
+      "negatives": 189,
+      "positive_mean": 0.6526480493496876,
+      "positive_min": 0.3162277340888977,
+      "positives": 196,
+      "view": "object"
+    }
+  }
+}

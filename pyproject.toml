@@ -17,9 +17,28 @@ dependencies = [
 [project.optional-dependencies]
 # GPU telemetry only (nvidia-ml-py); everything else works without it (ADR 0008).
 gpu = ["nvidia-ml-py>=13"]
-# Stage 2.5 clustering experiments only. Nothing in the engine imports numpy, so it is
-# deliberately not a runtime dependency: the engine must stay installable without it.
-experiments = ["numpy>=2"]
+# Stage 2.5 clustering experiments only. Nothing in the engine imports numpy, model2vec,
+# torch or sentence-transformers, so none of them are runtime dependencies: the engine
+# must stay installable without them.
+#
+# torch is pinned to the **CPU** wheel index. NFR-007 requires a working GPU-absent path
+# and the CUDA wheel is ~2.5 GB of download for hardware this stage does not use; the
+# extra index is declared in `[tool.uv.sources]` below so `uv sync --all-extras` resolves
+# CPU torch without anyone having to remember a flag.
+experiments = [
+    "numpy>=2",
+    "model2vec>=0.4",
+    "torch>=2.5",
+    "sentence-transformers>=3.3",
+]
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu", marker = "sys_platform != 'darwin'" }]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
 
 [project.scripts]
 de = "data_engine.cli:main"

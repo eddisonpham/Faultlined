@@ -1,0 +1,23 @@
+{
+  "ambiguous_pairs": [],
+  "experiment": "gold",
+  "set": "constructed",
+  "split": {
+    "clean": true,
+    "components": 93,
+    "dev_pairs": 195,
+    "heldout_pairs": 190,
+    "largest_component_pairs": 28,
+    "shared_components": 0
+  },
+  "summary": {
+    "diff_action_diff_object": 93,
+    "diff_action_same_object": 96,
+    "distinct_strings": 494,
+    "pairs": 385,
+    "same_action": 196,
+    "same_action_diff_object": 96,
+    "same_action_same_object": 100,
+    "same_object": 196
+  }
+}

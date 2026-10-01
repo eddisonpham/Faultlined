@@ -1,0 +1,83 @@
+{
+  "embedding": {
+    "backend": "m2v-32m",
+    "contextual": false,
+    "dim": 512,
+    "fingerprint": "minishlab/potion-base-32M@3b393362969361b7834b263489ad4acf",
+    "model": "minishlab/potion-base-32M@3b393362969361b7834b263489ad4acf",
+    "semantic": true
+  },
+  "experiment": "separability",
+  "gold_set": "constructed",
+  "probes": {
+    "action": {
+      "alpha": 0.1,
+      "dev_balanced_accuracy": 0.9376315789473684,
+      "dev_cv_balanced_accuracy": 0.8655263157894737,
+      "dev_pairs": 195,
+      "generalisation_gap": 0.05036674132138863,
+      "headroom": 0.31515957446808507,
+      "heldout_balanced_accuracy": 0.8151595744680851,
+      "heldout_pairs": 190,
+      "view": "action"
+    },
+    "object": {
+      "alpha": 1.0,
+      "dev_balanced_accuracy": 0.9683544303797469,
+      "dev_cv_balanced_accuracy": 0.9237778262767351,
+      "dev_pairs": 195,
+      "generalisation_gap": 0.054459644458553225,
+      "headroom": 0.3693181818181819,
+      "heldout_balanced_accuracy": 0.8693181818181819,
+      "heldout_pairs": 190,
+      "view": "object"
+    }
+  },
+  "split": {
+    "clean": true,
+    "components": 93,
+    "dev_pairs": 195,
+    "heldout_pairs": 190,
+    "largest_component_pairs": 28,
+    "shared_components": 0
+  },
+  "verification": {
+    "checks": [
+      "shape and finiteness",
+      "determinism",
+      "orders identical above unrelated"
+    ],
+    "failures": [],
+    "ok": true
+  },
+  "views": {
+    "action": {
+      "best_accuracy": 0.7277966742252456,
+      "best_threshold": 0.2681489884853363,
+      "clean_threshold": null,
+      "false_merges": 100,
+      "false_splits": 3,
+      "negative_max": 0.830544650554657,
+      "negative_mean": 0.3800958920289915,
+      "negatives": 189,
+      "positive_mean": 0.6366300711750376,
+      "positive_min": 0.07089441269636154,
+      "positives": 196,
+      "view": "action"
+    },
+    "object": {
+      "best_accuracy": 0.8771730914588057,
+      "best_threshold": 0.5424373149871826,
+      "clean_threshold": null,
+      "false_merges": 31,
+      "false_splits": 16,
+      "negative_max": 0.7834077477455139,
+      "negative_mean": 0.30944307406664523,
+      "negatives": 189,
+      "positive_mean": 0.7047595742101572,
+      "positive_min": 0.3620227575302124,
+      "positives": 196,
+      "view": "object"
+    }
+  }
+}
