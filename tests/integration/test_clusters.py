@@ -111,14 +111,23 @@ def test_a_rebuild_writes_proposals_a_run_and_a_health_block(settings: Settings)
 def test_a_second_rebuild_replaces_the_first_rather_than_adding_to_it(
     settings: Settings,
 ) -> None:
-    before_runs = len(store.run_history(settings, limit=200))
+    # Establish a baseline run of our own so the assertions below do not depend on
+    # what an earlier test left behind. run_history is capped and this database is
+    # never truncated, so counting rows stopped growing once the cap was reached:
+    # the original `len(run_history(limit=200)) == before + 2` passed for dozens of
+    # runs and then failed on its own, with no code change, at 247 accumulated runs.
+    store.rebuild(settings, source="sample", ignored="site")
+    before = [row["id"] for row in store.run_history(settings, limit=5)]
+
     store.rebuild(settings, source="sample", ignored="colour")
     first = len(store.list_proposals(settings))
     store.rebuild(settings, source="sample", ignored="verb,colour")
     assert len(store.list_proposals(settings)) != first, "a different axis set should regroup"
-    assert len(store.run_history(settings, limit=200)) == before_runs + 2, (
-        "each rebuild is one more run, not a rewrite of the last one"
-    )
+
+    after = store.run_history(settings, limit=5)
+    new = [row["id"] for row in after if row["id"] not in before]
+    assert len(new) == 2, "each rebuild appends one run rather than rewriting the last"
+    assert before[0] in [row["id"] for row in after], "the earlier run survives the rebuild"
 
 
 def test_the_page_model_reports_no_run_before_one_has_happened(settings: Settings) -> None:

@@ -31,6 +31,26 @@ def _episode() -> dict[str, Any]:
     }
 
 
+def _drain(worker: IngestWorker, catalog: PostgresCatalog, *job_ids: str) -> None:
+    """Run queued jobs until every id given has left the queue.
+
+    `claim_job` is FIFO across the whole shared catalog, so these jobs are only
+    reached once every older claimable job has been processed. The loop therefore
+    ends when the jobs we care about are done, or when nothing is claimable at
+    all -- and it cannot spin forever, because a job that keeps failing spends its
+    own attempt budget and stops being claimable.
+
+    This used to be a fixed 50 iterations. That is a flake with a long fuse: every
+    other test shares this queue, and the catalog is never truncated between runs,
+    so the job under test is only reached after however many jobs happen to be
+    queued ahead of it. It failed once the backlog passed 50, passed in isolation,
+    and passed on a rerun of the same directory.
+    """
+    while any(catalog.get_job(job_id)["state"] == JobState.QUEUED.value for job_id in job_ids):
+        if worker.process_one() is None:
+            return
+
+
 @pytest.mark.integration
 def test_postgres_job_idempotency_and_conflict() -> None:
     settings = _settings()
@@ -59,15 +79,8 @@ def test_worker_processes_ingest_and_registers_episode(tmp_path: Path) -> None:
         "ingest", {"episode": _episode()}, f"worker-{uuid.uuid4()}", "test-correlation"
     )
 
-    # process_one claims the oldest queued job in the shared catalog, which is not
-    # necessarily this one: other tests and any leftover work sit in the same queue.
-    # Drain until this job reaches a terminal state instead of assuming it goes first.
     worker = IngestWorker(settings)
-    for _ in range(50):
-        if worker.process_one() is None:
-            break
-        if catalog.get_job(job["id"])["state"] != JobState.QUEUED.value:
-            break
+    _drain(worker, catalog, job["id"])
 
     actual = catalog.get_job(job["id"])
     assert actual is not None
@@ -127,11 +140,7 @@ def test_list_artifacts_reports_referencing_episodes(tmp_path: Path) -> None:
             "ingest", {"episode": _episode()}, f"artifacts-{uuid.uuid4()}", "test-correlation"
         )
         submitted.append(job["id"])
-    for _ in range(50):
-        if worker.process_one() is None:
-            break
-        if all(catalog.get_job(j)["state"] != JobState.QUEUED.value for j in submitted):
-            break
+    _drain(worker, catalog, *submitted)
 
     artifacts = catalog.list_artifacts(limit=200)
     assert artifacts, "the ingested episode should have written an artifact"
