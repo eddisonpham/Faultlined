@@ -41,6 +41,7 @@ const PAGES = [
   "/ui/episodes",
   "/ui/failures",
   "/ui/slices",
+  "/ui/clusters",
   "/ui/insights",
   "/ui/metrics",
   "/ui/artifacts",

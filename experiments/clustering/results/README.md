@@ -840,12 +840,77 @@ still moves, freezing does not widen the radius, the arrival log stays bounded, 
 figure parses, and the page only fetches routes the server answers. So the demo is
 verified in CI even though no browser is.
 
+## EXP-2.5-09: what shipped, and the two defects the integration found
+
+The decision above — *extract, do not embed* — is now the engine's algorithm, not a
+recommendation. `data_engine.clustering` reduces a task string to an object core with the
+lexicon, groups cores by cosine radius with a running-mean centroid, and presents the
+groups as proposals on `/ui/clusters`. Every group is a proposal; a human confirms it by
+posting a label; only confirmed clusters are ever frozen. Recorded in
+[ADR 0026](../../../agents/decisions/0026-cluster-proposals.md).
+
+The measured behaviour of the extracted path carries over unchanged: 48 objects from the
+synthetic corpus, B-cubed 0.986, zero singletons, 1200 strings encoded in 2.45 s on CPU
+with no model and no numpy in the runtime dependency set.
+
+### The first version lost every label on the first rebuild
+
+`cluster_confirmations` pointed at `task_clusters(key)` with `ON DELETE CASCADE`. A
+proposal's key is a hash of its core, so changing the ignored axes changes every core and
+re-keys every proposal — and the cascade took every confirmation with it. The table now
+stores the *task strings* a confirmation covers and has no foreign key at all, and a
+rebuild re-attaches each one to whichever proposal holds those strings. Measured on a
+rebuild that re-keys every proposal: frozen 1, orphaned 0, the label readable back
+through both `list_proposals` and `get_proposal`.
+
+### The fix above it was also wrong, and only the integration test found it
+
+The first re-attachment rule matched on *any* overlap. Shrink the radius until a
+confirmed pair of task strings scatters into two singletons, and each singleton still
+overlaps by one, the tie is broken on the key, and the operator's name lands on an
+arbitrary neighbouring cluster — the exact failure the design exists to prevent. A
+confirmation now survives only while one proposal holds **more than half** of its
+strings; below that it is counted as orphaned and reported, never moved. The claim stays
+in the table either way.
+
+`tests/integration/test_clusters.py` drives this over real SQL. It is worth noting what it
+had to be written *around*: over a shared test catalog, the colour-ignored grouping pulls
+together every mug string any earlier test ever seeded, so the "same group, new key" case
+never presents itself. The durability and orphan tests therefore write controlled proposal
+sets directly through `replace_proposals`, because what is under test is the store's
+matching, not a grouping decision the clustering layer already owns in its own tests.
+
+### Two rendering defects the browser could see and the source could not
+
+Both were found by screenshotting the live page, not by reading it.
+
+`ProposalSet` is a dataclass with no `__len__`, so it is **always truthy**. A catalog that
+had never been clustered rendered six healthy-looking zero statistics and an empty
+proposals table — which reads as "clustering found nothing interesting" rather than
+"clustering has not run". `has_run` looks inside the set, and an empty run now says so.
+
+The map scaled both axes by one factor fitted to the *smaller* of its width and height, so
+a cloud with little vertical spread floated in a tall box with dead space above and
+below. The two axes are now fitted to their own extents, which costs nothing because the
+layout note already says the axes carry no meaning. Alongside it: proposal rows are capped
+at four members with a link to the full list, the colour key is printed under the treemap
+(the colours are a hash of the cluster key and meant nothing without it), the controls
+show the settings the run was built with rather than `catalog` over a sample run, and a
+`size` attribute that clipped the label an operator was about to confirm was replaced with
+a real width.
+
+The page is in the browser audit's page list, so a page added to the nav cannot go
+unmeasured. 48 page loads across four themes, clean, both empty and populated.
+
 ## Not yet run
 
-- MVP integration of the object view into the engine. Unblocked; not started.
+- A per-cluster detail view in the UI. Members past the fourth in a proposal row are
+  linked to `GET /api/v1/clusters/{key}` because no page reads them yet.
 - A fresh or real corpus to re-establish held-out independence, which the three reads
   above have spent.
-- A learned attribute extractor to replace both hand-written lexicons, whose coverage
-  on real operator text is unknown.
+- A learned attribute extractor to replace the hand-written lexicon, whose coverage
+  on real operator text is unknown. The page reports the matched-verb rate (98% on the
+  sample corpus, 82% on the full corpus) so the gap is visible per run, but visibility is
+  not accuracy.
 - A representation trained for this task, which is the only remaining route to the
   action view.

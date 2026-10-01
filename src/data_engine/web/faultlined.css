@@ -1506,3 +1506,153 @@ pre.de-json {
 .de-nav {
   text-shadow: none;
 }
+
+/* ---- cluster proposals (ADR 0026) ----------------------------------------- */
+
+/* Health tiles. Numbers first, prose second: the reader decides whether to keep
+   reading from these before they read a single task string. */
+.de-stat-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.6rem;
+}
+
+.de-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 5.2rem;
+  padding: 0.35rem 0.55rem;
+  border: 1px solid var(--de-line);
+  border-radius: var(--de-radius);
+}
+
+.de-stat-value {
+  font-family: var(--de-display);
+  font-size: 1.05rem;
+  line-height: 1.1;
+}
+
+.de-stat-label {
+  font-size: 0.6rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--de-dim);
+}
+
+.de-note {
+  font-size: 0.72rem;
+  line-height: 1.55;
+  margin: 0.4rem 0 0.2rem;
+  max-width: 78ch;
+}
+
+.de-dim {
+  font-size: 0.64rem;
+  color: var(--de-dim);
+  line-height: 1.5;
+}
+
+.de-warn { color: var(--de-warn); font-size: 0.7rem; }
+.de-error { color: var(--fine-use-red, var(--de-warn)); font-size: 0.7rem; }
+
+/* Controls sit on one line and wrap; a review page is used with one hand on the
+   keyboard, and a control that wraps to three rows is a control that gets skipped. */
+.de-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.de-check {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.68rem;
+  padding-bottom: 0.35rem;
+}
+
+.de-button {
+  font-family: var(--de-display);
+  font-size: 0.66rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--fine-use-bg, #000);
+  background: var(--fine-use-accent, #0c0);
+  border: 1px solid var(--fine-use-accent, #0c0);
+  border-radius: var(--de-radius);
+  padding: 0.28rem 0.7rem;
+  cursor: pointer;
+}
+
+/* Inverts like every other action here, so it reads the same in all four themes
+   including the phosphorless ones. */
+.de-button:hover,
+.de-button:focus-visible {
+  background: transparent;
+  color: var(--fine-use-accent, #0c0);
+  outline: none;
+}
+
+.de-button:active { transform: translateY(1px); }
+
+.de-table td form {
+  display: flex;
+  gap: 0.3rem;
+  align-items: center;
+}
+
+.de-table td form input {
+  font-family: var(--de-display);
+  font-size: 0.7rem;
+  color: var(--de-fg);
+  background: var(--fine-use-bg, #000);
+  border: 1px solid var(--de-line);
+  border-radius: var(--de-radius);
+  padding: 0.22rem 0.4rem;
+  /* The label is prefilled with the cluster's core, and a core is longer than a
+     `size` attribute. Flex would otherwise squeeze the field to nothing and the
+     reviewer would be confirming a name they cannot read. */
+  flex: 0 0 auto;
+  width: 17em;
+}
+
+/* Cluster identity: the same colour as the figure, so a row in the table and a
+   boundary on the map are the same thing rather than two vocabularies. */
+.de-dot {
+  display: inline-block;
+  width: 0.6rem;
+  height: 0.6rem;
+  border-radius: 50%;
+  margin-right: 0.3rem;
+  vertical-align: -0.05rem;
+}
+
+.de-tag {
+  display: inline-block;
+  font-size: 0.58rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  border: 1px solid var(--de-line);
+  border-radius: var(--de-radius);
+  padding: 0.05rem 0.3rem;
+  margin-right: 0.25rem;
+}
+
+.de-tag-warn { color: var(--de-warn); border-color: var(--de-warn); }
+
+.de-chips { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+
+.de-chips .de-chip {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.62rem;
+  border: 1px solid var(--de-line);
+  border-radius: var(--de-radius);
+  padding: 0.1rem 0.35rem;
+}
+
+.de-section p svg { max-width: 100%; height: auto; }

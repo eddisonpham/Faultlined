@@ -187,6 +187,73 @@ CREATE UNIQUE INDEX IF NOT EXISTS monitor_incidents_unresolved_idx
 CREATE INDEX IF NOT EXISTS monitor_incidents_last_seen_idx
     ON monitor_incidents (last_seen DESC);
 CREATE INDEX IF NOT EXISTS monitor_incidents_status_idx ON monitor_incidents (status);
+
+-- Cluster proposals (ADR 0026). Two tables and one join, because the thing being
+-- stored is a *proposal*: a suggested grouping of task strings that a human confirms.
+--
+-- `task_clusters.key` is a hash of the proposal's primary core, not a surrogate row id,
+-- so a rebuild can match a stored confirmation to the proposal it was about even though
+-- the row was recreated. That is the whole reason a confirm survives a recompute.
+--
+-- Frozen state lives in `cluster_confirmations` rather than as columns here: a
+-- proposal with no confirmation row is unconfirmed, and there is exactly one way for
+-- that to be true, so it cannot drift out of sync with a boolean.
+--
+-- A confirmation deliberately does **not** reference `task_clusters`. Its subject is the
+-- set of task strings a human grouped, not the row that currently holds them: a rebuild
+-- re-keys every proposal whenever the extraction options change, and a foreign key took
+-- the confirmations with it (measured, not assumed - the first version did exactly that,
+-- and `ON DELETE CASCADE` plus a re-keyed core lost every label in one rebuild).
+-- `tasks` carries the set, and a rebuild re-attaches each confirmation to whichever
+-- proposal now contains those strings.
+CREATE TABLE IF NOT EXISTS task_clusters (
+    key text PRIMARY KEY,
+    core text NOT NULL,
+    episodes integer NOT NULL DEFAULT 0,
+    task_count integer NOT NULL DEFAULT 0,
+    merged_cores jsonb NOT NULL DEFAULT '[]',
+    centroid jsonb,
+    source text NOT NULL DEFAULT 'catalog',
+    ignored text NOT NULL DEFAULT '',
+    radius double precision NOT NULL DEFAULT 0.3,
+    rule text NOT NULL DEFAULT 'running_mean',
+    updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS task_cluster_members (
+    cluster_key text NOT NULL REFERENCES task_clusters(key) ON DELETE CASCADE,
+    task text NOT NULL,
+    core text NOT NULL,
+    episodes integer NOT NULL DEFAULT 0,
+    verb text NOT NULL DEFAULT '',
+    colours jsonb NOT NULL DEFAULT '[]',
+    PRIMARY KEY (cluster_key, task)
+);
+
+CREATE INDEX IF NOT EXISTS task_cluster_members_task_idx ON task_cluster_members (task);
+
+CREATE TABLE IF NOT EXISTS cluster_confirmations (
+    id bigserial PRIMARY KEY,
+    label text NOT NULL,
+    tasks jsonb NOT NULL,
+    confirmed_at timestamptz NOT NULL DEFAULT now(),
+    confirmed_by text NOT NULL DEFAULT 'operator'
+);
+
+-- One run per rebuild, so the page can say when these numbers were computed instead of
+-- implying they are current.
+CREATE TABLE IF NOT EXISTS cluster_runs (
+    id bigserial PRIMARY KEY,
+    source text NOT NULL,
+    ignored text NOT NULL DEFAULT '',
+    radius double precision NOT NULL,
+    rule text NOT NULL,
+    health jsonb NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS cluster_runs_created_idx ON cluster_runs (created_at DESC);
+
 """
 
 # Columns the job lifecycle (retry / timeout / cancel) needs, added to pre-existing
@@ -198,6 +265,17 @@ ALTER TABLE jobs ADD COLUMN IF NOT EXISTS max_attempts integer NOT NULL DEFAULT 
 ALTER TABLE jobs ADD COLUMN IF NOT EXISTS deadline_at timestamptz;
 ALTER TABLE jobs ADD COLUMN IF NOT EXISTS worker_id text;
 ALTER TABLE jobs ADD COLUMN IF NOT EXISTS lease_expires_at timestamptz;
+-- The first draft keyed a confirmation on the proposal hash with a cascading reference,
+-- which deleted every label on any rebuild that re-keyed the proposals. The table is
+-- altered in place rather than dropped: an existing database has confirmations in it, and
+-- CREATE TABLE IF NOT EXISTS will not add the columns this shape needs.
+ALTER TABLE cluster_confirmations DROP CONSTRAINT IF EXISTS cluster_confirmations_pkey;
+ALTER TABLE cluster_confirmations DROP COLUMN IF EXISTS cluster_key;
+ALTER TABLE cluster_confirmations ADD COLUMN IF NOT EXISTS id bigserial;
+ALTER TABLE cluster_confirmations ADD COLUMN IF NOT EXISTS tasks jsonb NOT NULL DEFAULT '[]';
+ALTER TABLE cluster_confirmations ADD PRIMARY KEY (id);
+CREATE INDEX IF NOT EXISTS cluster_confirmations_tasks_idx
+    ON cluster_confirmations (md5(tasks::text));
 ALTER TABLE episodes ADD COLUMN IF NOT EXISTS episode_key text NOT NULL DEFAULT '';
 ALTER TABLE episodes ADD COLUMN IF NOT EXISTS state text NOT NULL DEFAULT 'ingested';
 ALTER TABLE episodes DROP CONSTRAINT IF EXISTS episodes_source_hash_key;

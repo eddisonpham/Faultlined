@@ -47,6 +47,7 @@ NAV_LINKS = (
     ("/ui/episodes", "Episodes", "4"),
     ("/ui/failures", "Failures", "5"),
     ("/ui/slices", "Slices", "6"),
+    ("/ui/clusters", "Clusters", "c"),
     ("/ui/insights", "Insights", "7"),
     ("/ui/metrics", "Metrics", "8"),
     ("/ui/artifacts", "Artifacts", "9"),
@@ -255,6 +256,7 @@ _SUBTITLES = {
     "/ui/incidents": "deterministic notifier // read-only",
     "/ui/episodes": "curation view // quality scored at ingest",
     "/ui/failures": "quarantine triage // read-only",
+    "/ui/clusters": "task-string proposals // confirm to freeze // ADR 0026",
     "/ui/slices": "named curation filters // membership recomputed on read",
     "/ui/insights": "dataset distribution // outliers are removal candidates",
     "/ui/metrics": "runtime telemetry // where the time goes",
@@ -1629,6 +1631,64 @@ def slice_impact_page(impact: dict[str, Any], theme: str) -> str:
 
 
 # ---------------------------------------------------------------- episodes
+
+
+# ----------------------------------------------------------------- clusters
+
+
+def clusters_page(model: dict[str, Any], theme: str, *, error: str = "") -> str:
+    """Task-string cluster proposals, and the controls that confirm or reject them."""
+    from data_engine.web.cluster_page import (
+        controls,
+        figures_section,
+        has_run,
+        health_section,
+        history_section,
+        proposal_table,
+        sample_note,
+    )
+
+    proposals = model.get("proposals")
+    if proposals is None or not has_run(model):
+        return _page(
+            "Clusters",
+            "/ui/clusters",
+            _section(
+                "Proposals",
+                '<p class="de-empty">// no clustering run yet</p>',
+                "rebuild to propose groups",
+            ),
+            theme,
+        )
+    body = [_section("Health", health_section(proposals), "is this run worth reading")]
+    if model.get("source") == "sample":
+        body.append(sample_note())
+    body.append(_section("Controls", controls(proposals, error=error), "rebuild"))
+    body.append(_section("Figures", figures_section(proposals), "size and boundary"))
+    body.append(_section("Proposals", proposal_table(proposals), "confirm to freeze"))
+    body.append(_section("History", history_section(model.get("history", [])), "every rebuild"))
+    return _page("Clusters", "/ui/clusters", "".join(body), theme)
+
+
+def clusters_fragment(model: dict[str, Any]) -> str:
+    """The part that changes on a rebuild: health, figures, proposals, history."""
+    from data_engine.web.cluster_page import (
+        figures_section,
+        has_run,
+        health_section,
+        history_section,
+        proposal_table,
+    )
+
+    proposals = model.get("proposals")
+    if not has_run(model) or proposals is None:
+        return '<p class="de-empty">// no clustering run yet</p>'
+    return (
+        _section("Health", health_section(proposals), "is this run worth reading")
+        + _section("Figures", figures_section(proposals), "size and boundary")
+        + _section("Proposals", proposal_table(proposals), "confirm to freeze")
+        + _section("History", history_section(model.get("history", [])), "every rebuild")
+    )
 
 
 def episodes_page(

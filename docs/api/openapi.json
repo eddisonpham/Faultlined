@@ -224,6 +224,302 @@
         "title": "BuildSummary",
         "type": "object"
       },
+      "ClusterConfirmRequest": {
+        "additionalProperties": false,
+        "description": "Confirm a proposal: give it a name, which also freezes it.",
+        "properties": {
+          "label": {
+            "description": "Human name for the group.",
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "label"
+        ],
+        "title": "ClusterConfirmRequest",
+        "type": "object"
+      },
+      "ClusterDetailResponse": {
+        "properties": {
+          "members": {
+            "items": {
+              "$ref": "#/components/schemas/ClusterMember"
+            },
+            "title": "Members",
+            "type": "array"
+          },
+          "proposal": {
+            "$ref": "#/components/schemas/ClusterProposal"
+          }
+        },
+        "required": [
+          "proposal",
+          "members"
+        ],
+        "title": "ClusterDetailResponse",
+        "type": "object"
+      },
+      "ClusterHealthResponse": {
+        "description": "The numbers the page leads with, without the proposals.",
+        "properties": {
+          "health": {
+            "additionalProperties": true,
+            "title": "Health",
+            "type": "object"
+          },
+          "run": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ClusterRun"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "health"
+        ],
+        "title": "ClusterHealthResponse",
+        "type": "object"
+      },
+      "ClusterListResponse": {
+        "properties": {
+          "health": {
+            "additionalProperties": true,
+            "title": "Health",
+            "type": "object"
+          },
+          "proposals": {
+            "items": {
+              "$ref": "#/components/schemas/ClusterProposal"
+            },
+            "title": "Proposals",
+            "type": "array"
+          },
+          "run": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ClusterRun"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "proposals"
+        ],
+        "title": "ClusterListResponse",
+        "type": "object"
+      },
+      "ClusterMember": {
+        "properties": {
+          "colours": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Colours",
+            "type": "array"
+          },
+          "core": {
+            "title": "Core",
+            "type": "string"
+          },
+          "episodes": {
+            "title": "Episodes",
+            "type": "integer"
+          },
+          "task": {
+            "title": "Task",
+            "type": "string"
+          },
+          "verb": {
+            "default": "",
+            "title": "Verb",
+            "type": "string"
+          }
+        },
+        "required": [
+          "task",
+          "core",
+          "episodes"
+        ],
+        "title": "ClusterMember",
+        "type": "object"
+      },
+      "ClusterProposal": {
+        "description": "One proposal. `frozen` is derived from a confirmation existing, never stored twice.",
+        "properties": {
+          "colours": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Colours",
+            "type": "object"
+          },
+          "core": {
+            "title": "Core",
+            "type": "string"
+          },
+          "episodes": {
+            "default": 0,
+            "title": "Episodes",
+            "type": "integer"
+          },
+          "frozen": {
+            "default": false,
+            "title": "Frozen",
+            "type": "boolean"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "label": {
+            "default": "",
+            "title": "Label",
+            "type": "string"
+          },
+          "merged_cores": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Merged Cores",
+            "type": "array"
+          },
+          "task_count": {
+            "default": 0,
+            "title": "Task Count",
+            "type": "integer"
+          },
+          "verbs": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Verbs",
+            "type": "object"
+          }
+        },
+        "required": [
+          "key",
+          "core"
+        ],
+        "title": "ClusterProposal",
+        "type": "object"
+      },
+      "ClusterRebuildRequest": {
+        "additionalProperties": false,
+        "description": "Recompute proposals. Every field changes what the numbers mean, so none is free.",
+        "properties": {
+          "ignore": {
+            "description": "Axes to remove before grouping. Removing too little fragments a task across clusters; removing too much merges unrelated tasks. Defaults to none.",
+            "items": {
+              "enum": [
+                "verb",
+                "colour",
+                "site"
+              ],
+              "type": "string"
+            },
+            "title": "Ignore",
+            "type": "array"
+          },
+          "limit": {
+            "default": 5000,
+            "description": "Maximum distinct task strings to read.",
+            "maximum": 50000.0,
+            "minimum": 1.0,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "radius": {
+            "default": 0.3,
+            "description": "Cosine distance within which a core joins the nearest cluster.",
+            "maximum": 2.0,
+            "minimum": 0.0,
+            "title": "Radius",
+            "type": "number"
+          },
+          "rule": {
+            "default": "running_mean",
+            "description": "How a cluster centroid moves as members arrive.",
+            "enum": [
+              "running_mean",
+              "sliding_8",
+              "sliding_32",
+              "ema_0.98"
+            ],
+            "title": "Rule",
+            "type": "string"
+          },
+          "source": {
+            "default": "catalog",
+            "description": "`catalog` clusters the distinct task strings the catalog holds. `sample` clusters the shipped LeRobot sentences instead, which is illustrative data and is labelled as such.",
+            "enum": [
+              "catalog",
+              "sample"
+            ],
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "title": "ClusterRebuildRequest",
+        "type": "object"
+      },
+      "ClusterRun": {
+        "description": "One rebuild, with the health numbers that say whether to trust it.",
+        "properties": {
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "health": {
+            "additionalProperties": true,
+            "title": "Health",
+            "type": "object"
+          },
+          "id": {
+            "default": 0,
+            "title": "Id",
+            "type": "integer"
+          },
+          "ignored": {
+            "default": "",
+            "title": "Ignored",
+            "type": "string"
+          },
+          "radius": {
+            "default": 0.3,
+            "title": "Radius",
+            "type": "number"
+          },
+          "rule": {
+            "default": "running_mean",
+            "title": "Rule",
+            "type": "string"
+          },
+          "source": {
+            "default": "catalog",
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "title": "ClusterRun",
+        "type": "object"
+      },
       "ContractListResponse": {
         "properties": {
           "items": {
@@ -2885,6 +3181,192 @@
         "summary": "Get Build"
       }
     },
+    "/api/v1/clusters": {
+      "get": {
+        "description": "Stored proposals with the health numbers of the run that produced them.",
+        "operationId": "list_clusters_api_v1_clusters_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClusterListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Clusters"
+      }
+    },
+    "/api/v1/clusters/rebuild": {
+      "post": {
+        "description": "Recompute proposals from the catalog's task strings.\n\nSynchronous on purpose: at a few thousand task strings the whole rebuild is\nmilliseconds of pure Python, and a queued job would add a failure mode (a run\nthat never finishes) to a page an operator uses to check their work.",
+        "operationId": "rebuild_clusters_api_v1_clusters_rebuild_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClusterRebuildRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClusterHealthResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Rebuild Clusters"
+      }
+    },
+    "/api/v1/clusters/{key}": {
+      "get": {
+        "description": "One proposal and the task strings behind it.",
+        "operationId": "cluster_detail_api_v1_clusters__key__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "title": "Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClusterDetailResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cluster Detail"
+      }
+    },
+    "/api/v1/clusters/{key}/confirm": {
+      "delete": {
+        "description": "Release a confirmation. The proposal remains; it is just a suggestion again.",
+        "operationId": "release_cluster_api_v1_clusters__key__confirm_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "title": "Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClusterProposal"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Release Cluster"
+      },
+      "post": {
+        "description": "Confirm a proposal under a human label, which freezes it against rebuilds.",
+        "operationId": "confirm_cluster_api_v1_clusters__key__confirm_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "title": "Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClusterConfirmRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClusterProposal"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Confirm Cluster"
+      }
+    },
     "/api/v1/contracts": {
       "get": {
         "operationId": "list_contracts_api_v1_contracts_get",
@@ -4739,6 +5221,175 @@
           }
         },
         "summary": "Ui Build Detail"
+      }
+    },
+    "/ui/clusters": {
+      "get": {
+        "operationId": "ui_clusters_ui_clusters_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "theme",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Theme"
+            }
+          },
+          {
+            "in": "query",
+            "name": "error",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Error"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-fragment",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Fragment"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ui Clusters"
+      }
+    },
+    "/ui/clusters/rebuild": {
+      "post": {
+        "description": "Regroup from the form. 303 so a refresh does not rebuild again.",
+        "operationId": "ui_rebuild_clusters_ui_clusters_rebuild_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Ui Rebuild Clusters"
+      }
+    },
+    "/ui/clusters/{key}/confirm": {
+      "post": {
+        "operationId": "ui_confirm_cluster_ui_clusters__key__confirm_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "title": "Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ui Confirm Cluster"
+      }
+    },
+    "/ui/clusters/{key}/release": {
+      "post": {
+        "operationId": "ui_release_cluster_ui_clusters__key__release_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "title": "Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ui Release Cluster"
       }
     },
     "/ui/episodes": {

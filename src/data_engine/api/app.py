@@ -8,12 +8,21 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any, cast
+from urllib.parse import quote
 from uuid import uuid4
 
 from fastapi import FastAPI, Header, HTTPException, Query, Request, Response
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
 from pydantic import ValidationError
 
+from data_engine.api.cluster_schemas import (
+    ClusterConfirmRequest,
+    ClusterDetailResponse,
+    ClusterHealthResponse,
+    ClusterListResponse,
+    ClusterProposal,
+    ClusterRebuildRequest,
+)
 from data_engine.api.errors import install_error_handling
 from data_engine.api.schemas import (
     AnyJobRequest,
@@ -81,6 +90,8 @@ from data_engine.web import (
     artifacts_page,
     builds_fragment,
     builds_page,
+    clusters_fragment,
+    clusters_page,
     episode_detail_page,
     episodes_fragment,
     episodes_page,
@@ -874,6 +885,268 @@ def create_app(
         if detail is None:
             raise KeyError(str(row["id"]))
         return detail
+
+    # ------------------------------------------------------------- clusters (ADR 0026)
+
+    def _first(raw: dict[str, list[str]]) -> dict[str, str]:
+        """A urlencoded body as one value per field; repeated fields join on a comma.
+
+        Checkboxes are the reason: three "ignore" boxes arrive as three keys of one name,
+        and the axes have to reach the store as one string.
+        """
+        return {key: ",".join(values) for key, values in raw.items()}
+
+    def _run_payload(run: dict[str, Any] | None) -> dict[str, Any] | None:
+        """A stored run as the API returns it, with a JSON-safe timestamp."""
+        if run is None:
+            return None
+        created = run.get("created_at")
+        stamp = created.isoformat() if isinstance(created, datetime) else None
+        return {
+            "id": int(run.get("id") or 0),
+            "source": str(run.get("source") or ""),
+            "ignored": str(run.get("ignored") or ""),
+            "radius": float(run.get("radius") or 0.0),
+            "rule": str(run.get("rule") or ""),
+            "created_at": stamp,
+            "health": dict(run.get("health") or {}),
+        }
+
+    def _cluster_model() -> dict[str, Any]:
+        """Page model, including a fresh ProposalSet rebuilt from stored rows.
+
+        The stored rows are the source of truth for the table; the ProposalSet exists so
+        the figures can be drawn from the same object the API returns rather than from a
+        second pass over the catalog.
+        """
+        from data_engine.catalog import clusters as cluster_store
+        from data_engine.clustering import Ignored, build
+
+        store = cluster_store.model(configured)
+        rows = store["rows"]
+        tasks: dict[str, int] = {}
+        cores: dict[str, str] = {}
+        for row in rows:
+            for member in store["members"].get(row["key"], []):
+                tasks[str(member["task"])] = int(member["episodes"])
+                cores[str(member["task"])] = str(member["core"])
+        ignored = store["ignored"] or Ignored()
+        proposals = build(
+            tasks,
+            ignored=ignored,
+            radius=float(store["radius"]),
+            rule=str(store["rule"]),
+            source=str(store["source"]),
+            order=list(tasks),
+        )
+        # The labels live on the stored rows; the figure set is rebuilt from the same
+        # members so a confirmed proposal is drawn confirmed rather than merely labelled.
+        proposals.apply_confirmations(
+            {str(row["key"]): str(row["label"]) for row in rows if row["label"]}
+        )
+        model = dict(store)
+        model["proposals"] = proposals
+        model["members"] = {
+            proposal.key: [
+                {"task": member.task, "core": member.core, "episodes": member.episodes}
+                for member in proposal.members
+            ]
+            for proposal in proposals.proposals
+        }
+        model["cores"] = cores
+        return model
+
+    @app.get("/api/v1/clusters", response_model=ClusterListResponse)
+    def list_clusters() -> dict[str, Any]:
+        """Stored proposals with the health numbers of the run that produced them."""
+
+        model = _cluster_model()
+        return {
+            "proposals": [
+                {
+                    "key": proposal.key,
+                    "core": proposal.core,
+                    "label": proposal.label,
+                    "frozen": proposal.frozen,
+                    "episodes": proposal.size,
+                    "task_count": proposal.task_count,
+                    "merged_cores": list(proposal.merged_cores),
+                    "verbs": dict(proposal.verbs()),
+                    "colours": dict(proposal.colours()),
+                }
+                for proposal in model["proposals"].proposals
+            ],
+            "run": _run_payload(model["run"]),
+            # The live numbers come from the set just rebuilt for the figures; the
+            # orphaned count comes from the stored run, because it is a fact about the
+            # last rebuild and cannot be recomputed from the proposals alone.
+            "health": {
+                **model["proposals"].health(),
+                "orphaned": int((model["health"] or {}).get("orphaned", 0)),
+                "truncated": bool((model["health"] or {}).get("truncated", False)),
+            },
+        }
+
+    @app.post("/api/v1/clusters/rebuild", response_model=ClusterHealthResponse)
+    def rebuild_clusters(body: ClusterRebuildRequest) -> dict[str, Any]:
+        """Recompute proposals from the catalog's task strings.
+
+        Synchronous on purpose: at a few thousand task strings the whole rebuild is
+        milliseconds of pure Python, and a queued job would add a failure mode (a run
+        that never finishes) to a page an operator uses to check their work.
+        """
+        from data_engine.catalog import clusters as cluster_store
+
+        result = cluster_store.rebuild(
+            configured,
+            source=body.source,
+            ignored=body.ignored_argument(),
+            radius=body.radius,
+            rule=body.rule,
+            limit=body.limit,
+        )
+        model = cluster_store.model(configured)
+        return {"health": result["health"], "run": _run_payload(model["run"])}
+
+    @app.get("/api/v1/clusters/{key}", response_model=ClusterDetailResponse)
+    def cluster_detail(key: str) -> dict[str, Any]:
+        """One proposal and the task strings behind it."""
+        from data_engine.catalog import clusters as cluster_store
+
+        row = cluster_store.get_proposal(configured, key)
+        if row is None:
+            raise HTTPException(status_code=404, detail=f"No cluster {key}.")
+        members = cluster_store.proposal_members(configured, key)
+        return {
+            "proposal": {
+                "key": str(row["key"]),
+                "core": str(row["core"]),
+                "label": str(row["label"]),
+                "frozen": bool(row["label"]),
+                "episodes": int(row["episodes"]),
+                "task_count": int(row["task_count"]),
+                "merged_cores": list(row["merged_cores"] or []),
+            },
+            "members": [
+                {
+                    "task": str(member["task"]),
+                    "core": str(member["core"]),
+                    "episodes": int(member["episodes"]),
+                    "verb": str(member["verb"]),
+                    "colours": list(member["colours"] or []),
+                }
+                for member in members
+            ],
+        }
+
+    @app.post("/api/v1/clusters/{key}/confirm", response_model=ClusterProposal)
+    def confirm_cluster(key: str, body: ClusterConfirmRequest) -> dict[str, Any]:
+        """Confirm a proposal under a human label, which freezes it against rebuilds."""
+        from data_engine.catalog import clusters as cluster_store
+
+        if not cluster_store.confirm(configured, key, body.label):
+            raise HTTPException(status_code=404, detail=f"No cluster {key}.")
+        row = cluster_store.get_proposal(configured, key)
+        return {
+            "key": key,
+            "core": str(row["core"]) if row else "",
+            "label": body.label,
+            "frozen": True,
+            "episodes": int(row["episodes"]) if row else 0,
+            "task_count": int(row["task_count"]) if row else 0,
+        }
+
+    @app.delete("/api/v1/clusters/{key}/confirm", response_model=ClusterProposal)
+    def release_cluster(key: str) -> dict[str, Any]:
+        """Release a confirmation. The proposal remains; it is just a suggestion again."""
+        from data_engine.catalog import clusters as cluster_store
+
+        cluster_store.unconfirm(configured, key)
+        row = cluster_store.get_proposal(configured, key)
+        if row is None:
+            raise HTTPException(status_code=404, detail=f"No cluster {key}.")
+        return {
+            "key": key,
+            "core": str(row["core"]),
+            "label": "",
+            "frozen": False,
+            "episodes": int(row["episodes"]),
+            "task_count": int(row["task_count"]),
+        }
+
+    # The page and its controls. Plain form posts, so every control works with scripting
+    # off; each one calls the same repository method as its API twin rather than issuing
+    # an HTTP request to ourselves.
+
+    @app.get("/ui/clusters", response_class=HTMLResponse)
+    def ui_clusters(
+        theme: str | None = None,
+        error: str | None = None,
+        x_fragment: str | None = Header(default=None),
+    ) -> HTMLResponse:
+        model = _cluster_model()
+        if x_fragment:
+            return HTMLResponse(clusters_fragment(model))
+        return HTMLResponse(clusters_page(model, theme_or_default(theme), error=error or ""))
+
+    @app.post("/ui/clusters/rebuild")
+    async def ui_rebuild_clusters(request: Request) -> RedirectResponse:
+        """Regroup from the form. 303 so a refresh does not rebuild again."""
+        from urllib.parse import parse_qs
+
+        from data_engine.catalog import clusters as cluster_store
+
+        # `_first` already joined repeated fields on a comma, so the checkbox group
+        # arrives as one string. Joining again here would iterate its characters.
+        form = _first(parse_qs((await request.body()).decode("utf-8", "replace")))
+        ignored = form.get("ignore", "")
+        try:
+            radius = float(form.get("radius", "0.3"))
+        except ValueError:
+            radius = 0.3
+        source = form.get("source", "catalog")
+        if source not in ("catalog", "sample"):
+            source = "catalog"
+        rule = form.get("rule", "running_mean")
+        if rule not in ("running_mean", "sliding_8", "sliding_32", "ema_0.98"):
+            rule = "running_mean"
+        try:
+            cluster_store.rebuild(
+                configured,
+                source=source,
+                ignored=ignored,
+                radius=min(max(radius, 0.0), 2.0),
+                rule=rule,
+            )
+        except ValueError as error:
+            return RedirectResponse(f"/ui/clusters?error={quote(str(error))}", status_code=303)
+        return RedirectResponse("/ui/clusters", status_code=303)
+
+    @app.post("/ui/clusters/{key}/confirm")
+    async def ui_confirm_cluster(key: str, request: Request) -> RedirectResponse:
+        from urllib.parse import parse_qs
+
+        from data_engine.catalog import clusters as cluster_store
+
+        form = _first(parse_qs((await request.body()).decode("utf-8", "replace")))
+        label = (form.get("label") or "").strip()
+        if not label:
+            return RedirectResponse(
+                f"/ui/clusters?error={quote('a confirmation needs a label')}",
+                status_code=303,
+            )
+        if not cluster_store.confirm(configured, key, label):
+            return RedirectResponse(
+                f"/ui/clusters?error={quote(f'no cluster {key}')}", status_code=303
+            )
+        return RedirectResponse("/ui/clusters", status_code=303)
+
+    @app.post("/ui/clusters/{key}/release")
+    def ui_release_cluster(key: str) -> RedirectResponse:
+        from data_engine.catalog import clusters as cluster_store
+
+        cluster_store.unconfirm(configured, key)
+        return RedirectResponse("/ui/clusters", status_code=303)
 
     @app.get("/api/v1/slices", response_model=SliceListResponse)
     def list_slices(
