@@ -3,7 +3,7 @@
 Current state of Faultlined for whoever picks it up next. Recent slices are listed in [§14](#14-recent-slices); detail lives in the linked ADR, experiment and review records.
 
 - Stage: production baseline, open since 2026-09-30. MVP complete, all 27 criteria evidenced ([definition of done](spec/definition-of-done.md)).
-- Suite: 1065 passing, coverage 92.37%, mypy strict clean, OpenAPI contract matches.
+- Suite: 1102 passing, coverage 92.37%, mypy strict clean, OpenAPI contract matches.
 - Everything is committed on `main`. Do not tag `scaffold-complete` until the open items in [§6](#6-known-technical-risks) and [§7](#7-next-steps) close.
 
 ## 1. Problem
@@ -69,9 +69,9 @@ More detail: [implementation status](implementation/status.md), [failure modes](
 
 ## 7. Next steps
 
-1. **Integrate the object view** into the engine as a proposal surface: `minilm`, cosine, colour facet at weight ~0.5-1.0, radius 0.20-0.30, online centroids with `sliding_8`, human confirmation. Zero false merges on both gold sets; F1 0.968 constructed / 0.889 hand. Configuration and evidence in [stage 2.5 findings](../experiments/clustering/results/README.md).
-2. **Re-check the radius on a real corpus.** The treemap shows the frozen config gives 34 clusters from 46 hand-set strings with a largest of 2 and 22 singletons - a fragmentation the merge-oriented metrics scored as a success. The constructed set is fine (44 clusters from 273 strings, largest 15), so this is likely the hand set's small size, but it has to be checked against real data before shipping.
-3. **Decide whether the object view should ignore the verb.** Three false splits survive after the colour fix, and the heatmap shows two ten-member clusters that are single-verb rather than object-pure.
+1. **Integrate the object view** into the engine as a proposal surface: `minilm`, cosine, colour facet at weight ~1.0 plus **verb masking** before embedding, radius re-derived per representation (0.15-0.30), online centroids with `sliding_8`, human confirmation. All 42 constructed clusters object-pure and colour-pure; zero false merges on both gold sets. Configuration and evidence in [stage 2.5 findings](../experiments/clustering/results/README.md).
+2. **Re-establish held-out independence.** The held-out sets have now been read three times (colour off, colour on, colour+verb off), each read choosing a configuration. The reported 1.000 and 0.987 are development figures, not a clean estimate. A fresh split or a real corpus is needed before they mean anything.
+3. **Fragmentation is still open.** 27 clusters from 46 hand-set strings, and that set has only 25 distinct nouns so its ceiling is low. Real-corpus scale is untested.
 4. Run the §6 fault-injection campaign against `just run` to produce the notifier accuracy figure, including the real-kill `WORKER_LOST` variant and clean replicates. Backlog B-016.
 5. Write down the per-stage ingest targets the owner prefers, replacing the unreachable 50 MB/s one.
 6. Consider formal catalog migrations; inline DDL plus an `ALTER TABLE` block is the current mechanism.
@@ -81,7 +81,7 @@ Done and closed: the baseline runbook (2026-09-28), clean-clone and secrets vali
 ## 8. Open questions
 
 - **Can the action view be solved at all?** Stage 2.5 answered no for a linear projection over general-purpose embeddings: the information is present (a pair probe reaches 0.784 held-out) but not expressible as a distance (threshold 0.724, projection 0.687, unprojected clustering F1 0.488). A representation trained for this task is the untried route.
-- **Should the object view drop the verb entirely?** Clustering on a representation that contains no verb would fix the surviving verb-synonym false splits, at the cost of not being able to say anything about actions.
+- **Should the object view drop the verb entirely?** Answered on 2026-09-30: yes. Masking the verb before embedding removed all three verb-synonym false splits and made all 42 constructed clusters object-pure. The cost is that the view can now say nothing about actions at all, which is what the two-view design already implied.
 - Fixture versioning for LeRobot at full episode size. The current fixture is the 203-frame tabular slice, not the video shards. For MCAP the fixture is a closed-form generator versioned by its arguments and SHA-256, so no download sits in the measurement path.
 - What catalog migration and transaction or outbox strategy reconciles artifact writes with database state?
 - What retry, lease and cancel semantics, and worker concurrency limits, land first?
@@ -156,6 +156,7 @@ One line each. Detail in the linked record.
 | 2026-09-29 | Curated slices with recomputed membership, failures view | [plan](implementation/telldown-plan.md) |
 | 2026-09-30 | Stage 2.5 clustering assessment end to end. Corrected a broken ceiling diagnostic, added a constructed gold set, and concluded: object view ships, action view does not, learned projection rejected | [findings](../experiments/clustering/results/README.md) |
 | 2026-09-30 | Colour facet removes both false merges; treemap, PCA map and heatmap render the frozen clustering and exposed a fragmentation the metrics scored as success | [findings](../experiments/clustering/results/README.md) |
+| 2026-09-30 | Verb masking before embedding. All 42 constructed clusters now object-pure and colour-pure; verb-synonym splits and verb-pure clusters gone | [findings](../experiments/clustering/results/README.md) |
 | 2026-09-29 | Deterministic monitoring notifier, eleven rules, alert budget | [ADR 0020](decisions/0020-deterministic-monitoring-notifier.md), [EXP-0003](experiments/0003-deterministic-notifier-latency.md) |
 | 2026-09-29 | Instrument UI pass: theme hooks, visible failure policy, HTML error pages | [ADR 0021](decisions/0021-frontend-instrument-pass.md) |
 | 2026-09-29 | MVP complete: content-addressed builds and the MCAP reader | [ADR 0022](decisions/0022-mcap-ingest-reader.md), [EXP-0004](experiments/0004-mcap-ingest-baseline.md) |
@@ -178,4 +179,4 @@ One line each. Detail in the linked record.
 - "Pure core, unit-tested" is not coverage of a feature. Every defect in the end-to-end run was in the wiring around correct code, and 92% line coverage hid all five.
 - Write the probe first. Chaos-harness and adversarial-probing defects were all found by a test or script that could fail, never by reading the code.
 - A metric with units is not a metric with a scale. Plotting an L2 norm in source units put episodes at `1.0e8` beside joints at `0.02`; the chart was not misdrawn, it was showing nothing.
-- Measure before optimizing, and attribute before claiming. `_dimensions` was 51% of ingest time; the disk was 65 ms and would have been blamed by order of magnitude.
+- Measure before optimizing, and attribute before claiming. `_dimensions` was 51% of ingest time; the disk was 65 ms and would have been blamed by order of magnitude.

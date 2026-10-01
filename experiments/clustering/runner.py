@@ -326,7 +326,9 @@ def cmd_colours(args: argparse.Namespace) -> int:
 
     rows: list[tuple[float, float, float, float, float, int]] = []
     for weight in COLOUR_WEIGHTS:
-        by_text = attributes.encode_with_colours(encoder, texts, weight)
+        by_text = attributes.encode_for_clustering(
+            encoder, texts, weight, mask_verb=args.mask_verbs
+        )
         matrix = np.stack([by_text[text] for text in texts])
         for radius in RADIUS_GRID:
             model = OnlineCentroids(
@@ -402,7 +404,9 @@ def _frozen_fit(
     encoder = embeddings.get(args.embedding)
     split = _split_for(args.set_name)
     vocabulary = sorted(_vocab_for(args.set_name))
-    by_text = attributes.encode_with_colours(encoder, vocabulary, args.colour_weight)
+    by_text = attributes.encode_for_clustering(
+        encoder, vocabulary, args.colour_weight, mask_verb=args.mask_verbs
+    )
     texts = sorted({t for pair in split.heldout for t in (pair.a, pair.b)})
     vectors = np.stack([by_text[text] for text in texts])
     model = OnlineCentroids(radius=args.radius, rule_factory=centroid_experiment.RULES[args.rule])
@@ -521,7 +525,9 @@ def cmd_final(args: argparse.Namespace) -> int:
 
     split = _split_for(args.set_name)
     vocabulary = sorted(_vocab_for(args.set_name))
-    by_text = attributes.encode_with_colours(encoder, vocabulary, args.colour_weight)
+    by_text = attributes.encode_for_clustering(
+        encoder, vocabulary, args.colour_weight, mask_verb=args.mask_verbs
+    )
 
     heldout_texts = sorted({t for pair in split.heldout for t in (pair.a, pair.b)})
     heldout_vectors = np.stack([by_text[text] for text in heldout_texts])
@@ -588,6 +594,12 @@ def cmd_final(args: argparse.Namespace) -> int:
             "rule": args.rule,
             "radius": args.radius,
             "colour_weight": args.colour_weight,
+            "mask_verbs": args.mask_verbs,
+            # A verb the lexicon misses is a silent no-op, not an error, so the
+            # coverage is reported with every run rather than assumed.
+            "verb_mask_coverage": (
+                attributes.verb_mask_coverage(heldout_texts) if args.mask_verbs else None
+            ),
             "frozen_before_scoring": True,
         },
         "split": split.report(),
@@ -620,6 +632,14 @@ def cmd_final(args: argparse.Namespace) -> int:
         f"unassigned: {scores.unassigned}"
     )
     print(f"\nboundary cases within {BOUNDARY_MARGIN}x the radius: {len(boundary)}")
+    if args.mask_verbs:
+        unmatched = [t for t in heldout_texts if not attributes.mask_verbs(t)[1]]
+        print(
+            f"verb masking: {attributes.verb_mask_coverage(heldout_texts):.0%} of "
+            f"{len(heldout_texts)} strings matched a known verb"
+        )
+        for text in unmatched[:5]:
+            print(f"  UNMASKED: {text!r}")
     for left, right in scores.over_merged:
         print(f"  FALSE MERGE: {left!r} was clustered with {right!r} (same {args.view}: False)")
     for row in boundary[:12]:
@@ -748,6 +768,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     final.add_argument("--rule", default="sliding_8")
     final.add_argument("--radius", type=float, default=0.30)
     final.add_argument("--colour-weight", type=float, default=0.0)
+    final.add_argument("--mask-verbs", action="store_true")
     final.set_defaults(run=cmd_final)
 
     colours = subparsers.add_parser(
@@ -757,6 +778,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     colours.add_argument("--view", default="object", choices=("action", "object"))
     colours.add_argument("--set", dest="set_name", default="hand", choices=GOLD_SETS)
     colours.add_argument("--rule", default="sliding_8")
+    colours.add_argument("--mask-verbs", action="store_true")
     colours.set_defaults(run=cmd_colours)
 
     plot = subparsers.add_parser(
@@ -768,6 +790,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     plot.add_argument("--rule", default="sliding_8")
     plot.add_argument("--radius", type=float, default=0.30)
     plot.add_argument("--colour-weight", type=float, default=0.0)
+    plot.add_argument("--mask-verbs", action="store_true")
     plot.set_defaults(run=cmd_plot)
 
     args = parser.parse_args(argv)

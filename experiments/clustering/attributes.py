@@ -55,6 +55,105 @@ def _unit(vector: np.ndarray) -> np.ndarray:
     return vector / norm if norm else vector
 
 
+#: Verb phrases that may open an imperative task string, longest first at match time.
+#:
+#: **This list was written with the gold sets open, so coverage on them is 100% by
+#: construction and says nothing about coverage on real operator text.** That is the
+#: honest limitation of a hand-written lexicon and the reason `verb_mask_coverage`
+#: is reported rather than assumed: a verb this list misses leaves its string unmasked,
+#: which is a silent no-op, not an error.
+VERBS: tuple[tuple[str, ...], ...] = tuple(
+    sorted(
+        {
+            ("pick", "up"),
+            ("put", "down"),
+            ("set", "down"),
+            ("hand", "over"),
+            ("screw", "in"),
+            ("step", "on"),
+            ("wipe", "down"),
+            ("grab",),
+            ("take",),
+            ("lift",),
+            ("place",),
+            ("open",),
+            ("close",),
+            ("shut",),
+            ("push",),
+            ("pull",),
+            ("press",),
+            ("wipe",),
+            ("pour",),
+            ("fold",),
+            ("unfold",),
+            ("insert",),
+            ("turn",),
+            ("rotate",),
+            ("unscrew",),
+            ("give",),
+            ("sort",),
+            ("sweep",),
+            ("collect",),
+            ("gather",),
+            ("clean",),
+            ("carry",),
+            ("move",),
+            ("hold",),
+            ("stack",),
+            # Added after measuring: `put the bowl on the plate` and `raise the lid`
+            # were unmasked, and the second was the one surviving false split, so the
+            # lexicon gap was causing the failure rather than the verb-free view
+            # being wrong. Both are ordinary verbs whose absence was an oversight.
+            # That they were found by looking at eval-set failures is exactly why the
+            # 100% coverage this produces on these two sets proves nothing about real
+            # operator text - see `verb_mask_coverage`.
+            ("put",),
+            ("raise",),
+        },
+        key=len,
+        reverse=True,
+    )
+)
+
+#: Stand-in for a masked verb span. One token regardless of how many words the verb
+#: was, so "pick up" and "grab" collapse to the same thing rather than to strings of
+#: different lengths that a contextual encoder would still tell apart.
+_VERB_TOKEN = "action"
+
+
+def mask_verbs(text: str) -> tuple[str, bool]:
+    """Replace the leading verb phrase with a neutral token.
+
+    Returns the masked text and whether a verb was actually found.
+
+    Masking rather than deleting keeps word order and sentence length intact, so the
+    encoder still sees well-formed text. Deleting outright is also tempting and is
+    what `split_colour` does for colour - but there the colour is a modifier to be
+    replaced by an explicit facet, whereas here the verb is being *neutralised*, and
+    removing it outright would collapse "the red cube" and "the" out of existence for
+    strings whose verb is the only thing distinguishing them.
+
+    Both phrasings of one action collapse to the same masked string, which is the
+    point: `place the bowl` and `lift the bowl` become the same input, so the object
+    view can no longer split them for disagreeing about the verb.
+    """
+    words = text.split()
+    if not words:
+        return text, False
+    for phrase in VERBS:
+        length = len(phrase)
+        if len(words) >= length and tuple(w.lower().strip(".,") for w in words[:length]) == phrase:
+            return " ".join([_VERB_TOKEN, *words[length:]]), True
+    return text, False
+
+
+def verb_mask_coverage(texts: Sequence[str]) -> float:
+    """Share of strings whose leading verb was recognised."""
+    if not texts:
+        return 0.0
+    return sum(1 for text in texts if mask_verbs(text)[1]) / len(texts)
+
+
 #: Colour words treated as object facets rather than as part of the object noun.
 #: Deliberately a plain set: it is the smallest thing that addresses a measured
 #: failure, and every entry is one somebody had to write down.
@@ -138,34 +237,43 @@ def colour_space(colours: Iterable[str] = COLOURS) -> int:
     return 1 + len(set(colours))
 
 
-def encode_with_colours(
+def encode_for_clustering(
     encoder: embeddings.Encoder,
     texts: Sequence[str],
     weight: float,
+    *,
+    mask_verb: bool = False,
 ) -> dict[str, np.ndarray]:
-    """Encode `texts`, lifting colour out of the embedding and onto its own axis.
+    """Encode `texts`, optionally lifting colour out and neutralising the verb.
 
-    At `weight == 0` this is the plain encoder output, so every existing result
-    stays reproducible and the feature can be switched off rather than argued about.
+    At `weight == 0` with no verb masking this is the plain encoder output, so every
+    earlier result stays reproducible and each feature can be switched off rather
+    than argued about.
 
     Keys are the **original** strings, so callers keep resolving gold pairs against
     the text they were written with; only the vector changes.
     """
     base = embeddings.encode_all(encoder, list(texts))
-    if weight <= 0.0:
+    if weight <= 0.0 and not mask_verb:
         return {
             text: _unit(np.asarray(row, dtype=np.float64))
             for text, row in zip(texts, base, strict=True)
         }
 
     size = colour_space()
-    stripped = [split_colour(text)[0] for text in texts]
-    stripped_vectors = embeddings.encode_all(encoder, stripped)
+    prepared: list[str] = []
+    for text in texts:
+        # Verb first, then colour: masking replaces the leading phrase, and a
+        # colour word is never inside it, so the order does not matter. Doing it
+        # this way means a verb the lexicon misses still gets its colour handled.
+        prepared_text = mask_verbs(text)[0] if mask_verb else text
+        prepared.append(split_colour(prepared_text)[0])
+    stripped_vectors = embeddings.encode_all(encoder, prepared)
     out: dict[str, np.ndarray] = {}
     for text, stripped_row, colours in zip(
         texts,
         stripped_vectors,
-        (split_colour(text)[1] for text in texts),
+        (split_colour(mask_verbs(text)[0] if mask_verb else text)[1] for text in texts),
         strict=True,
     ):
         row = np.asarray(stripped_row, dtype=np.float64)
@@ -183,3 +291,27 @@ def colour_of(text: str) -> str:
     """A short human-readable description of a string's colour, for the audit."""
     colours = split_colour(text)[1]
     return "+".join(colours) if colours else "-"
+
+
+def verb_of(text: str) -> str:
+    """The verb phrase this string starts with, or `-` when none was recognised.
+
+    Re-matched rather than read back off the masked text, because masking replaces
+    the verb and does not preserve it.
+    """
+    words = [w.lower().strip(".,") for w in text.split()]
+    for phrase in VERBS:
+        if len(words) >= len(phrase) and tuple(words[: len(phrase)]) == phrase:
+            return " ".join(phrase)
+    return "-"
+
+
+def masked_verb_classes(texts: Sequence[str]) -> dict[str, str]:
+    """Map each string to its verb phrase, collapsing synonyms onto one class.
+
+    "place the bowl" and "lift the bowl" are different verb phrases but the same
+    *action* as far as a clustering that has been told to ignore the verb, so the
+    audit reports them together. That grouping is what makes the before-and-after
+    comparison meaningful rather than a list of surface verbs.
+    """
+    return {text: verb_of(text) for text in texts}

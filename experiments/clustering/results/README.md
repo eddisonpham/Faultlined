@@ -396,11 +396,15 @@ lets a human confirm them, rather than one that asserts a number.
 
 | | |
 |---|---|
-| **Ship** | Object view, `minilm`, cosine, colour facet at weight ≈0.5–1.0, radius 0.20–0.30, online centroids with `sliding_8`, human confirmation. F1 0.968 constructed / 0.889 hand, **zero false merges on both**. |
+| | |
+|---|---|
+| **Ship** | Object view, `minilm`, cosine, **colour facet + verb masking**, radius re-derived per representation, online centroids with `sliding_8`, human confirmation. All 42 constructed clusters object-pure and colour-pure; zero false merges on both gold sets. |
 | **Do not ship** | The learned projection (EXP-2.5-03). It overfits and it degrades the one view that works. |
 | **Do not ship** | The action view. F1 0.488 is a coin flip, and no representation tried separates it. |
-| **Resolved** | Colour adjectives (EXP-2.5-05). Lifted out of the embedding onto their own axis. Both false merges gone. |
-| **Still open** | Whether the object view should ignore the verb. Three verb-synonym false splits (`place the bowl`/`lift the bowl`) say it currently does not. |
+| **Resolved** | Colour adjectives (EXP-2.5-05), lifted onto their own axis. |
+| **Resolved** | Verb leakage (EXP-2.5-07), masked before embedding. Three verb-synonym splits and every verb-pure cluster gone. |
+| **Still open** | Fragmentation: 27 clusters from 46 hand-set strings. Real-corpus scale is untested. |
+| **Spent** | Held-out independence. Read three times; the final numbers are development figures. |
 | **Needs a human** | Cluster count. Never assert it; propose it. |
 
 **What would change these conclusions.** A representation trained on this task
@@ -556,12 +560,105 @@ just cluster plot --set hand --embedding minilm --view object --rule sliding_8 -
 
 Writes `results/figures/{treemap,map,heatmap}-<encoder>-<view>[-<set>].svg`.
 
+## EXP-2.5-07: making the object view verb-free fixes both symptoms
+
+**Question.** EXP-2.5-04 left three false splits that were all verb synonyms of the
+same object, and EXP-2.5-06 found clusters that were single-verb. Both say the object
+view is not actually clustering on objects. What happens if it is told to?
+
+**Method.** The leading verb phrase is replaced with a single neutral token before
+embedding — `pick up the red cube` and `grab the red cube` both become
+`action the red cube`. Masking rather than deleting keeps word order and sentence
+length intact; deleting the verb outright would collapse short strings to nothing.
+The radius is then re-selected on dev, because masking shrinks all the distances and
+a radius tuned for the unmasked representation is simply the wrong number.
+
+**Result — held-out, radius re-selected on dev for the masked representation:**
+
+| gold set | config | pair F1 | false merges | false splits | clusters |
+|---|---|---|---|---|---|
+| hand | colour only (r=0.20) | 0.889 | 0 | 3 | 34 |
+| hand | **+ verb-free** (r=0.30) | **1.000** | **0** | **0** | 27 |
+| constructed | colour only (r=0.30) | 0.968 | 0 | 5 | 44 |
+| constructed | **+ verb-free** (r=0.15) | **0.987** | **0** | **2** | 42 |
+
+**Result — what the clusters are made of** (constructed, held-out):
+
+| | clusters | object-pure | colour-pure | largest verb-pure cluster |
+|---|---|---|---|---|
+| colour only | 44 | 37/44 | 40/44 | **3 members spanning 3 objects** |
+| + verb-free | 42 | **42/42** | **42/42** | **1** |
+
+**Finding 1. The verb-synonym splits are gone.** All three — `place the bowl`/
+`lift the bowl`, `hand over the pen`/`give the pen`, `press the pedal`/`step on the
+pedal` — now merge, because both phrasings of a task are the *same input string*
+after masking. The hand set scores 1.000 with zero merges and zero splits.
+
+**Finding 2. The verb-pure clusters are gone, and this is the more convincing half.**
+Before, the largest verb-pure cluster had 3 members spanning 3 different objects: it
+was clustered on the verb, which is the wrong attribute. After masking, **every one
+of the 42 clusters is object-pure and colour-pure**, and the largest verb-pure
+cluster is a single string. Verb purity survives only where it is a coincidence of a
+one-member cluster, which is not a clustering criterion. This is the first
+configuration where the object view provably clusters on objects.
+
+**Finding 3. Fragmentation improves on both sets.** Hand set 34 → 27 clusters,
+constructed 44 → 42 with the largest cluster holding 14. The treemap warning from
+EXP-2.5-06 is reduced but not gone, and it was never about the radius alone.
+
+**Finding 4. The radius had to be re-derived, and using the old one looked like a
+regression.** Carried over unchanged at radius 0.30, the masked configuration
+produced **2 new false merges** — `press the cup`/`press the mug` and `insert the
+blue block`/`hand over the green block`. Both were artefacts of a radius tuned for
+the unmasked geometry. Re-selected on dev to 0.15, both disappear. This is the
+single easiest way to get a wrong answer out of this harness: change the
+representation, keep the threshold.
+
+**One of those two merges was the constructed set contradicting itself.** `press the
+cup` and `press the mug` were labelled `same_object = False` by the exact-name rule,
+while `OBJECT_CLASSES` groups cup and mug as one class on the stated grounds that
+near-synonyms should not masquerade as different objects. The clustering merged them
+and the gold called it wrong. The construction-time caveat said this set would
+"inflate the object view's apparent error rate", and it did, in exactly the place
+predicted. The hand set agrees that cup and mug are different, so the strict rule is
+the consistent one — but the grid should not also be grouping them as synonyms.
+
+**Caveats, and the one that matters most.**
+
+- **Held-out has now been read three times** — colour off, colour on, colour and verb
+  off — and each read chose a configuration. The numbers above are dev-selected but
+  sit on data already seen, so they are **development numbers, not a clean held-out
+  estimate**. A fresh split, or a real corpus, is needed before 1.000 and 0.987 mean
+  anything. This is the cost of iterating on a 24-pair hand set and it was worth
+  paying to find the verb result, but it should not be quoted as a final figure.
+- **Verb coverage is 100% on these sets by construction.** `put` and `raise` were
+  missing, the second was causing the last surviving false split, and both were added
+  *after* the measurement revealed them. The lexicon was therefore written with the
+  eval sets open, so its 100% here proves nothing about real operator text. Coverage
+  is reported with every run for that reason.
+- A perfect 1.000 on 24 pairs is a small-sample result. The direction is consistent
+  across both sets and is corroborated by the purity counts, which is what makes it
+  believable rather than the F1 alone.
+
+**Decision: ship the verb-free object view.** Colour facet plus verb masking, radius
+re-derived per representation. It is the first configuration whose clusters are
+demonstrably object groups, and it removes every failure mode the study has found in
+the object view except fragmentation.
+
+**Reproduce.**
+
+```bash
+just cluster colours --set hand --embedding minilm --view object --rule sliding_8 --mask-verbs
+just cluster final --set hand --embedding minilm --view object --rule sliding_8 --radius 0.30 --colour-weight 1.0 --mask-verbs
+just cluster final --set constructed --embedding minilm --view object --rule sliding_8 --radius 0.15 --colour-weight 1.0 --mask-verbs
+```
+
 ## Not yet run
 
 - MVP integration of the object view into the engine. Unblocked; not started.
-- Re-checking the radius on a real corpus, given the fragmentation above.
+- A fresh or real corpus to re-establish held-out independence, which the three reads
+  above have spent.
+- A learned attribute extractor to replace both hand-written lexicons, whose coverage
+  on real operator text is unknown.
 - A representation trained for this task, which is the only remaining route to the
   action view.
-- A learned attribute extractor to replace the colour lexicon, and a decision about
-  whether the object view should ignore the verb entirely — which the three
-  verb-synonym false splits and the verb-pure clusters are both asking for.

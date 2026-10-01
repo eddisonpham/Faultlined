@@ -85,8 +85,8 @@ def test_the_facet_separates_colours_an_encoder_cannot() -> None:
     encoder = _ColourBlind()
     texts = ["press the red button", "press the blue button"]
 
-    plain = attributes.encode_with_colours(encoder, texts, 0.0)
-    faceted = attributes.encode_with_colours(encoder, texts, 1.0)
+    plain = attributes.encode_for_clustering(encoder, texts, 0.0)
+    faceted = attributes.encode_for_clustering(encoder, texts, 1.0)
 
     assert _cosine(plain[texts[0]], plain[texts[1]]) == pytest.approx(1.0)
     assert _cosine(faceted[texts[0]], faceted[texts[1]]) < 0.95
@@ -95,7 +95,7 @@ def test_the_facet_separates_colours_an_encoder_cannot() -> None:
 def test_identical_colour_stays_identical() -> None:
     encoder = _ColourBlind()
     texts = ["press the red button", "press the red button"]
-    faceted = attributes.encode_with_colours(encoder, texts, 1.0)
+    faceted = attributes.encode_for_clustering(encoder, texts, 1.0)
     assert _cosine(faceted[texts[0]], faceted[texts[1]]) == pytest.approx(1.0)
 
 
@@ -103,7 +103,7 @@ def test_zero_weight_reproduces_the_plain_encoder() -> None:
     """The feature is switchable, so every earlier result stays reproducible."""
     encoder = _ColourBlind()
     texts = ["press the red button", "open the drawer"]
-    off = attributes.encode_with_colours(encoder, texts, 0.0)
+    off = attributes.encode_for_clustering(encoder, texts, 0.0)
     assert set(off) == set(texts)
     for text in texts:
         assert float(np.linalg.norm(off[text])) == pytest.approx(1.0, abs=1e-9)
@@ -121,7 +121,7 @@ def test_vectors_come_back_unit_length() -> None:
     """
     encoder = _ColourBlind()
     for weight in (0.0, 0.5, 1.0, 4.0):
-        vectors = attributes.encode_with_colours(
+        vectors = attributes.encode_for_clustering(
             encoder, ["press the red button", "open the drawer"], weight
         )
         for vector in vectors.values():
@@ -133,7 +133,7 @@ def test_a_larger_weight_separates_colours_more() -> None:
     texts = ["press the red button", "press the blue button"]
 
     def gap(weight: float) -> float:
-        vectors = attributes.encode_with_colours(encoder, texts, weight)
+        vectors = attributes.encode_for_clustering(encoder, texts, weight)
         return _cosine(vectors[texts[0]], vectors[texts[1]])
 
     assert gap(2.0) < gap(1.0) < gap(0.25)
@@ -142,7 +142,7 @@ def test_a_larger_weight_separates_colours_more() -> None:
 def test_uncoloured_strings_get_the_empty_slot_not_a_colour() -> None:
     encoder = _ColourBlind()
     texts = ["press the red button", "open the drawer"]
-    faceted = attributes.encode_with_colours(encoder, texts, 2.0)
+    faceted = attributes.encode_for_clustering(encoder, texts, 2.0)
     # Distinct vectors: the uncoloured sentence is not pushed into some colour's slot.
     assert _cosine(faceted[texts[0]], faceted[texts[1]]) < 0.999
 
@@ -151,7 +151,7 @@ def test_every_string_is_keyed_by_its_original_text() -> None:
     """Callers resolve gold pairs against the text they were written with."""
     encoder = _ColourBlind()
     texts = ["press the red button", "press the blue button"]
-    vectors = attributes.encode_with_colours(encoder, texts, 1.0)
+    vectors = attributes.encode_for_clustering(encoder, texts, 1.0)
     assert set(vectors) == set(texts)
 
 
@@ -164,3 +164,100 @@ def test_colour_space_has_a_slot_for_every_colour_plus_uncoloured() -> None:
 def test_the_audit_can_name_a_colour() -> None:
     assert attributes.colour_of("press the red button") == "red"
     assert attributes.colour_of("open the drawer") == "-"
+
+
+# ------------------------------------------------------------ verb masking
+
+
+def test_a_single_word_verb_is_masked() -> None:
+    masked, matched = attributes.mask_verbs("open the drawer")
+    assert matched
+    assert masked == "action the drawer"
+
+
+def test_a_multi_word_verb_is_masked_as_one_span() -> None:
+    """Longest match first, so "pick up" is not masked as bare "pick"."""
+    masked, matched = attributes.mask_verbs("pick up the red cube")
+    assert matched
+    assert masked == "action the red cube"
+    assert attributes.mask_verbs("set down the lid")[0] == "action the lid"
+    assert attributes.mask_verbs("screw in the bolt")[0] == "action the bolt"
+
+
+def test_an_unknown_verb_is_reported_rather_than_guessed() -> None:
+    """A missed verb is a silent no-op, so the miss has to be visible."""
+    masked, matched = attributes.mask_verbs("frobnicate the widget")
+    assert not matched
+    assert masked == "frobnicate the widget"
+
+
+def test_masking_keeps_the_rest_of_the_sentence_intact() -> None:
+    """Masking, not deletion: the object and any trailing phrase must survive."""
+    masked, _ = attributes.mask_verbs("place the bowl on the plate")
+    assert masked == "action the bowl on the plate"
+    assert "plate" in masked and "bowl" in masked
+
+
+def test_two_phrasings_of_one_object_mask_to_the_same_text() -> None:
+    """This is the whole mechanism.
+
+    `place the bowl` and `lift the bowl` are the failure EXP-2.5-04 left behind. If
+    they do not collapse to one input, the object view can still split them for
+    disagreeing about the verb, and the feature does nothing.
+    """
+    assert attributes.mask_verbs("place the bowl")[0] == attributes.mask_verbs("lift the bowl")[0]
+    assert attributes.mask_verbs("hand over the pen")[0] == attributes.mask_verbs("give the pen")[0]
+
+
+def test_different_objects_still_mask_to_different_texts() -> None:
+    """Otherwise masking would merge everything with the same verb."""
+    assert (
+        attributes.mask_verbs("press the red button")[0]
+        != attributes.mask_verbs("press the blue button")[0]
+    )
+    assert (
+        attributes.mask_verbs("pick up the cube")[0] != attributes.mask_verbs("pick up the mug")[0]
+    )
+
+
+def test_coverage_is_reported_as_a_fraction() -> None:
+    texts = ["open the drawer", "pick up the cube", "frobnicate the widget"]
+    assert attributes.verb_mask_coverage(texts) == pytest.approx(2 / 3)
+    assert attributes.verb_mask_coverage([]) == 0.0
+
+
+def test_verb_of_names_the_phrase_it_matched() -> None:
+    assert attributes.verb_of("pick up the cube") == "pick up"
+    assert attributes.verb_of("open the drawer") == "open"
+    assert attributes.verb_of("frobnicate the widget") == "-"
+
+
+def test_masking_and_colour_compose() -> None:
+    """Both facets apply to one string, in either order, with the same result."""
+    encoder = _ColourBlind()
+    texts = ["press the red button", "press the blue button"]
+    faceted = attributes.encode_for_clustering(encoder, texts, 2.0, mask_verb=True)
+    assert _cosine(faceted[texts[0]], faceted[texts[1]]) < 0.95
+    # Same verb, different object: still distinct.
+    other = ["press the green button"]
+    mixed = attributes.encode_for_clustering(encoder, [*texts, *other], 2.0, mask_verb=True)
+    assert _cosine(mixed[other[0]], mixed[texts[0]]) < 0.95
+
+
+def test_an_unmasked_verb_still_gets_its_colour_handled() -> None:
+    """Masking failing must not disable the colour facet for that string."""
+    encoder = _ColourBlind()
+    texts = ["frobnicate the red widget", "press the red widget"]
+    faceted = attributes.encode_for_clustering(encoder, texts, 2.0, mask_verb=True)
+    # They differ by verb alone, which masking leaves in, so they may or may not
+    # separate - but both must still be unit vectors of the augmented width.
+    for vector in faceted.values():
+        assert float(np.linalg.norm(vector)) == pytest.approx(1.0, abs=1e-9)
+        assert vector.shape[0] == encoder.dim + attributes.colour_space()
+
+
+def test_the_known_verb_gaps_that_measurement_found_are_closed() -> None:
+    """`put` and `raise` were added after they caused a false split on the hand set."""
+    for text in ("put the bowl on the plate", "raise the lid"):
+        _masked, matched = attributes.mask_verbs(text)
+        assert matched, text
