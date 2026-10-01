@@ -316,12 +316,112 @@ just cluster projection --set constructed --embedding minilm
 just cluster projection --set constructed --embedding minilm --shrinkage 0.1
 ```
 
+## EXP-2.5-04: the object view works, the action view does not, and one failure mode explains both
+
+**Question.** Given EXP-2.5-03, what is actually shippable?
+
+**Method.** The centroid rule and the radius are both selected on dev, over a grid,
+ranked by over-merge rate first and pair F1 second. The winning configuration is
+then frozen — encoder, view, rule, radius — and run once against held-out *pairs*,
+with the clustering fitted on held-out *strings*. Alongside the score, every string
+within 1.5× the radius of its assigned centroid is dumped with the members it was
+merged with and the gold verdicts it was judged against, because a pair F1 of 0.94
+looks identical whether the merges are right or wrong.
+
+**Encoder choice, under the actual clustering method** (dev, object view, radius
+chosen per encoder):
+
+| Encoder | radius | clusters | pair F1 | over-merge | order-stable count? |
+|---|---|---|---|---|---|
+| `m2v-8m` | 0.05 | 64 | 0.663 | 0.063 | yes |
+| `m2v-32m` | 0.30 | 64 | 0.754 | 0.038 | yes |
+| `minilm` | 0.30 | 37 | **0.941** | **0.000** | **no** (10 distinct counts) |
+
+**Centroid rule: it barely matters.** Six of the nine rules land on identical
+numbers at radius 0.30 — same F1 (0.941), same zero over-merges, same drift to four
+decimals. `sliding_8` is chosen because it is the cheapest of the tied set (24 µs per
+point, 8 points of memory, zero outlier pull, full recovery). The rule only changes
+the answer when the radius is wrong: `ema_0.90` selected radius 0.05 on its own dev
+score and landed at F1 0.828. **Radius matters, rule does not.**
+
+**Held-out results for the frozen configuration** (`minilm` / object / `sliding_8`
+/ radius 0.30):
+
+| gold set | pairs | clusters | pair F1 | false merges | false splits |
+|---|---|---|---|---|---|
+| constructed | 190 | 43 | 0.947 | **0** | 8 (0.100) |
+| hand | 24 | 25 | 0.938 | **2** (0.286) | 0 |
+
+For contrast, the same configuration on the **action** view, constructed set: pair
+F1 **0.488**, 31 false merges, 55 false splits. That is a coin flip.
+
+**Finding 1. The object view is the deliverable.** Zero false merges on the
+constructed set, 43 clusters from 273 strings, and the audit confirms the clusters
+are object groups rather than accident: `pour`/`close`/`hand over` the blue cube all
+land together, which is *correct* for the object view and would be wrong for the
+action view. The two-view design earns its keep here.
+
+**Finding 2. The constructed set's zero false merges does not transfer, and the two
+failures are the same failure.** On the hand set the same configuration produces two
+false merges:
+
+```
+'press the red button'             merged with  'press the blue button'
+'sort the red blocks into the bin' merged with  'sort the blue blocks into the bin'
+```
+
+Both differ only by a colour adjective. A contextual encoder embeds "the red button"
+and "the blue button" as near-identical, and no radius separates them. The
+constructed grid does not catch this because it draws its object pairs from a fixed
+noun list where the colour adjectives are balanced rather than adversarially paired
+— its over-merge rate of 0.000 is real but it was measured on easier negatives than
+production will produce. **The constructed set is an upper bound, as documented, and
+this is the concrete place it was optimistic.**
+
+**Finding 3. Zero false merges is achievable and it is not sufficient.** The
+object view trades in false splits (8 of them, 0.100) rather than false merges,
+which is the right direction: a false split shows up as two small clusters a human
+merges in seconds, a false merge silently mixes two tasks into a build. The radius
+is what buys that trade, and it is the one number that must be set from real data.
+
+**Finding 4. Cluster count is order-dependent at the winning radius.** `minilm` at
+radius 0.30 produced 10 distinct cluster counts across 10 input orderings, while the
+weaker encoders produced 1. So the best-accuracy configuration is also the one whose
+answer to "how many tasks are there" depends on arrival order. The online method's
+`confirm()` is the intended remedy — a human freezes a cluster and it never moves
+again — but this is exactly the case for it: an engine that proposes clusters and
+lets a human confirm them, rather than one that asserts a number.
+
+**Decision.**
+
+| | |
+|---|---|
+| **Ship** | Object view, `minilm`, cosine, radius ≈0.30, online centroids with `sliding_8`, human confirmation. F1 0.947 / 0.938, no false merges on constructed, 2 colour-adjective merges on hand. |
+| **Do not ship** | The learned projection (EXP-2.5-03). It overfits and it degrades the one view that works. |
+| **Do not ship** | The action view. F1 0.488 is a coin flip, and no representation tried separates it. |
+| **Blocked on** | Colour adjectives. Any deployment needs them either stripped before embedding or carried as a separate facet outside the embedding. This is a one-line change with a measurable target, and it is the highest-value follow-up. |
+| **Needs a human** | Cluster count. Never assert it; propose it. |
+
+**What would change these conclusions.** A representation trained on this task
+rather than a general one — the action view's information is demonstrably present
+(probe 0.784) and demonstrably not expressible as a distance, so a fine-tuned
+encoder is the obvious next attempt. Or a representation that respects colour, which
+would fix Finding 2 outright. Neither has been tried; both are better uses of effort
+than more radii.
+
+**Reproduce.**
+
+```bash
+just cluster centroids --set constructed --embedding minilm --view object
+just cluster final --set constructed --embedding minilm --view object --rule sliding_8 --radius 0.30
+just cluster final --set hand --embedding minilm --view object --rule sliding_8 --radius 0.30
+just cluster final --set constructed --embedding minilm --view action --rule sliding_8 --radius 0.30
+```
+
 ## Not yet run
 
-- `centroids` — built and passing, but last run with a radius chosen arbitrarily
-  before the premise test existed. Now unblocked for the **object view only**, where
-  0.977 held-out finally makes a threshold meaningful.
-- the method × encoder factorial, which is now scoped to the object view. The
-  original 30-config matrix is dead: the action view has no representation that
-  separates it and there is no reason to spend a factorial confirming that.
-- the manual boundary audit, which needs a finalist. The object view now has one.
+- MVP integration of the object view into the engine, and the cluster visualisation.
+  Both are unblocked now that there is a configuration worth integrating; neither is
+  started.
+- A representation trained for this task, which is the only remaining route to the
+  action view.

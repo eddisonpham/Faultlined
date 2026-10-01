@@ -3,7 +3,7 @@
 Current state of Faultlined for whoever picks it up next. Recent slices are listed in [§14](#14-recent-slices); detail lives in the linked ADR, experiment and review records.
 
 - Stage: production baseline, open since 2026-09-30. MVP complete, all 27 criteria evidenced ([definition of done](spec/definition-of-done.md)).
-- Suite: 971 passing, coverage 92.37%, mypy strict clean, OpenAPI contract matches.
+- Suite: 1051 passing, coverage 92.37%, mypy strict clean, OpenAPI contract matches.
 - Everything is committed on `main`. Do not tag `scaffold-complete` until the open items in [§6](#6-known-technical-risks) and [§7](#7-next-steps) close.
 
 ## 1. Problem
@@ -69,15 +69,17 @@ More detail: [implementation status](implementation/status.md), [failure modes](
 
 ## 7. Next steps
 
-1. Run the §6 fault-injection campaign against `just run` to produce the notifier accuracy figure, including the real-kill `WORKER_LOST` variant and clean replicates. Backlog B-016.
-2. Write down the per-stage ingest targets the owner prefers, replacing the unreachable 50 MB/s one.
-3. Optionally verify the slice against the owner's own PostgreSQL on 5432 by putting its DSN in `.env`. The isolated cluster already covers development.
-4. Consider formal catalog migrations; inline DDL plus an `ALTER TABLE` block is the current mechanism.
+1. **Integrate the object view** into the engine as a proposal surface: `minilm`, cosine, radius ~0.30, online centroids with `sliding_8`, human confirmation. F1 0.947 constructed / 0.938 hand, zero false merges on the constructed set. Configuration and evidence in [stage 2.5 findings](../experiments/clustering/results/README.md).
+2. **Handle colour adjectives before embedding, or as a separate facet.** The only two false merges measured are `red button`/`blue button` and `red blocks`/`blue blocks` - the pair differs by one colour word and a contextual encoder calls them identical.
+3. Run the §6 fault-injection campaign against `just run` to produce the notifier accuracy figure, including the real-kill `WORKER_LOST` variant and clean replicates. Backlog B-016.
+4. Write down the per-stage ingest targets the owner prefers, replacing the unreachable 50 MB/s one.
+5. Consider formal catalog migrations; inline DDL plus an `ALTER TABLE` block is the current mechanism.
 
-Done and closed: the baseline runbook (2026-09-28), clean-clone and secrets validation (2026-09-28), and the whole MVP engineering order (real LeRobot reader, rule-based validation and quarantine, content-addressed build, MCAP reader) on 2026-09-29.
+Done and closed: the baseline runbook (2026-09-28), clean-clone and secrets validation (2026-09-28), the whole MVP engineering order (real LeRobot reader, rule-based validation and quarantine, content-addressed build, MCAP reader) on 2026-09-29, and the stage 2.5 clustering assessment on 2026-09-30.
 
 ## 8. Open questions
 
+- **Can the action view be solved at all?** Stage 2.5 answered no for a linear projection over general-purpose embeddings: the information is present (a pair probe reaches 0.784 held-out) but not expressible as a distance (threshold 0.724, projection 0.687, unprojected clustering F1 0.488). A representation trained for this task is the untried route.
 - Fixture versioning for LeRobot at full episode size. The current fixture is the 203-frame tabular slice, not the video shards. For MCAP the fixture is a closed-form generator versioned by its arguments and SHA-256, so no download sits in the measurement path.
 - What catalog migration and transaction or outbox strategy reconciles artifact writes with database state?
 - What retry, lease and cancel semantics, and worker concurrency limits, land first?
@@ -150,6 +152,7 @@ One line each. Detail in the linked record.
 | 2026-09-29 | Validation profiles, rule engine, quarantine, re-validate | [ADR 0016](decisions/0016-json-validation-profiles.md) |
 | 2026-09-29 | Run intelligence: metrics aggregation, quality analytics, run inspection | [ADR 0017](decisions/0017-runtime-metrics-aggregation.md), [ADR 0018](decisions/0018-episode-quality-signals.md), [ADR 0019](decisions/0019-benchmark-workload-isolation.md) |
 | 2026-09-29 | Curated slices with recomputed membership, failures view | [plan](implementation/telldown-plan.md) |
+| 2026-09-30 | Stage 2.5 clustering assessment end to end. Corrected a broken ceiling diagnostic, added a constructed gold set, and concluded: object view ships, action view does not, learned projection rejected | [findings](../experiments/clustering/results/README.md) |
 | 2026-09-29 | Deterministic monitoring notifier, eleven rules, alert budget | [ADR 0020](decisions/0020-deterministic-monitoring-notifier.md), [EXP-0003](experiments/0003-deterministic-notifier-latency.md) |
 | 2026-09-29 | Instrument UI pass: theme hooks, visible failure policy, HTML error pages | [ADR 0021](decisions/0021-frontend-instrument-pass.md) |
 | 2026-09-29 | MVP complete: content-addressed builds and the MCAP reader | [ADR 0022](decisions/0022-mcap-ingest-reader.md), [EXP-0004](experiments/0004-mcap-ingest-baseline.md) |

@@ -15,12 +15,15 @@ from __future__ import annotations
 
 import argparse
 import json
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+
 from experiments.clustering import embeddings
 from experiments.clustering.evaluation import gold, splits
+from experiments.clustering.evaluation.metrics import PairScores
 
 RESULTS = Path(__file__).parent / "results"
 
@@ -99,11 +102,43 @@ def cmd_gold(args: argparse.Namespace) -> int:
     return 0
 
 
+#: Candidate radii, in cosine distance. The grid brackets where the object view's
+#: best similarity threshold sits (similarity 0.83-0.87, so distance 0.13-0.17) with
+#: room either side, because the online algorithm needs a radius that produces a
+#: usable number of clusters, not one that maximises a pairwise score.
+RADIUS_GRID = (0.05, 0.10, 0.15, 0.20, 0.30, 0.40)
+
+
+def _score_on_dev(
+    rule: str,
+    encoder: embeddings.Encoder,
+    texts: Sequence[str],
+    radius: float,
+    scorer: Callable[[Sequence[int], Sequence[str], str], PairScores],
+) -> tuple[float, float]:
+    """Pair F1 and over-merge rate for one rule at one radius, on dev strings."""
+    from experiments.clustering import centroid_experiment
+    from experiments.clustering.methods.online_centroids import OnlineCentroids
+
+    vectors = embeddings.encode_all(encoder, texts)
+    model = OnlineCentroids(radius=radius, rule_factory=centroid_experiment.RULES[rule])
+    result = model.fit(vectors, texts)
+    scores = scorer(result.labels, texts, rule)
+    return scores.pair_f1, scores.over_merge_rate
+
+
 def cmd_centroids(args: argparse.Namespace) -> int:
     """Decide the centroid rule on dev data, before the factorial.
 
     Dev only, always. The held-out set exists to be touched once, and an
     exploratory sweep over nine rules on it would spend that for nothing.
+
+    The radius is *selected here too*, on dev, rather than supplied. The previous
+    version of this command took a radius as an argument and every reported number
+    inherited whatever the caller typed - which is why the earlier run is marked
+    invalid in the findings record. Over-merges are ranked first because a false
+    merge silently mixes two tasks into one build, while a false split shows up as
+    two small clusters a human fixes in seconds.
     """
     from experiments.clustering import centroid_experiment
     from experiments.clustering.evaluation import evaluation as ev
@@ -118,41 +153,51 @@ def cmd_centroids(args: argparse.Namespace) -> int:
 
     split = _split_for(args.set_name)
     texts = sorted({t for pair in split.dev for t in (pair.a, pair.b)})
-    scorer = ev.pair_scorer(split.dev, "action")
+    scorer = ev.pair_scorer(split.dev, args.view)
+
+    chosen: dict[str, float] = {}
+    for rule in centroid_experiment.RULES:
+        scored = []
+        for radius in RADIUS_GRID:
+            f1, over = _score_on_dev(rule, encoder, texts, radius, scorer)
+            scored.append((over, -f1, radius, f1))
+        best = min(scored)
+        chosen[rule] = best[2]
 
     outcomes = []
     for rule in centroid_experiment.RULES:
-        outcome = centroid_experiment.run_rule(
-            rule,
-            encoder,
-            texts,
-            radius=args.radius,
-            scorer=scorer,
+        outcomes.append(
+            centroid_experiment.run_rule(rule, encoder, texts, radius=chosen[rule], scorer=scorer)
         )
-        outcomes.append(outcome)
 
     ranked = sorted(outcomes, key=lambda o: (o.drift, o.outlier_pull))
     payload = {
         "experiment": "centroids",
         "embedding": embeddings.describe(encoder),
         "gold_set": args.set_name,
-        "radius": args.radius,
+        "view": args.view,
+        "radii": {rule: chosen[rule] for rule in sorted(chosen)},
         "split": "dev",
         "inputs": len(texts),
         "outcomes": [o.as_dict() for o in ranked],
     }
-    path = _write(f"centroids-{encoder.name}", payload)
+    suffix = "" if args.set_name == "hand" else f"-{args.set_name}"
+    path = _write(f"centroids-{encoder.name}-{args.view}{suffix}", payload)
 
-    print(f"embedding {encoder.name} dim={encoder.dim}  inputs={len(texts)}  radius={args.radius}")
     print(
-        f"{'rule':22s} {'drift':>7s} {'pull':>7s} {'recov':>7s} "
+        f"embedding {encoder.name} dim={encoder.dim}  inputs={len(texts)}  "
+        f"view={args.view}  gold={args.set_name}"
+    )
+    print(
+        f"{'rule':22s} {'radius':>7s} {'drift':>7s} {'pull':>7s} {'recov':>7s} "
         f"{'us/pt':>7s} {'mem':>4s} {'k':>3s} {'kvar':>5s} {'pairF1':>7s} {'over':>6s}"
     )
     for o in ranked:
         print(
-            f"{o.rule:22s} {o.drift:7.4f} {o.outlier_pull:7.4f} {o.recovery:7.3f} "
-            f"{o.micros_per_point:7.1f} {o.points_retained:4d} {o.cluster_count:3d} "
-            f"{o.distinct_counts:5d} {o.pair_f1:7.3f} {o.over_merge_rate:6.3f}"
+            f"{o.rule:22s} {chosen[o.rule]:7.2f} {o.drift:7.4f} {o.outlier_pull:7.4f} "
+            f"{o.recovery:7.3f} {o.micros_per_point:7.1f} {o.points_retained:4d} "
+            f"{o.cluster_count:3d} {o.distinct_counts:5d} {o.pair_f1:7.3f} "
+            f"{o.over_merge_rate:6.3f}"
         )
     print(f"\nwrote {path.relative_to(Path.cwd())}")
     return 0
@@ -248,6 +293,143 @@ def cmd_projection(args: argparse.Namespace) -> int:
     return 0
 
 
+#: A string whose distance to the centroid it joined falls within this multiple of
+#: the radius counts as a boundary case. Comfortably inside means the assignment was
+#: obvious; comfortably outside means the string sat alone.
+BOUNDARY_MARGIN = 1.5
+
+
+def cmd_final(args: argparse.Namespace) -> int:
+    """Score the frozen configuration on held-out pairs, once, and audit its edges.
+
+    Everything here is fixed before this runs: encoder, view, centroid rule, radius.
+    The clustering is fitted on held-out *strings* and scored against held-out
+    *pairs*, so nothing about the answer was tuned on what is being graded.
+
+    The audit exists because pair F1 alone cannot tell a human whether the clusters
+    are right. A false merge at 0.941 looks identical to a correct merge. So the
+    strings sitting near the decision boundary are dumped with the members they were
+    merged with and the labels they were actually judged against, which is the only
+    form in which "works well" is checkable.
+    """
+    from experiments.clustering import centroid_experiment
+    from experiments.clustering.evaluation import evaluation as ev
+    from experiments.clustering.methods.online_centroids import OnlineCentroids
+
+    encoder = embeddings.get(args.embedding)
+    check = embeddings.verify(encoder)
+    if not check.ok:
+        print(f"refusing to score {encoder.name}: verification failed")
+        return 1
+
+    split = _split_for(args.set_name)
+    vectors = embeddings.encode_all(encoder, sorted(_vocab_for(args.set_name)))
+    by_text = sep_all(vectors, sorted(_vocab_for(args.set_name)))
+
+    heldout_texts = sorted({t for pair in split.heldout for t in (pair.a, pair.b)})
+    heldout_vectors = np.stack([by_text[text] for text in heldout_texts])
+
+    model = OnlineCentroids(radius=args.radius, rule_factory=centroid_experiment.RULES[args.rule])
+    result = model.fit(heldout_vectors, heldout_texts)
+    scores = ev.pair_scorer(split.heldout, args.view)(result.labels, heldout_texts, args.rule)
+
+    # Every gold label this string was judged by, so the audit can say what the
+    # string "actually" is rather than only what it was clustered with.
+    verdicts: dict[str, list[str]] = {}
+    for pair in split.heldout:
+        verdict = getattr(pair, f"same_{args.view}")
+        if verdict is None:
+            continue
+        verdict_text = "same" if verdict else "different"
+        verdicts.setdefault(pair.a, []).append(f"{verdict_text} as {pair.b}")
+        verdicts.setdefault(pair.b, []).append(f"{verdict_text} as {pair.a}")
+
+    members: dict[int, list[str]] = {}
+    for label, text in zip(result.labels, heldout_texts, strict=True):
+        members.setdefault(int(label), []).append(text)
+
+    centroid_of: dict[str, int] = {
+        text: int(label) for label, text in zip(result.labels, heldout_texts, strict=True)
+    }
+    centroids = np.stack([c.centroid for c in model.clusters])
+
+    boundary: list[dict[str, Any]] = []
+    for text in heldout_texts:
+        label = centroid_of[text]
+        distance = float(1.0 - by_text[text] @ centroids[label])
+        if distance > args.radius * BOUNDARY_MARGIN:
+            continue
+        peers = [peer for peer in members[label] if peer != text]
+        boundary.append(
+            {
+                "text": text,
+                "cluster": label,
+                "distance_to_centroid": round(distance, 4),
+                "radius": args.radius,
+                "merged_with": peers[:3],
+                "cluster_size": len(peers) + 1,
+                "gold_says": verdicts.get(text, [])[:3],
+            }
+        )
+    boundary.sort(key=lambda row: -float(row["distance_to_centroid"]))
+
+    payload = {
+        "experiment": "final",
+        "configuration": {
+            "embedding": embeddings.describe(encoder),
+            "view": args.view,
+            "gold_set": args.set_name,
+            "rule": args.rule,
+            "radius": args.radius,
+            "frozen_before_scoring": True,
+        },
+        "split": split.report(),
+        "heldout": {
+            "pairs": len(split.heldout),
+            "strings": len(heldout_texts),
+            "clusters": result.cluster_count,
+            "pair_f1": scores.pair_f1,
+            "over_merge_rate": scores.over_merge_rate,
+            "under_merge_rate": scores.under_merge_rate,
+            "false_merges": len(scores.over_merged),
+            "false_splits": len(scores.under_merged),
+            "unassigned": scores.unassigned,
+            # The failing pairs themselves, not just their count: an over-merge rate
+            # of 0.286 does not say *which* pairs, and the whole point of this
+            "over_merged_pairs": [{"a": left, "b": right} for left, right in scores.over_merged],
+            "under_merged_pairs": [{"a": left, "b": right} for left, right in scores.under_merged],
+        },
+        "boundary_cases": boundary,
+    }
+    suffix = "" if args.set_name == "hand" else f"-{args.set_name}"
+    path = _write(f"final-{encoder.name}-{args.view}{suffix}", payload)
+
+    print(f"configuration: {encoder.name} / {args.view} / {args.rule} / radius {args.radius}")
+    print(f"gold set: {args.set_name}   held-out pairs: {len(split.heldout)}")
+    print(
+        f"clusters: {result.cluster_count}  pair F1: {scores.pair_f1:.3f}  "
+        f"over-merge: {scores.over_merge_rate:.3f} ({len(scores.over_merged)})  "
+        f"under-merge: {scores.under_merge_rate:.3f} ({len(scores.under_merged)})  "
+        f"unassigned: {scores.unassigned}"
+    )
+    print(f"\nboundary cases within {BOUNDARY_MARGIN}x the radius: {len(boundary)}")
+    for left, right in scores.over_merged:
+        print(f"  FALSE MERGE: {left!r} was clustered with {right!r} (same {args.view}: False)")
+    for row in boundary[:12]:
+        print(f"  {row['text']!r}  d={row['distance_to_centroid']}  -> {row['merged_with']}")
+        print(f"      gold: {row['gold_says']}")
+    if len(boundary) > 12:
+        print(f"  ... {len(boundary) - 12} more in {path.relative_to(Path.cwd())}")
+    print(f"\nwrote {path.relative_to(Path.cwd())}")
+    return 0
+
+
+def sep_all(vectors: Any, texts: Sequence[str]) -> dict[str, Any]:
+    from experiments.clustering.evaluation.separability import all_vectors
+
+    return all_vectors(vectors, texts)
+
+
 def cmd_separability(args: argparse.Namespace) -> int:
     """Premise check: are same-pairs and different-pairs separable at all?
 
@@ -330,7 +512,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     centroids = subparsers.add_parser("centroids", help="decide the centroid rule on the dev split")
     centroids.add_argument("--embedding", default="m2v-8m")
-    centroids.add_argument("--radius", type=float, default=0.35)
+    centroids.add_argument("--view", default="object", choices=("action", "object"))
     centroids.add_argument("--set", dest="set_name", default="hand", choices=GOLD_SETS)
     centroids.set_defaults(run=cmd_centroids)
 
@@ -349,6 +531,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     project.add_argument("--shrinkage", type=float, default=None)
     project.add_argument("--metric", default="euclidean", choices=sep_metrics())
     project.set_defaults(run=cmd_projection)
+
+    final = subparsers.add_parser(
+        "final", help="score the frozen configuration on held-out pairs and audit its edges"
+    )
+    final.add_argument("--embedding", default="minilm")
+    final.add_argument("--view", default="object", choices=("action", "object"))
+    final.add_argument("--set", dest="set_name", default="hand", choices=GOLD_SETS)
+    final.add_argument("--rule", default="sliding_8")
+    final.add_argument("--radius", type=float, default=0.30)
+    final.set_defaults(run=cmd_final)
 
     args = parser.parse_args(argv)
     result: int = args.run(args)
