@@ -44,6 +44,8 @@ class ViewSeparability:
     view: str
     positives: int
     negatives: int
+    #: Which distance the similarities below are measured by.
+    metric: str
     positive_min: float
     positive_mean: float
     negative_max: float
@@ -63,6 +65,7 @@ class ViewSeparability:
     def as_dict(self) -> dict[str, object]:
         return {
             "view": self.view,
+            "metric": self.metric,
             "positives": self.positives,
             "negatives": self.negatives,
             "positive_min": self.positive_min,
@@ -77,18 +80,39 @@ class ViewSeparability:
         }
 
 
-def _similarity(vectors: dict[str, np.ndarray], a: str, b: str) -> float:
-    return float(vectors[a] @ vectors[b])
+#: How a pair's closeness is measured. `cosine` is the right default for raw
+#: embeddings, which are unit vectors where cosine *is* a distance. `euclidean`
+#: exists because a learned projection deliberately changes the metric's shape -
+#: it whitens, equalising variance along every retained axis - and cosine of the
+#: result is not the distance that projection optimises. In one dimension cosine is
+#: degenerate outright, so a 1-axis projection cannot be scored with it at all.
+METRICS = ("cosine", "euclidean")
+
+
+def _similarity(vectors: dict[str, np.ndarray], a: str, b: str, metric: str) -> float:
+    """Signed closeness: larger means closer, whichever metric was asked for."""
+    if metric == "cosine":
+        return float(vectors[a] @ vectors[b])
+    left = vectors[a]
+    right = vectors[b]
+    delta: np.ndarray = left - right
+    distance: float = float(np.sqrt(delta @ delta))
+    return -distance
 
 
 def _separability_for(
     view: str,
     pairs: Sequence[GoldPair],
     vectors: dict[str, np.ndarray],
+    metric: str = "cosine",
 ) -> ViewSeparability:
     attribute = f"same_{view}"
-    positives = [_similarity(vectors, p.a, p.b) for p in pairs if getattr(p, attribute) is True]
-    negatives = [_similarity(vectors, p.a, p.b) for p in pairs if getattr(p, attribute) is False]
+    positives = [
+        _similarity(vectors, p.a, p.b, metric) for p in pairs if getattr(p, attribute) is True
+    ]
+    negatives = [
+        _similarity(vectors, p.a, p.b, metric) for p in pairs if getattr(p, attribute) is False
+    ]
     if not positives or not negatives:
         raise ValueError(f"view {view!r} has no decided pairs of both classes")
 
@@ -118,6 +142,7 @@ def _separability_for(
     return ViewSeparability(
         view=view,
         positives=len(pos),
+        metric=metric,
         negatives=len(neg),
         positive_min=float(pos.min()),
         positive_mean=float(pos.mean()),
@@ -134,6 +159,7 @@ def _separability_for(
 def separability(
     vectors_by_text: dict[str, np.ndarray],
     pairs: Sequence[GoldPair] | None = None,
+    metric: str = "cosine",
 ) -> dict[str, ViewSeparability]:
     """Measure per-view separability. Uses the full gold set, both splits.
 
@@ -145,7 +171,10 @@ def separability(
     from experiments.clustering.evaluation import gold
 
     chosen = tuple(pairs) if pairs is not None else gold.GOLD_PAIRS
-    return {view: _separability_for(view, chosen, vectors_by_text) for view in ("action", "object")}
+    return {
+        view: _separability_for(view, chosen, vectors_by_text, metric)
+        for view in ("action", "object")
+    }
 
 
 @dataclass(frozen=True, slots=True)

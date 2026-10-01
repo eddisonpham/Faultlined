@@ -39,6 +39,12 @@ def _write(name: str, payload: dict[str, Any]) -> Path:
 GOLD_SETS = ("hand", "constructed")
 
 
+def sep_metrics() -> tuple[str, ...]:
+    from experiments.clustering.evaluation.separability import METRICS
+
+    return METRICS
+
+
 def _gold_for(name: str) -> tuple[gold.GoldPair, ...]:
     if name == "hand":
         return gold.GOLD_PAIRS
@@ -152,6 +158,96 @@ def cmd_centroids(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_projection(args: argparse.Namespace) -> int:
+    """Does the learned projection make the action view work by threshold alone?
+
+    Reports the width sweep on dev, then the chosen width's score on held-out -
+    which is read once, after everything is frozen.
+    """
+    from experiments.clustering import projection
+    from experiments.clustering.evaluation import separability as sep
+
+    encoder = embeddings.get(args.embedding)
+    check = embeddings.verify(encoder)
+    if not check.ok:
+        print(f"refusing to report a result for {encoder.name}: verification failed")
+        return 1
+
+    texts = sorted(_vocab_for(args.set_name))
+    vectors = embeddings.encode_all(encoder, texts)
+    by_text = sep.all_vectors(vectors, texts)
+    split = _split_for(args.set_name)
+
+    payload: dict[str, Any] = {
+        "experiment": "projection",
+        "embedding": embeddings.describe(encoder),
+        "gold_set": args.set_name,
+        "split": split.report(),
+        "views": {},
+    }
+    print(f"embedding {encoder.name} dim={encoder.dim}  gold={args.set_name}")
+    print(f"{'view':7s} {'k':>3s} {'dev bacc':>9s} {'dev over':>9s} {'dev split':>9s}")
+    for view in ("action", "object"):
+        # `None` means "use the module's measured default"; a literal 0.1 here
+        # would silently override it and quietly reproduce the worst setting.
+        shrinkage = args.shrinkage if args.shrinkage is not None else projection.DEFAULT_SHRINKAGE
+        fitted, sweep = projection.choose_k(
+            by_text, split.dev, view, encoder.name, shrinkage, metric=args.metric
+        )
+        projected = fitted.project(by_text)
+        probe_before = sep.probes(by_text, split.dev, split.heldout, split.dev_pair_groups)[view]
+        probe_after = sep.probes(projected, split.dev, split.heldout, split.dev_pair_groups)[view]
+
+        metrics: dict[str, Any] = {}
+        for metric in ("cosine", "euclidean"):
+            # The dev "before" is the control that decides whether the projection
+            # failed or merely overfitted. Without it a held-out drop is ambiguous.
+            dev_before = sep.separability(by_text, split.dev, metric=metric)[view]
+            dev_after = sep.separability(projected, split.dev, metric=metric)[view]
+            before = sep.separability(by_text, split.heldout, metric=metric)[view]
+            after = sep.separability(projected, split.heldout, metric=metric)[view]
+            metrics[metric] = {
+                "dev_before": dev_before.as_dict(),
+                "dev_after": dev_after.as_dict(),
+                "before": before.as_dict(),
+                "after": after.as_dict(),
+            }
+
+        payload["views"][view] = {
+            "metric": args.metric,
+            "shrinkage": shrinkage,
+            "sweep": [row.as_dict() for row in sweep],
+            "chosen": fitted.as_dict(),
+            "heldout": metrics,
+            "probe_before": probe_before.as_dict(),
+            "probe_after": probe_after.as_dict(),
+        }
+        for row in sweep:
+            print(
+                f"{view:7s} {row.k:3d} {row.dev_balanced_accuracy:9.3f} "
+                f"{row.dev_false_merges:9d} {row.dev_false_splits:9d}"
+            )
+        for metric, values in metrics.items():
+            before, after = values["before"], values["after"]
+            dev_before, dev_after = values["dev_before"], values["dev_after"]
+            print(
+                f"  {view} [{metric:9s}] dev {dev_before['best_accuracy']:.3f} -> "
+                f"{dev_after['best_accuracy']:.3f} | held-out "
+                f"{before['best_accuracy']:.3f} -> {after['best_accuracy']:.3f} "
+                f"(false merges {before['false_merges']} -> {after['false_merges']})"
+            )
+        print(
+            f"  {view} [probe    ] held-out "
+            f"{probe_before.heldout_balanced_accuracy:.3f} -> "
+            f"{probe_after.heldout_balanced_accuracy:.3f}"
+        )
+
+    suffix = "" if args.set_name == "hand" else f"-{args.set_name}"
+    path = _write(f"projection-{encoder.name}{suffix}", payload)
+    print(f"\nwrote {path.relative_to(Path.cwd())}")
+    return 0
+
+
 def cmd_separability(args: argparse.Namespace) -> int:
     """Premise check: are same-pairs and different-pairs separable at all?
 
@@ -244,6 +340,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     separate.add_argument("--embedding", default="m2v-8m")
     separate.add_argument("--set", dest="set_name", default="hand", choices=GOLD_SETS)
     separate.set_defaults(run=cmd_separability)
+
+    project = subparsers.add_parser(
+        "projection", help="fit the learned per-view projection and score it"
+    )
+    project.add_argument("--embedding", default="minilm")
+    project.add_argument("--set", dest="set_name", default="hand", choices=GOLD_SETS)
+    project.add_argument("--shrinkage", type=float, default=None)
+    project.add_argument("--metric", default="euclidean", choices=sep_metrics())
+    project.set_defaults(run=cmd_projection)
 
     args = parser.parse_args(argv)
     result: int = args.run(args)

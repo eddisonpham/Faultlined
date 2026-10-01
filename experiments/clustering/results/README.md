@@ -226,12 +226,102 @@ just cluster separability --set constructed --embedding minilm
 just cluster separability --set hand --embedding minilm
 ```
 
+## EXP-2.5-03: the learned projection does not work, and the object view does not need it
+
+**Question.** EXP-2.5-02 left exactly one thing worth building: a learned projection
+for the action view, since a probe can reach it and a threshold cannot. This asks
+whether it survives contact with held-out data.
+
+**Method.** Fisher discriminant analysis on pair differences, fitted on dev pairs
+only: whiten by the pooled within-class scatter, then keep the leading directions.
+The width is chosen on **dev threshold** balanced accuracy, never on the probe —
+the probe is what the projection is a substitute for, so optimising it here would
+optimise the wrong thing. Held-out is read once, after `k` and the shrinkage
+strength are frozen.
+
+Two metrics are reported, because the projection changes the shape of the space
+and cosine may no longer be the right yardstick. It is not: whitening rescales
+every retained axis to unit variance, which flattens the difference between "close
+because same task" and "close because near". Cosine of the projected vectors is not
+the quantity that was arranged — and in one axis it is degenerate outright, since
+the cosine of two scalars is always ±1. Both are pinned by tests.
+
+**Result — constructed set, MiniLM, shrinkage 0.9, Euclidean:**
+
+| view | metric | dev before → after | held-out before → after |
+|---|---|---|---|
+| action | euclidean | 0.673 → **0.757** | 0.724 → **0.687** |
+| action | cosine | 0.673 → 0.524 | 0.724 → 0.516 |
+| object | euclidean | 0.947 → 0.955 | 0.977 → **0.890** |
+| object | cosine | 0.947 → 0.817 | 0.977 → 0.810 |
+
+**Finding 1. The projection raises dev and lowers held-out, on both views, at every
+width.** The pattern is identical in all four rows and is the signature of
+overfitting, not of a metric mismatch. The dev "before" column is the control that
+distinguishes the two: the unprojected space already scores 0.673/0.947 on dev, so
+the projection is not uncovering anything, it is fitting dev.
+
+**Finding 2. No shrinkage strength rescues it.** The within-class scatter is
+estimated from ~195 pairs in 384 dimensions, so it is rank-deficient by
+construction and its inverse is meaningless unless regularised. Sweeping shrinkage
+from 0.1 to 0.99:
+
+| shrinkage | action dev | action held-out | object dev | object held-out |
+|---|---|---|---|---|
+| 0.1 | 0.750 | 0.598 | 0.955 | 0.815 |
+| 0.5 | 0.750 | 0.655 | 0.955 | 0.869 |
+| 0.9 | 0.757 | 0.687 | 0.955 | 0.890 |
+| 0.99 | 0.759 | 0.692 | 0.953 | 0.931 |
+| *unprojected* | *0.673* | ***0.724*** | *0.947* | ***0.977*** |
+
+As shrinkage approaches 1 the projection approaches the identity and held-out
+climbs back to the baseline — without ever passing it. This is the expected
+behaviour: whitening divides by each axis's standard deviation, so the axes that
+varied *least* in-sample are inflated most, and those are precisely the axes whose
+sample variance was mostly noise.
+
+**Finding 3. A pair classifier generalises where a projection does not.** The probe
+on the same vectors, fitted on the same dev pairs, reaches 0.784 held-out on the
+action view while the projection built from those same pairs reaches 0.687. The
+difference is not information — the information is identical — it is the demand.
+The probe has to get one binary decision right about a pair. The projection has to
+place *every* string so that *all* pairwise distances agree with the labels, and a
+single position per string cannot do that for 17 action classes at once. This is
+the most useful thing in the study, because it says the ceiling is not the problem.
+
+**Finding 4. The object view is already solved and the projection only endangers
+it.** Unprojected MiniLM scores **0.977 held-out with 5 false merges** across 190
+pairs. The projection takes that to 0.890 and raises false merges from 5 to 9 — it
+converts the best result in the study into a worse one.
+
+**Conclusion: do not ship a learned projection.** Not as a default, and not behind
+a flag. The action view is not reachable by reshaping MiniLM's space with a linear
+map fitted on a few hundred pairs, and the object view does not need one.
+
+**What survives, and it is narrower than the design assumed:**
+
+- **Object view: ship it.** MiniLM, cosine, one threshold. 0.977 held-out, 5 false
+  merges. No learned component.
+- **Action view: unresolved, and honestly so.** The information is demonstrably
+  present (probe 0.784) and demonstrably not expressible as a distance (threshold
+  0.724, 44 false merges; projection 0.687). A binary pair classifier works and a
+  metric does not, which points at *either* a representation trained on this task
+  rather than a reshaping of a general one, *or* a human-in-the-loop design that
+  never asks for an automatic action clustering at all.
+
+**Reproduce.**
+
+```bash
+just cluster projection --set constructed --embedding minilm
+just cluster projection --set constructed --embedding minilm --shrinkage 0.1
+```
+
 ## Not yet run
 
 - `centroids` — built and passing, but last run with a radius chosen arbitrarily
-  before the premise test existed. Held until a representation separates the classes,
-  which EXP-2.5-02 now identifies: MiniLM for objects, a learned projection for
-  actions.
-- the learned action/object projection itself, and the method × view × encoder
-  factorial that depends on it.
-- the manual boundary audit, which needs a finalist.
+  before the premise test existed. Now unblocked for the **object view only**, where
+  0.977 held-out finally makes a threshold meaningful.
+- the method × encoder factorial, which is now scoped to the object view. The
+  original 30-config matrix is dead: the action view has no representation that
+  separates it and there is no reason to spend a factorial confirming that.
+- the manual boundary audit, which needs a finalist. The object view now has one.
