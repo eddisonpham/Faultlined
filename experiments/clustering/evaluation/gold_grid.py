@@ -403,6 +403,23 @@ def _string_groups(pairs: tuple[GridPair, ...]) -> dict[str, int]:
     return out
 
 
+def string_classes(
+    pairs: tuple[GridPair, ...],
+) -> dict[str, tuple[str, str]]:
+    """Map each distinct string to the `(verb class, object name)` it was built from.
+
+    Public because the cluster-by-attribute figure needs a ground-truth verb to
+    show per cluster, and that is the one thing the grid knows exactly and no
+    heuristic can recover. A string always comes from a single `(verb, object)`
+    pair, so the mapping is a function.
+    """
+    out: dict[str, tuple[str, str]] = {}
+    for pair in pairs:
+        for side in ("a", "b"):
+            out[pair.a if side == "a" else pair.b] = _classes(pair, side)
+    return out
+
+
 def _classes(pair: GridPair, side: str) -> tuple[str, str]:
     """The (verb class, object name) a string was generated from.
 

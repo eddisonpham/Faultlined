@@ -506,13 +506,62 @@ just cluster final --set hand --embedding minilm --view object --rule sliding_8 
 just cluster final --set constructed --embedding minilm --view object --rule sliding_8 --radius 0.30 --colour-weight 0.5
 ```
 
+## EXP-2.5-06: figures, and one thing the metrics were hiding
+
+**Method.** Three static SVG renderers over the frozen clustering — a squarified
+treemap of cluster sizes, a PCA scatter with a convex hull per cluster, and a
+cluster-by-attribute heatmap. No chart library: the engine has no frontend build,
+the UI is server-rendered (ADR 0014), and an artefact that lives in `results/` next
+to the JSON it came from can be diffed in a way a page cannot. Since a figure cannot
+be eyeballed from a terminal, every property a reader would check by looking is
+asserted in tests instead: treemap areas proportional to sizes, no overlaps,
+containment in the canvas, hull vertices that are real cluster points, row
+normalisation, and well-formed XML.
+
+**Finding 1. The heatmap confirms the object view is object-driven, which is the
+first direct evidence for it rather than an inference from a score.** On the
+constructed set, **31 of 44 clusters contain more than one verb class** — `pick up`,
+`place`, `turn` and `screw in` on the same object land together — which is what
+clustering by object is supposed to do and what the action view failed to do.
+
+**Finding 2. The colour facet is visible in the figure the way it should be.**
+**40 of 44 clusters contain exactly one colour.** The four that mix colours are
+where any residual colour risk lives, and they are now identifiable by name rather
+than by inference.
+
+**Finding 3. A few clusters are verb-pure instead of object-pure.** Two ten-member
+clusters are single-verb (`fold`) clusters. They score perfectly on the pair metrics
+— every pair inside them does agree — while being clustered on the wrong attribute
+entirely. No scalar in this study would have revealed that; the heatmap shows it in
+one glance.
+
+**Finding 4. The treemap caught a fragmentation problem the metrics called a success.**
+On the hand set the frozen configuration produces **34 clusters from 46 strings, with
+a largest cluster of 2 and 22 singletons** — 78% of clusters are single episodes.
+Its pair F1 is still 0.889 with zero false merges, because a fragmentation that
+never merges anything is trivially safe on merge-oriented metrics. On the
+constructed set the same configuration gives 44 clusters from 273 strings with a
+largest of 15, which is a sane clustering. So the configuration is not obviously
+wrong; the hand set is 46 strings drawn from mostly distinct real objects and a fine
+object view genuinely fragments at that size. **It is a warning, not a verdict** —
+but it is the kind of thing that has to be seen before the configuration is shipped,
+and it is why the radius is the number to re-check on a real corpus.
+
+**Reproduce.**
+
+```bash
+just cluster plot --set constructed --embedding minilm --view object --rule sliding_8 --radius 0.30 --colour-weight 0.5
+just cluster plot --set hand --embedding minilm --view object --rule sliding_8 --radius 0.20 --colour-weight 1.0
+```
+
+Writes `results/figures/{treemap,map,heatmap}-<encoder>-<view>[-<set>].svg`.
+
 ## Not yet run
 
-- MVP integration of the object view into the engine, and the cluster visualisation.
-  Both are unblocked now that there is a configuration worth integrating; neither is
-  started.
+- MVP integration of the object view into the engine. Unblocked; not started.
+- Re-checking the radius on a real corpus, given the fragmentation above.
 - A representation trained for this task, which is the only remaining route to the
   action view.
 - A learned attribute extractor to replace the colour lexicon, and a decision about
-  whether the object view should ignore the verb entirely — which is what the three
-  verb-synonym false splits are asking for.
+  whether the object view should ignore the verb entirely — which the three
+  verb-synonym false splits and the verb-pure clusters are both asking for.

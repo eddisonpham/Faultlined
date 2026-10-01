@@ -70,10 +70,11 @@ More detail: [implementation status](implementation/status.md), [failure modes](
 ## 7. Next steps
 
 1. **Integrate the object view** into the engine as a proposal surface: `minilm`, cosine, colour facet at weight ~0.5-1.0, radius 0.20-0.30, online centroids with `sliding_8`, human confirmation. Zero false merges on both gold sets; F1 0.968 constructed / 0.889 hand. Configuration and evidence in [stage 2.5 findings](../experiments/clustering/results/README.md).
-2. **Decide whether the object view should ignore the verb.** Three false splits survive after the colour fix - `place the bowl`/`lift the bowl`, `hand over the pen`/`give the pen`, `press the pedal`/`step on the pedal` - all verb synonyms of the same object. The view is not purely object-driven.
-3. Run the §6 fault-injection campaign against `just run` to produce the notifier accuracy figure, including the real-kill `WORKER_LOST` variant and clean replicates. Backlog B-016.
-4. Write down the per-stage ingest targets the owner prefers, replacing the unreachable 50 MB/s one.
-5. Consider formal catalog migrations; inline DDL plus an `ALTER TABLE` block is the current mechanism.
+2. **Re-check the radius on a real corpus.** The treemap shows the frozen config gives 34 clusters from 46 hand-set strings with a largest of 2 and 22 singletons - a fragmentation the merge-oriented metrics scored as a success. The constructed set is fine (44 clusters from 273 strings, largest 15), so this is likely the hand set's small size, but it has to be checked against real data before shipping.
+3. **Decide whether the object view should ignore the verb.** Three false splits survive after the colour fix, and the heatmap shows two ten-member clusters that are single-verb rather than object-pure.
+4. Run the §6 fault-injection campaign against `just run` to produce the notifier accuracy figure, including the real-kill `WORKER_LOST` variant and clean replicates. Backlog B-016.
+5. Write down the per-stage ingest targets the owner prefers, replacing the unreachable 50 MB/s one.
+6. Consider formal catalog migrations; inline DDL plus an `ALTER TABLE` block is the current mechanism.
 
 Done and closed: the baseline runbook (2026-09-28), clean-clone and secrets validation (2026-09-28), the whole MVP engineering order (real LeRobot reader, rule-based validation and quarantine, content-addressed build, MCAP reader) on 2026-09-29, and the stage 2.5 clustering assessment on 2026-09-30.
 
@@ -154,6 +155,7 @@ One line each. Detail in the linked record.
 | 2026-09-29 | Run intelligence: metrics aggregation, quality analytics, run inspection | [ADR 0017](decisions/0017-runtime-metrics-aggregation.md), [ADR 0018](decisions/0018-episode-quality-signals.md), [ADR 0019](decisions/0019-benchmark-workload-isolation.md) |
 | 2026-09-29 | Curated slices with recomputed membership, failures view | [plan](implementation/telldown-plan.md) |
 | 2026-09-30 | Stage 2.5 clustering assessment end to end. Corrected a broken ceiling diagnostic, added a constructed gold set, and concluded: object view ships, action view does not, learned projection rejected | [findings](../experiments/clustering/results/README.md) |
+| 2026-09-30 | Colour facet removes both false merges; treemap, PCA map and heatmap render the frozen clustering and exposed a fragmentation the metrics scored as success | [findings](../experiments/clustering/results/README.md) |
 | 2026-09-29 | Deterministic monitoring notifier, eleven rules, alert budget | [ADR 0020](decisions/0020-deterministic-monitoring-notifier.md), [EXP-0003](experiments/0003-deterministic-notifier-latency.md) |
 | 2026-09-29 | Instrument UI pass: theme hooks, visible failure policy, HTML error pages | [ADR 0021](decisions/0021-frontend-instrument-pass.md) |
 | 2026-09-29 | MVP complete: content-addressed builds and the MCAP reader | [ADR 0022](decisions/0022-mcap-ingest-reader.md), [EXP-0004](experiments/0004-mcap-ingest-baseline.md) |

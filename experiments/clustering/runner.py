@@ -377,6 +377,125 @@ def cmd_colours(args: argparse.Namespace) -> int:
     return 0
 
 
+def _frozen_fit(
+    args: argparse.Namespace,
+) -> tuple[
+    embeddings.Encoder,
+    splits.Split,
+    dict[str, np.ndarray],
+    list[str],
+    np.ndarray,
+    Any,
+    Any,
+    PairScores,
+]:
+    """Fit the frozen configuration on held-out strings and return the pieces.
+
+    Shared by `final` and `plot` so the figure cannot describe a different
+    clustering from the one that was scored. A visualisation of anything other than
+    the evaluated artefact is worse than no visualisation.
+    """
+    from experiments.clustering import centroid_experiment
+    from experiments.clustering.evaluation import evaluation as ev
+    from experiments.clustering.methods.online_centroids import OnlineCentroids
+
+    encoder = embeddings.get(args.embedding)
+    split = _split_for(args.set_name)
+    vocabulary = sorted(_vocab_for(args.set_name))
+    by_text = attributes.encode_with_colours(encoder, vocabulary, args.colour_weight)
+    texts = sorted({t for pair in split.heldout for t in (pair.a, pair.b)})
+    vectors = np.stack([by_text[text] for text in texts])
+    model = OnlineCentroids(radius=args.radius, rule_factory=centroid_experiment.RULES[args.rule])
+    result = model.fit(vectors, texts)
+    scores = ev.pair_scorer(split.heldout, args.view)(result.labels, texts, args.rule)
+    return encoder, split, by_text, texts, vectors, model, result, scores
+
+
+def cmd_plot(args: argparse.Namespace) -> int:
+    """Render the frozen clustering as three reviewable SVG figures.
+
+    Treemap, a PCA map with per-cluster convex hulls, and a cluster-by-attribute
+    heatmap. Written next to the JSON the run produced so a reader can check one
+    against the other.
+    """
+    from experiments.clustering import figures
+    from experiments.clustering.evaluation import gold_grid
+
+    encoder = embeddings.get(args.embedding)
+    check = embeddings.verify(encoder)
+    if not check.ok:
+        print(f"refusing to draw {encoder.name}: verification failed")
+        return 1
+
+    _encoder, split, _by_text, texts, vectors, _model, result, scores = _frozen_fit(args)
+    suffix = "" if args.set_name == "hand" else f"-{args.set_name}"
+    stem = f"{encoder.name}-{args.view}{suffix}"
+
+    members: dict[int, list[str]] = {}
+    for label, text in zip(result.labels, texts, strict=True):
+        members.setdefault(int(label), []).append(text)
+    ordered = sorted(members)
+    sizes = [len(members[label]) for label in ordered]
+    row_labels = [f"c{label}" for label in ordered]
+
+    tags: dict[str, list[str]] = {}
+    for text in texts:
+        colour = attributes.colour_of(text)
+        tags[text] = [f"colour:{colour}"]
+    if args.set_name == "constructed":
+        # The grid knows each string's verb class exactly. No heuristic could, and
+        # a guessed verb in a figure that is supposed to be evidence would be worse
+        # than omitting the row.
+        for text, (verb, _object) in gold_grid.string_classes(
+            gold_grid.constructed_pairs()
+        ).items():
+            if text in tags:
+                tags[text].append(f"verb:{verb}")
+
+    columns = sorted({tag for text in texts for tag in tags[text]})
+    matrix = figures.cluster_attribute_matrix(members, tags, columns)
+    top_verbs = sorted(column for column in columns if column.startswith("verb:"))
+
+    FIGURES = "figures"
+    out = RESULTS / FIGURES
+    out.mkdir(parents=True, exist_ok=True)
+    written: list[str] = []
+
+    svg = figures.render_treemap(sizes, row_labels, f"object clusters ({args.set_name} held-out)")
+    (out / f"treemap-{stem}.svg").write_text(svg, encoding="utf-8")
+    written.append(f"treemap-{stem}.svg")
+
+    svg = figures.render_map(vectors, result.labels, f"object clusters ({args.set_name} held-out)")
+    (out / f"map-{stem}.svg").write_text(svg, encoding="utf-8")
+    written.append(f"map-{stem}.svg")
+
+    # Verb columns only where they exist; 17 of them would crowd the colour ones
+    # off the canvas and the colour split is what EXP-2.5-05 turned on.
+    heat_columns = [column for column in columns if not column.startswith("verb:")] + top_verbs
+    heat = figures.render_heatmap(
+        matrix[:, [columns.index(column) for column in heat_columns]],
+        row_labels,
+        heat_columns,
+        f"cluster composition ({args.set_name} held-out)",
+    )
+    (out / f"heatmap-{stem}.svg").write_text(heat, encoding="utf-8")
+    written.append(f"heatmap-{stem}.svg")
+
+    print(
+        f"configuration: {encoder.name} / {args.view} / {args.rule} / radius {args.radius} "
+        f"/ colour weight {args.colour_weight}"
+    )
+    print(
+        f"held-out: {len(split.heldout)} pairs, {len(texts)} strings, "
+        f"{result.cluster_count} clusters, F1 {scores.pair_f1:.3f}, "
+        f"{len(scores.over_merged)} false merges"
+    )
+    print(f"largest cluster {max(sizes)}, smallest {min(sizes)}")
+    for name in written:
+        print(f"wrote {(out / name).relative_to(Path.cwd())}")
+    return 0
+
+
 def cmd_final(args: argparse.Namespace) -> int:
     """Score the frozen configuration on held-out pairs, once, and audit its edges.
 
@@ -639,6 +758,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     colours.add_argument("--set", dest="set_name", default="hand", choices=GOLD_SETS)
     colours.add_argument("--rule", default="sliding_8")
     colours.set_defaults(run=cmd_colours)
+
+    plot = subparsers.add_parser(
+        "plot", help="render the frozen clustering as treemap, PCA map, and heatmap"
+    )
+    plot.add_argument("--embedding", default="minilm")
+    plot.add_argument("--view", default="object", choices=("action", "object"))
+    plot.add_argument("--set", dest="set_name", default="hand", choices=GOLD_SETS)
+    plot.add_argument("--rule", default="sliding_8")
+    plot.add_argument("--radius", type=float, default=0.30)
+    plot.add_argument("--colour-weight", type=float, default=0.0)
+    plot.set_defaults(run=cmd_plot)
 
     args = parser.parse_args(argv)
     result: int = args.run(args)
