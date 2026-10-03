@@ -2,8 +2,8 @@
 
 Current state of Faultlined for whoever picks it up next. Recent slices are listed in [§14](#14-recent-slices); detail lives in the linked ADR, experiment and review records.
 
-- Stage: Production Baseline **closed 2026-10-01**; Performance/Scaling (stage 4) is next ([definition of done](spec/definition-of-done.md)). All five stage-3 criteria are checked with evidence. Not closed with them: the restore drill has not been run, `de gc` and `de migrate` do not exist, and F8/F12/F15 rows name stage-4/5 work rather than a `planned` test.
-- Latest local `just ci`: 1,304 passed, coverage 91.33%, strict mypy clean (76 source + 22 experiment files), repository hygiene and OpenAPI contract pass. `just ui-audit` clean at 60 page loads across 4 themes. One Starlette/httpx deprecation warning remains.
+- Stage: Performance/Scaling (stage 4) **closed 2026-10-03**; Production Hardening (stage 5) is next ([definition of done](spec/definition-of-done.md)). All stage-4 criteria are checked with evidence. Stage-5 items closed: the restore drill (`scripts/fault_drill.py`) was executed and converged; `de gc` and `de migrate` now exist and work (ADR 0028); F8/F12/F15 rows state implemented behavior where the remainder is stage-5 work.
+- Latest local `just ci`: 1,357 passed, coverage 91.46%, strict mypy clean (76 source + 22 experiment files), repository hygiene and OpenAPI contract pass. `just ui-audit` clean at 60 page loads across 4 themes. One Starlette/httpx deprecation warning remains (non-blocking).
 - The worktree contains the current UI/cluster-review slice and earlier uncommitted user work. Do not assume files are committed or clean. Do not tag `scaffold-complete` until stage gates and outstanding items close.
 
 ## 1. Problem
@@ -69,15 +69,12 @@ More detail: [implementation status](implementation/status.md), [failure modes](
 5. **The owner's system PostgreSQL on 5432 is unverified.** `just pg-up` covers development with an isolated cluster on 55432; that instance's superuser password is unknown and was never needed.
 6. **Clean-clone validation and the history-wide secrets scan are done** (2026-09-28): a clean clone runs `just setup`, `just ci` and `just bench` green; no credential is in any of the 15 commits; `.env` was never tracked.
 
-## 7. Next steps
+## 7. Next steps (stage 5 — production hardening)
 
-1. ~~**Integrate cluster proposals** into the engine, but over *extracted* task strings rather than sentence embeddings.~~ Shipped 2026-10-01 as [ADR 0026](decisions/0026-cluster-proposals.md): `data_engine.clustering` (lexicon, extraction, online centroids, proposals, layout), four catalog tables, `/ui/clusters` in the nav, and the cluster API. The extracted-core path from EXP-2.5-08 is the shipped algorithm, the open centroids do incremental assignment, and fragmentation and singleton rate lead the health block. **The open risk is unchanged:** extractor coverage on real operator text, which has no labels to measure it with. Evidence in [stage 2.5 findings](../experiments/clustering/results/README.md).
-2. **Give the Clusters page a per-cluster detail view.** Members past the fourth are linked to `GET /api/v1/clusters/{key}` because no UI reads them yet, and a reviewer deciding whether to confirm a group should not have to leave the page for it.
-3. **Re-establish held-out independence.** The held-out sets have now been read three times (colour off, colour on, colour+verb off), each read choosing a configuration. The reported 1.000 and 0.987 are development figures, not a clean estimate. A fresh split or a real corpus is needed before they mean anything.
-4. **Fragmentation is still open on real text.** The 46-sentence sample is the only real corpus and it has no labels; extractor coverage is reported as a rate (98% on the sample, 82% on the full corpus) because nothing better is measurable yet.
-5. Run the §6 fault-injection campaign against `just run` to produce the notifier accuracy figure, including the real-kill `WORKER_LOST` variant and clean replicates. Backlog B-016.
-6. Write down the per-stage ingest targets the owner prefers, replacing the unreachable 50 MB/s one.
-7. Consider formal catalog migrations; inline DDL plus an `ALTER TABLE` block is the current mechanism.
+1. **Finish the §6 fault-injection campaign** (worker kill, GPU OOM, disk full, DB restart — failure-modes F5/F9/F10/F12) with recorded outcomes in [experiments/](../experiments/). The worker-kill half (F5/F10) is closed via [EXP-0011](experiments/0011-worker-kill-crash-recovery.md); remaining halves: GPU OOM, disk-full, DB restart. Backlog B-016.
+2. **Load/soak tests** via `benchmarks/` with committed baselines.
+3. **Runbooks and troubleshooting final** ([architecture/deployment.md](architecture/deployment.md) + docs/runbooks) — the backup/restore and worker-ops runbooks are drafted; the restore drill is now executed.
+4. **Resume/Demo Ready stage** — README with architecture diagram, quickstart, demo script; interview Q&A / design-defense doc; final repo-wide review.
 
 Done and closed: the baseline runbook (2026-09-28), clean-clone and secrets validation (2026-09-28), the whole MVP engineering order (real LeRobot reader, rule-based validation and quarantine, content-addressed build, MCAP reader) on 2026-09-29, the stage 2.5 clustering assessment on 2026-09-30, the cluster proposal surface on 2026-10-01, and **all five Production Baseline criteria on 2026-10-01**.
 

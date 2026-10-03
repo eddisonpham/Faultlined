@@ -1,6 +1,6 @@
 # Definition of Done (living)
 
-**Current stage: Production Baseline (stage 3) complete 2026-10-01; Performance/Scaling (stage 4) is next.** Scaffolding and MVP closed earlier; stage 3's five criteria are now all checked with evidence — the failure-mode catalog has no `planned` row, every registered metric is emitted and every lookup is a documented query, the production-like local tier is specified down to what is manual, two runbooks exist, and the UI now covers benchmarks and experiments alongside jobs, resources, versions, failures, and artifacts. Local gate at close: `just ci` 1,304 passed at 91.40% coverage, `just ui-audit` 60 page loads across 4 themes. **What stage 3 explicitly did not do:** exercise the restore drill, and close the reachability gap on MCAP ingest, which EXP-0005 shows is capped around 10.8–18.3 MiB/s by container parsing and JSON decode rather than by our code. Product name: **Faultlined**.
+**Current stage: Performance/Scaling (stage 4) complete 2026-10-03; Production Hardening (stage 5) is next.** Scaffolding and MVP closed earlier; stage 3's five criteria are checked with evidence — the failure-mode catalog has no `planned` row, every registered metric is emitted and every lookup is a documented query, the production-like local tier is specified down to what is manual, two runbooks exist, and the UI now covers benchmarks and experiments alongside jobs, resources, versions, failures, and artifacts. **Stage 4 (Performance/Scaling) closed 2026-10-03:** NFR-001 (revised, EXOp-0005), NFR-002 (EXP-0010c), NFR-003 (EXP-0010c), NFR-005 (revised, EXP-0010d), NFR-008 (EXP-0010a–d), NFR-010 (EXP-0010e) all met or explicitly revised with evidence. The scaling campaign lives in `scripts/scale_campaign.py` (throwaway Postgres per leg, real workers, real MCAP bytes). Local gate: `just ci` 1,357 passed at 91.46% coverage, `just ui-audit` 60 page loads across 4 themes. **Stage 5 (Production Hardening) next:** fault injection (worker kill, GPU OOM, disk full, DB restart — F5/F9/F10/F12), load/soak tests, runbook finalization. Product name: **Faultlined**.
 
 ```text
 Scaffolding → MVP → Production Baseline → Performance/Scaling → Production Hardening → Resume/Demo Ready
@@ -88,9 +88,10 @@ All three criteria closed 2026-10-03. Local gate at close: `just ci` green (deta
 
 ## 5. Production Hardening
 
-- [ ] Fault injection (worker kill, GPU OOM, disk full, DB restart — failure-modes F5/F9/F10/F12) with recorded outcomes in [../experiments/](../experiments/)
-- [ ] Load/soak tests via `benchmarks/`; dependency and secrets audit (ADR [0002](../decisions/0002-secrets-handling.md))
-- [ ] Runbooks and troubleshooting final ([../architecture/deployment.md](../architecture/deployment.md) + docs/runbooks)
+- [ ] **Fault injection (F5/F9/F10/F12)** — worker kill (closed, EXP-0011 + EXP-0013), GPU OOM, disk full, DB restart, each with recorded outcomes in [../experiments/](../experiments/)
+- [ ] **Load/soak tests** via `benchmarks/`, committed baselines
+- [ ] **Runbooks and troubleshooting final** ([../architecture/deployment.md](../architecture/deployment.md) + docs/runbooks) — restore drill executed (EXP-0013), GC documented
+- [ ] **Resume/Demo Ready** — README with architecture diagram + quickstart + demo script, resume metrics tracing to experiment records, interview Q&A / design-defense doc, final repo-wide review
 
 ## 6. Resume / Demo Ready
 

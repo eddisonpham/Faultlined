@@ -118,7 +118,7 @@ Everything under `var/` is generated. Delete it any time.
 | Ingest, validate, build | Working end to end |
 | Formats read | LeRobot v2.1 and v3.0, MCAP with JSON channels |
 | Formats written | LeRobot v3 dataset directories |
-| Tests | 918 passing, coverage above 92% |
+| Tests | 1,357 passing, 91.46% coverage |
 | MCAP ingest speed | 10.8-18.3 MiB/s, target not met |
 
 ## Layout
@@ -137,6 +137,7 @@ Everything under `var/` is generated. Delete it any time.
 - Run `just ci` before every commit.
 - Run `just ui-audit` after changing the UI. It measures the rendered pages in a real browser.
 - Keep coverage above 70%.
+- Stage 4 (Performance/Scaling) closed: NFR-001–003, 005, 008, 010 met with evidence in [EXP-0010a–e](../agents/experiments/0010a-data-size-scaling-curve.md, 0010b-worker-scaling.md, 0010c-catalog-scale-nfr003.md, 0010d-queue-latency-and-cancel.md, 0010e-api-latency-and-metrics-n1.md); the scaling campaign lives in `scripts/scale_campaign.py`.
 - Use conventional commit messages.
 - Change docs in the same commit as the code.
 - Add an ADR in `agents/decisions/` before changing the architecture.
