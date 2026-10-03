@@ -35,7 +35,43 @@ TASKS = {
 @pytest.fixture
 def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
     """The app with the cluster store replaced by an in-memory one."""
-    state: dict[str, Any] = {"confirmations": {}, "rebuilds": []}
+    state: dict[str, Any] = {"confirmations": {}, "rebuilds": [], "review_decisions": {}}
+
+    candidate = {
+        "task": "open the drawer",
+        "core": "drawer",
+        "cluster_key": proposal_key("drawer"),
+        "proposal_core": "drawer",
+        "episodes": 4,
+        "distance": 0.0,
+        "radius": 0.3,
+        "reason": "no supporting neighbors",
+        "source": "catalog",
+    }
+
+    def fake_review_candidates(_settings: Settings, **_kwargs: Any) -> list[dict[str, Any]]:
+        return [] if candidate["task"] in state["review_decisions"] else [candidate]
+
+    def fake_review_decisions(_settings: Settings, **_kwargs: Any) -> list[dict[str, str]]:
+        return [
+            {"task": task, "disposition": disposition, "label": label}
+            for task, (disposition, label) in state["review_decisions"].items()
+        ]
+
+    def fake_decide_review(
+        _settings: Settings, tasks: list[str], *, disposition: str, label: str = "", **_kwargs: Any
+    ) -> int:
+        candidates = {item["task"] for item in fake_review_candidates(_settings)}
+        if not tasks or not set(tasks) <= candidates:
+            raise ValueError(
+                "review selection is no longer in the candidate queue; reload and try again"
+            )
+        for task in tasks:
+            state["review_decisions"][task] = (disposition, label if disposition == "class" else "")
+        return len(tasks)
+
+    def fake_undo_review(_settings: Settings, tasks: list[str]) -> int:
+        return sum(state["review_decisions"].pop(task, None) is not None for task in tasks)
 
     def fake_model(_settings: Settings, **_kwargs: Any) -> dict[str, Any]:
         proposals = build(TASKS, ignored=Ignored(verb=True, colour=True))
@@ -78,6 +114,8 @@ def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
             "rule": "running_mean",
             "source": "catalog",
             "health": {"orphaned": 0, "truncated": False},
+            "review_candidates": fake_review_candidates(_settings),
+            "review_decisions": fake_review_decisions(_settings),
             "proposals": proposals,
         }
 
@@ -104,6 +142,10 @@ def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
 
     monkeypatch.setattr(store, "model", fake_model)
     monkeypatch.setattr(store, "rebuild", fake_rebuild)
+    monkeypatch.setattr(store, "review_candidates", fake_review_candidates)
+    monkeypatch.setattr(store, "review_decisions", fake_review_decisions)
+    monkeypatch.setattr(store, "decide_review", fake_decide_review)
+    monkeypatch.setattr(store, "undo_review", fake_undo_review)
     monkeypatch.setattr(store, "confirm", fake_confirm)
     monkeypatch.setattr(store, "unconfirm", fake_unconfirm)
 
@@ -120,6 +162,11 @@ def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
             "label": state["confirmations"].get(key, ""),
         }
 
+    monkeypatch.setattr(
+        store,
+        "latest_run",
+        lambda _settings, **_kwargs: {"health": {"source": "catalog"}, "source": "catalog"},
+    )
     monkeypatch.setattr(store, "get_proposal", fake_get)
     monkeypatch.setattr(
         store,
@@ -176,6 +223,56 @@ def test_an_unknown_cluster_is_a_404_with_a_readable_detail(client: TestClient) 
     response = client.get("/api/v1/clusters/deadbeefdeadbeef")
     assert response.status_code == 404
     assert "deadbeefdeadbeef" in response.json()["detail"]
+
+
+# ---------------------------------------------------------------- human review
+
+
+def test_the_review_queue_lists_only_unresolved_candidates(client: TestClient) -> None:
+    response = client.get("/api/v1/clusters/review")
+    assert response.status_code == 200
+    assert response.json()["candidates"][0]["reason"] == "no supporting neighbors"
+    assert response.json()["decisions"] == []
+
+
+def test_a_human_class_decision_is_separate_and_reversible(client: TestClient) -> None:
+    response = client.post(
+        "/api/v1/clusters/review",
+        json={"tasks": ["open the drawer"], "disposition": "class", "label": "drawer work"},
+    )
+    assert response.status_code == 200
+    assert response.json()["reviewed"] == 1
+    assert response.json()["decisions"][0]["label"] == "drawer work"
+    assert client.get("/api/v1/clusters/review").json()["candidates"] == []
+
+    reopened = client.request(
+        "DELETE", "/api/v1/clusters/review", params={"tasks": "open the drawer"}
+    )
+    assert reopened.status_code == 200
+    assert reopened.json()["reopened"] == 1
+    assert client.get("/api/v1/clusters/review").json()["candidates"]
+
+
+def test_a_dismissal_needs_no_label_and_stale_review_is_rejected(client: TestClient) -> None:
+    response = client.post(
+        "/api/v1/clusters/review",
+        json={"tasks": ["open the drawer"], "disposition": "dismissed"},
+    )
+    assert response.status_code == 200
+    assert response.json()["decisions"][0]["disposition"] == "dismissed"
+    stale = client.post(
+        "/api/v1/clusters/review",
+        json={"tasks": ["open the drawer"], "disposition": "class", "label": "drawer work"},
+    )
+    assert stale.status_code == 409
+
+
+def test_review_request_rejects_a_class_without_a_label(client: TestClient) -> None:
+    response = client.post(
+        "/api/v1/clusters/review",
+        json={"tasks": ["open the drawer"], "disposition": "class"},
+    )
+    assert response.status_code == 422
 
 
 # --------------------------------------------------------------------- rebuild
@@ -253,8 +350,9 @@ def test_the_page_renders_with_its_figures_and_controls(client: TestClient) -> N
     response = client.get("/ui/clusters")
     assert response.status_code == 200
     body = response.text
-    assert "Health" in body
-    assert body.count("<svg") >= 2
+    assert "Largest classes" in body
+    assert "Human review" in body
+    assert "de-class-size" in body
     assert "/ui/clusters/rebuild" in body
     assert "/confirm" in body
 
@@ -268,7 +366,8 @@ def test_the_fragment_carries_the_parts_that_change_on_a_rebuild(client: TestCli
     """The polling fragment must not re-send the controls and wipe what is typed."""
     response = client.get("/ui/clusters", headers={"X-Fragment": "1"})
     assert response.status_code == 200
-    assert "Health" in response.text
+    assert "Largest classes" in response.text
+    assert "Human review" in response.text
     assert "/ui/clusters/rebuild" not in response.text
 
 
@@ -335,6 +434,27 @@ def test_a_form_rebuild_posts_the_checkbox_group_as_one_value(client: TestClient
     assert response.headers["location"].endswith("/ui/clusters")
 
 
+def test_a_review_form_posts_a_human_class_and_redirects(client: TestClient) -> None:
+    response = client.post(
+        "/ui/clusters/review",
+        data={"task": "open the drawer", "label": "drawer work", "disposition": "class"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    assert client.get("/api/v1/clusters/review").json()["decisions"][0]["label"] == "drawer work"
+
+
+def test_a_review_form_can_dismiss_without_a_label(client: TestClient) -> None:
+    response = client.post(
+        "/ui/clusters/review",
+        data={"task": "open the drawer", "disposition": "dismissed"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    decision = client.get("/api/v1/clusters/review").json()["decisions"][0]
+    assert decision["disposition"] == "dismissed"
+
+
 def test_a_form_confirm_uses_the_same_store_as_the_api(client: TestClient) -> None:
     response = client.post(
         f"/ui/clusters/{_mug_key()}/confirm",
@@ -361,3 +481,89 @@ def test_a_form_release_is_a_post_and_redirects(client: TestClient) -> None:
     client.post(f"/ui/clusters/{_mug_key()}/confirm", data={"label": "mug handling"})
     response = client.post(f"/ui/clusters/{_mug_key()}/release", follow_redirects=False)
     assert response.status_code == 303
+
+
+# ------------------------------------------------------------- the detail page
+
+
+def test_the_detail_page_renders_the_stored_proposal(client: TestClient) -> None:
+    response = client.get(f"/ui/clusters/{_mug_key()}")
+    assert response.status_code == 200
+    body = response.text
+    assert "Cluster detail" in body
+    assert "pick up the red mug" in body
+    assert 'href="/ui/clusters"' in body
+    assert f'action="/ui/clusters/{_mug_key()}/confirm"' in body
+
+
+def test_the_detail_page_shows_a_release_form_once_confirmed(client: TestClient) -> None:
+    client.post(f"/api/v1/clusters/{_mug_key()}/confirm", json={"label": "mug handling"})
+    body = client.get(f"/ui/clusters/{_mug_key()}").text
+    assert "confirmed: mug handling" in body
+    assert f'action="/ui/clusters/{_mug_key()}/release"' in body
+
+
+def test_an_unknown_cluster_is_an_html_404(client: TestClient) -> None:
+    response = client.get("/ui/clusters/deadbeefdeadbeef")
+    assert response.status_code == 404
+    assert "text/html" in response.headers["content-type"]
+    assert "No cluster" in response.text
+
+
+def test_the_detail_fragment_has_no_shell(client: TestClient) -> None:
+    response = client.get(f"/ui/clusters/{_mug_key()}", headers={"X-Fragment": "1"})
+    assert response.status_code == 200
+    assert "<!doctype html>" not in response.text
+    assert "pick up the red mug" in response.text
+
+
+def test_the_detail_page_carries_the_requested_theme(client: TestClient) -> None:
+    body = client.get(f"/ui/clusters/{_mug_key()}?theme=amber").text
+    assert 'data-theme="amber"' in body
+
+
+def test_a_form_confirm_returns_to_the_detail_page(client: TestClient) -> None:
+    """Confirming from the detail view must not bounce the reviewer to the list."""
+    response = client.post(
+        f"/ui/clusters/{_mug_key()}/confirm",
+        data={"label": "mug handling"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    assert response.headers["location"] == f"/ui/clusters/{_mug_key()}"
+
+
+def test_a_form_confirm_with_no_label_returns_to_the_detail_page_with_the_reason(
+    client: TestClient,
+) -> None:
+    response = client.post(
+        f"/ui/clusters/{_mug_key()}/confirm", data={"label": ""}, follow_redirects=False
+    )
+    assert response.status_code == 303
+    from urllib.parse import unquote
+
+    location = unquote(response.headers["location"])
+    assert "needs a label" in location
+    assert f"/ui/clusters/{_mug_key()}" in location
+
+
+def test_a_form_release_returns_to_the_detail_page(client: TestClient) -> None:
+    client.post(f"/ui/clusters/{_mug_key()}/confirm", data={"label": "mug handling"})
+    response = client.post(f"/ui/clusters/{_mug_key()}/release", follow_redirects=False)
+    assert response.status_code == 303
+    assert response.headers["location"] == f"/ui/clusters/{_mug_key()}"
+
+
+def test_the_detail_page_stays_preview_only_for_sample_source(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        store,
+        "latest_run",
+        lambda _settings, **_kwargs: {"health": {"source": "sample"}, "source": "sample"},
+    )
+    body = client.get(f"/ui/clusters/{_mug_key()}").text
+    assert "preview only" in body
+    # The nav's theme form is a <form> too; what must be absent is the confirm control.
+    assert f'action="/ui/clusters/{_mug_key()}/confirm"' not in body
+    assert f'action="/ui/clusters/{_mug_key()}/release"' not in body

@@ -22,6 +22,12 @@ from data_engine.api.cluster_schemas import (
     ClusterListResponse,
     ClusterProposal,
     ClusterRebuildRequest,
+    ClusterReviewCandidate,
+    ClusterReviewDecision,
+    ClusterReviewDecisionResponse,
+    ClusterReviewListResponse,
+    ClusterReviewRequest,
+    ClusterReviewUndoResponse,
 )
 from data_engine.api.errors import install_error_handling
 from data_engine.api.schemas import (
@@ -88,13 +94,19 @@ from data_engine.web import (
     app_script,
     artifacts_fragment,
     artifacts_page,
+    benchmarks_fragment,
+    benchmarks_page,
     builds_fragment,
     builds_page,
+    cluster_detail_fragment,
+    cluster_detail_page,
     clusters_fragment,
     clusters_page,
     episode_detail_page,
     episodes_fragment,
     episodes_page,
+    experiments_fragment,
+    experiments_page,
     failures_fragment,
     failures_page,
     font_bytes,
@@ -120,6 +132,7 @@ from data_engine.web import (
     vendor_css,
 )
 from data_engine.web.pages import EPISODE_FLAGS, EPISODE_STATES
+from data_engine.web.records import benchmarks_model, experiments_model
 
 # Only these two filename shapes are servable; anything else is a 404.
 _SAFE_STYLESHEET = re.compile(r"(core|theme-[a-z0-9-]+)")
@@ -166,7 +179,7 @@ def _status_model(catalog: PostgresCatalog) -> dict[str, Any]:
     sample = sample_resources()
     return {
         "status": "ok",
-        "queue_depth": {state.value: catalog.count_jobs(state) for state in JobState},
+        "queue_depth": catalog.count_jobs_by_state(),
         "artifact_count": catalog.count_artifacts(),
         "episode_count": catalog.count_episodes(),
         "resources": {
@@ -200,7 +213,7 @@ def _metrics_model(
         "record_count": len(windowed),
         "summaries": summarize(windowed),
         "series": metric_series(windowed, bucket_seconds=bucket_seconds),
-        "jobs_queue_depth": {state.value: catalog.count_jobs(state) for state in JobState},
+        "jobs_queue_depth": catalog.count_jobs_by_state(),
         "worker_heartbeat_age_seconds": heartbeat_age_seconds(records),
     }
 
@@ -804,6 +817,32 @@ def create_app(
             episode_detail_page(episode, quality, theme_or_default(theme), validations)
         )
 
+    @app.get("/ui/benchmarks", response_class=HTMLResponse)
+    def ui_benchmarks(
+        theme: str | None = None,
+        x_fragment: str | None = Header(default=None),
+    ) -> HTMLResponse:
+        """Committed benchmark baselines and the runs recorded on this machine.
+
+        Reads `benchmarks/` off disk, so it needs no database and no catalog
+        table. A benchmark claim is a repository artifact, not a row.
+        """
+        model = benchmarks_model()
+        if x_fragment:
+            return HTMLResponse(benchmarks_fragment(model))
+        return HTMLResponse(benchmarks_page(model, theme_or_default(theme)))
+
+    @app.get("/ui/experiments", response_class=HTMLResponse)
+    def ui_experiments(
+        theme: str | None = None,
+        x_fragment: str | None = Header(default=None),
+    ) -> HTMLResponse:
+        """Every experiment record, indexed from its own metadata block."""
+        model = experiments_model()
+        if x_fragment:
+            return HTMLResponse(experiments_fragment(model))
+        return HTMLResponse(experiments_page(model, theme_or_default(theme)))
+
     @app.get("/ui/insights", response_class=HTMLResponse)
     def ui_insights(
         request: Request,
@@ -913,47 +952,54 @@ def create_app(
         }
 
     def _cluster_model() -> dict[str, Any]:
-        """Page model, including a fresh ProposalSet rebuilt from stored rows.
-
-        The stored rows are the source of truth for the table; the ProposalSet exists so
-        the figures can be drawn from the same object the API returns rather than from a
-        second pass over the catalog.
-        """
+        """Rehydrate the exact stored partition; page reads never recluster it."""
         from data_engine.catalog import clusters as cluster_store
-        from data_engine.clustering import Ignored, build
+        from data_engine.clustering import Ignored, Member, Proposal, ProposalSet, coverage, extract
 
         store = cluster_store.model(configured)
-        rows = store["rows"]
-        tasks: dict[str, int] = {}
-        cores: dict[str, str] = {}
-        for row in rows:
-            for member in store["members"].get(row["key"], []):
-                tasks[str(member["task"])] = int(member["episodes"])
-                cores[str(member["task"])] = str(member["core"])
         ignored = store["ignored"] or Ignored()
-        proposals = build(
-            tasks,
+        built: list[Proposal] = []
+        all_members: list[Member] = []
+        for row in store["rows"]:
+            members = tuple(
+                Member(
+                    task=str(member["task"]),
+                    core=str(member["core"]),
+                    episodes=int(member["episodes"]),
+                    verb=str(member.get("verb") or ""),
+                    colours=tuple(str(value) for value in (member.get("colours") or [])),
+                )
+                for member in store["members"].get(row["key"], [])
+            )
+            all_members.extend(members)
+            built.append(
+                Proposal(
+                    key=str(row["key"]),
+                    core=str(row["core"]),
+                    label=str(row["label"] or ""),
+                    frozen=bool(row["label"]),
+                    members=members,
+                    centroid=tuple(float(value) for value in (row.get("centroid") or [])),
+                    merged_cores=tuple(str(value) for value in (row.get("merged_cores") or [])),
+                )
+            )
+        tasks = {member.task: member.episodes for member in all_members}
+        measured = coverage([extract(task, ignored=ignored) for task in tasks])
+        health = store.get("health", {}) or {}
+        proposals = ProposalSet(
+            proposals=tuple(built),
+            coverage=measured,
             ignored=ignored,
             radius=float(store["radius"]),
             rule=str(store["rule"]),
             source=str(store["source"]),
-            order=list(tasks),
-        )
-        # The labels live on the stored rows; the figure set is rebuilt from the same
-        # members so a confirmed proposal is drawn confirmed rather than merely labelled.
-        proposals.apply_confirmations(
-            {str(row["key"]): str(row["label"]) for row in rows if row["label"]}
+            tasks=int(health.get("tasks", len(tasks))),
+            episodes=int(health.get("episodes", sum(tasks.values()))),
+            confirmed=int(health.get("frozen", sum(1 for item in built if item.frozen))),
         )
         model = dict(store)
         model["proposals"] = proposals
-        model["members"] = {
-            proposal.key: [
-                {"task": member.task, "core": member.core, "episodes": member.episodes}
-                for member in proposal.members
-            ]
-            for proposal in proposals.proposals
-        }
-        model["cores"] = cores
+        model["health"] = health
         return model
 
     @app.get("/api/v1/clusters", response_model=ClusterListResponse)
@@ -977,6 +1023,13 @@ def create_app(
                 for proposal in model["proposals"].proposals
             ],
             "run": _run_payload(model["run"]),
+            "review_candidates": [
+                ClusterReviewCandidate(**item) for item in model.get("review_candidates", [])
+            ],
+            "review_decisions": [
+                ClusterReviewDecision.model_validate(item)
+                for item in model.get("review_decisions", [])
+            ],
             # The live numbers come from the set just rebuilt for the figures; the
             # orphaned count comes from the stored run, because it is a fact about the
             # last rebuild and cannot be recomputed from the proposals alone.
@@ -1007,6 +1060,54 @@ def create_app(
         )
         model = cluster_store.model(configured)
         return {"health": result["health"], "run": _run_payload(model["run"])}
+
+    @app.get("/api/v1/clusters/review", response_model=ClusterReviewListResponse)
+    def list_cluster_review() -> dict[str, Any]:
+        """Current bounded triage queue and the latest human decisions."""
+        from data_engine.catalog import clusters as cluster_store
+
+        return {
+            "candidates": [
+                ClusterReviewCandidate(**item)
+                for item in cluster_store.review_candidates(configured)
+            ],
+            "decisions": [
+                ClusterReviewDecision.model_validate(item)
+                for item in cluster_store.review_decisions(configured)
+            ],
+        }
+
+    @app.post("/api/v1/clusters/review", response_model=ClusterReviewDecisionResponse)
+    def decide_cluster_review(body: ClusterReviewRequest) -> dict[str, Any]:
+        """Create a named annotation or dismiss selected unresolved candidates."""
+        from data_engine.catalog import clusters as cluster_store
+
+        try:
+            count = cluster_store.decide_review(
+                configured, body.tasks, disposition=body.disposition, label=body.label
+            )
+        except ValueError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        return {
+            "reviewed": count,
+            "decisions": [
+                ClusterReviewDecision.model_validate(item)
+                for item in cluster_store.review_decisions(configured)
+            ],
+        }
+
+    @app.delete("/api/v1/clusters/review", response_model=ClusterReviewUndoResponse)
+    def reopen_cluster_review(
+        tasks: Annotated[list[str], Query(min_length=1, max_length=25)],
+    ) -> dict[str, int]:
+        """Reopen up to 25 reviewed task strings by removing their disposition."""
+        from data_engine.catalog import clusters as cluster_store
+
+        try:
+            count = cluster_store.undo_review(configured, tasks)
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+        return {"reopened": count}
 
     @app.get("/api/v1/clusters/{key}", response_model=ClusterDetailResponse)
     def cluster_detail(key: str) -> dict[str, Any]:
@@ -1132,20 +1233,81 @@ def create_app(
         label = (form.get("label") or "").strip()
         if not label:
             return RedirectResponse(
-                f"/ui/clusters?error={quote('a confirmation needs a label')}",
+                f"/ui/clusters/{key}?error={quote('a confirmation needs a label')}",
                 status_code=303,
             )
         if not cluster_store.confirm(configured, key, label):
             return RedirectResponse(
-                f"/ui/clusters?error={quote(f'no cluster {key}')}", status_code=303
+                f"/ui/clusters/{key}?error={quote(f'no cluster {key}')}", status_code=303
             )
-        return RedirectResponse("/ui/clusters", status_code=303)
+        return RedirectResponse(f"/ui/clusters/{key}", status_code=303)
 
     @app.post("/ui/clusters/{key}/release")
     def ui_release_cluster(key: str) -> RedirectResponse:
         from data_engine.catalog import clusters as cluster_store
 
         cluster_store.unconfirm(configured, key)
+        return RedirectResponse(f"/ui/clusters/{key}", status_code=303)
+
+    @app.get("/ui/clusters/{key}", response_class=HTMLResponse)
+    def ui_cluster_detail(
+        key: str,
+        theme: str | None = None,
+        error: str | None = None,
+        x_fragment: str | None = Header(default=None),
+    ) -> HTMLResponse:
+        """Review one group without leaving it: the detail view behind the
+        "and N more" links (ADR 0027)."""
+        from data_engine.catalog import clusters as cluster_store
+
+        row = cluster_store.get_proposal(configured, key)
+        if row is None:
+            raise HTTPException(status_code=404, detail=f"No cluster {key}.")
+        members = cluster_store.proposal_members(configured, key)
+        run = cluster_store.latest_run(configured) or {}
+        read_only = str((run.get("health") or {}).get("source", "catalog")) == "sample"
+        if x_fragment:
+            return HTMLResponse(cluster_detail_fragment(row, members))
+        return HTMLResponse(
+            cluster_detail_page(
+                row,
+                members,
+                theme_or_default(theme),
+                read_only=read_only,
+                error=error or "",
+            )
+        )
+
+    @app.post("/ui/clusters/review")
+    async def ui_decide_cluster_review(request: Request) -> RedirectResponse:
+        """Plain form workflow for assigning a human class or dismissing candidates."""
+        from urllib.parse import parse_qs
+
+        from data_engine.catalog import clusters as cluster_store
+
+        raw = parse_qs((await request.body()).decode("utf-8", "replace"))
+        tasks = raw.get("task", [])
+        disposition = (raw.get("disposition") or [""])[0]
+        label = (raw.get("label") or [""])[0]
+        try:
+            cluster_store.decide_review(configured, tasks, disposition=disposition, label=label)
+        except ValueError as error:
+            return RedirectResponse(f"/ui/clusters?error={quote(str(error))}", status_code=303)
+        return RedirectResponse("/ui/clusters", status_code=303)
+
+    @app.post("/ui/clusters/review/undo")
+    async def ui_undo_cluster_review(request: Request) -> RedirectResponse:
+        """Reopen a reviewed task string so it can be reconsidered on the queue."""
+        from urllib.parse import parse_qs
+
+        from data_engine.catalog import clusters as cluster_store
+
+        raw = parse_qs((await request.body()).decode("utf-8", "replace"))
+        tasks = raw.get("task", [])
+        try:
+            cluster_store.undo_review(configured, tasks)
+        except ValueError as error:
+            return RedirectResponse(f"/ui/clusters?error={quote(str(error))}", status_code=303)
         return RedirectResponse("/ui/clusters", status_code=303)
 
     @app.get("/api/v1/slices", response_model=SliceListResponse)

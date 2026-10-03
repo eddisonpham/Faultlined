@@ -54,6 +54,11 @@ class _EmptyCatalog:
     about the routing rather than about fixtures.
     """
 
+    def count_jobs_by_state(self) -> dict[str, int]:
+        # Not the name rules below: they answer `count_*` with 0, and this
+        # method's contract is a mapping (states -> depths), not a scalar.
+        return {}
+
     def __getattr__(self, name: str) -> Any:
         def _empty(*_args: Any, **_kwargs: Any) -> Any:
             # Order is load-bearing: count_artifacts() ends in "s", so the

@@ -25,13 +25,16 @@ from typing import Any, cast
 from psycopg.types.json import Jsonb
 
 from data_engine.catalog.database import connect
-from data_engine.clustering import ProposalSet
+from data_engine.clustering import ProposalSet, token_vector
 from data_engine.config import Settings
 
 #: Catalog rows read per rebuild. The cap is reported in the run's health block rather
 #: than hidden: a clustering over the first 5000 task strings looks identical to a
 #: complete one unless somebody says otherwise.
 TASK_LIMIT = 5000
+REVIEW_LIMIT = 100
+REVIEW_MARGIN = 0.05
+_CLUSTER_REVIEW_LOCK = 0x464C5256
 
 
 def distinct_tasks(settings: Settings, *, limit: int = TASK_LIMIT) -> dict[str, int]:
@@ -152,6 +155,7 @@ def replace_proposals(settings: Settings, proposals: ProposalSet) -> dict[str, A
     """
     reapplied = reapply(confirmations(settings), proposals)
     with connect(settings) as connection, connection.transaction():
+        connection.execute("SELECT pg_advisory_xact_lock(%s)", (_CLUSTER_REVIEW_LOCK,))
         connection.execute("DELETE FROM task_cluster_members")
         connection.execute("DELETE FROM task_clusters")
         for proposal in proposals.proposals:
@@ -220,7 +224,7 @@ def list_proposals(settings: Settings, *, limit: int = 200) -> list[dict[str, An
     stored = confirmations(settings)
     with connect(settings) as connection:
         rows = connection.execute(
-            """SELECT c.key, c.core, c.episodes, c.task_count, c.merged_cores,
+            """SELECT c.key, c.core, c.episodes, c.task_count, c.merged_cores, c.centroid,
                       c.source, c.ignored, c.radius, c.rule, c.updated_at
                  FROM task_clusters c
                 ORDER BY c.episodes DESC, c.core
@@ -256,6 +260,175 @@ def proposal_members(settings: Settings, key: str, *, limit: int = 200) -> list[
             (key, limit),
         ).fetchall()
     return [dict(row) for row in rows]
+
+
+def proposal_members_by_key(
+    settings: Settings, *, limit: int = TASK_LIMIT
+) -> dict[str, list[dict[str, Any]]]:
+    """Read one complete bounded member set for the current catalog proposals."""
+    with connect(settings) as connection:
+        rows = connection.execute(
+            """SELECT cluster_key, task, core, episodes, verb, colours
+                 FROM task_cluster_members
+                ORDER BY cluster_key, episodes DESC, task
+                LIMIT %s""",
+            (limit,),
+        ).fetchall()
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        grouped.setdefault(str(row["cluster_key"]), []).append(dict(row))
+    return grouped
+
+
+def review_decisions(settings: Settings, *, limit: int = 30) -> list[dict[str, str]]:
+    """Recent human decisions, bounded and independent of proposal identity."""
+    with connect(settings) as connection:
+        rows = connection.execute(
+            """SELECT task, disposition, label FROM cluster_review_decisions
+                ORDER BY reviewed_at DESC, task LIMIT %s""",
+            (limit,),
+        ).fetchall()
+    return [
+        {
+            "task": str(row["task"]),
+            "disposition": str(row["disposition"]),
+            "label": str(row["label"]),
+        }
+        for row in rows
+    ]
+
+
+def review_candidates(
+    settings: Settings, *, limit: int = REVIEW_LIMIT, margin: float = REVIEW_MARGIN
+) -> list[dict[str, Any]]:
+    """Rank bounded low-support or near-boundary members from the stored proposal run.
+
+    Distance is measured from each extracted core to its final stored proposal centroid.
+    Singleton status and radius margin are review heuristics, not calibrated confidence.
+    At most TASK_LIMIT stored members are examined so page reads stay bounded.
+    """
+    if limit < 1 or limit > REVIEW_LIMIT:
+        raise ValueError(f"review limit must be between 1 and {REVIEW_LIMIT}")
+    candidates: list[dict[str, Any]] = []
+    with connect(settings) as connection:
+        members = connection.execute(
+            """SELECT m.cluster_key, m.task, m.core, m.episodes, c.radius, c.centroid,
+                      c.core AS proposal_core, c.task_count, c.source
+                 FROM task_cluster_members m
+                 JOIN task_clusters c ON c.key = m.cluster_key
+                 LEFT JOIN cluster_review_decisions d ON d.task = m.task
+                WHERE d.task IS NULL AND c.source = 'catalog'
+                ORDER BY m.episodes, m.task
+                LIMIT %s""",
+            (TASK_LIMIT,),
+        ).fetchall()
+    candidates.extend(
+        candidate
+        for row in members
+        if (candidate := _review_candidate(row, margin=margin)) is not None
+    )
+    candidates.sort(
+        key=lambda item: (
+            0 if item["reason"] == "no supporting neighbors" else 1,
+            -item["distance"],
+            item["task"],
+        )
+    )
+    return candidates[:limit]
+
+
+def _review_candidate(row: Mapping[str, Any], *, margin: float) -> dict[str, Any] | None:
+    """Convert one stored assignment into the same explicit triage signal everywhere."""
+    radius = float(cast(float, row["radius"]))
+    centroid_raw = cast(list[object], row["centroid"] or [])
+    centroid = [float(cast(float, value)) for value in centroid_raw]
+    point = token_vector(str(row["core"]))
+    norm = sum(value * value for value in centroid) ** 0.5
+    similarity = (
+        sum(left * right for left, right in zip(centroid, point, strict=True)) / norm
+        if norm
+        else 0.0
+    )
+    distance = max(0.0, 1.0 - similarity)
+    singleton = int(cast(int, row["task_count"])) == 1
+    near = not singleton and distance >= max(0.0, radius - margin)
+    if not (singleton or near):
+        return None
+    return {
+        "task": str(row["task"]),
+        "core": str(row["core"]),
+        "cluster_key": str(row["cluster_key"]),
+        "proposal_core": str(row["proposal_core"]),
+        "episodes": int(cast(int, row["episodes"])),
+        "distance": distance,
+        "radius": radius,
+        "reason": "no supporting neighbors" if singleton else "near cluster boundary",
+        "source": str(row["source"]),
+    }
+
+
+def decide_review(
+    settings: Settings,
+    tasks: Sequence[str],
+    *,
+    disposition: str,
+    label: str = "",
+    who: str = "operator",
+) -> int:
+    """Record an explicitly bounded, reversible human decision for present review candidates."""
+    cleaned = label.strip()
+    selected = list(dict.fromkeys(task.strip() for task in tasks if task.strip()))
+    if not selected or len(selected) > 25:
+        raise ValueError("select between 1 and 25 task strings")
+    if disposition not in ("class", "dismissed"):
+        raise ValueError("review disposition must be class or dismissed")
+    if disposition == "class" and not cleaned:
+        raise ValueError("a human class needs a label")
+    if disposition == "class" and len(cleaned) > 120:
+        raise ValueError("a human class label must be 120 characters or fewer")
+    with connect(settings) as connection, connection.transaction():
+        connection.execute("SELECT pg_advisory_xact_lock(%s)", (_CLUSTER_REVIEW_LOCK,))
+        rows = connection.execute(
+            """SELECT m.cluster_key, m.task, m.core, m.episodes, c.radius, c.centroid,
+                      c.core AS proposal_core, c.task_count, c.source
+                 FROM task_cluster_members m
+                 JOIN task_clusters c ON c.key = m.cluster_key
+                 LEFT JOIN cluster_review_decisions d ON d.task = m.task
+                WHERE m.task = ANY(%s) AND d.task IS NULL AND c.source = 'catalog'""",
+            (selected,),
+        ).fetchall()
+        candidates = {
+            str(candidate["task"])
+            for row in rows
+            if (candidate := _review_candidate(row, margin=REVIEW_MARGIN)) is not None
+        }
+        if not set(selected) <= candidates:
+            raise ValueError(
+                "review selection is no longer in the candidate queue; reload and try again"
+            )
+        connection.cursor().executemany(
+            """INSERT INTO cluster_review_decisions (task, disposition, label, reviewed_by)
+               VALUES (%s, %s, %s, %s)
+               ON CONFLICT (task) DO UPDATE SET disposition = EXCLUDED.disposition,
+                 label = EXCLUDED.label, reviewed_by = EXCLUDED.reviewed_by,
+                 reviewed_at = now()""",
+            [
+                (task, disposition, cleaned if disposition == "class" else "", who)
+                for task in selected
+            ],
+        )
+    return len(selected)
+
+
+def undo_review(settings: Settings, tasks: Sequence[str]) -> int:
+    selected = list(dict.fromkeys(task.strip() for task in tasks if task.strip()))
+    if not selected or len(selected) > 25:
+        raise ValueError("select between 1 and 25 task strings")
+    with connect(settings) as connection, connection.transaction():
+        rows = connection.execute(
+            "DELETE FROM cluster_review_decisions WHERE task = ANY(%s) RETURNING task", (selected,)
+        ).fetchall()
+    return len(rows)
 
 
 def get_proposal(settings: Settings, key: str) -> dict[str, Any] | None:
@@ -373,7 +546,7 @@ def rebuild(
     return {"health": health, "proposals": proposals, **stored}
 
 
-def model(settings: Settings, *, limit: int = 200) -> dict[str, Any]:
+def model(settings: Settings, *, limit: int = 512) -> dict[str, Any]:
     """Everything the Clusters page renders, in one read.
 
     Proposals come back from the catalog rather than being recomputed on the page view:
@@ -383,31 +556,36 @@ def model(settings: Settings, *, limit: int = 200) -> dict[str, Any]:
     from data_engine.clustering import Ignored
 
     rows = list_proposals(settings, limit=limit)
+    members = proposal_members_by_key(settings)
     history = run_history(settings)
+    latest = latest_run(settings)
+    run_health = (latest or {}).get("health") or {}
     if not rows:
         return {
             "rows": [],
             "members": {},
             "history": history,
-            "run": None,
-            "ignored": Ignored(),
-            "radius": 0.30,
-            "rule": "running_mean",
-            "source": "catalog",
-            "health": {},
+            "run": latest,
+            "ignored": Ignored.parse(str(run_health.get("ignored", ""))),
+            "radius": float(run_health.get("radius", 0.30)),
+            "rule": str(run_health.get("rule", "running_mean")),
+            "source": str(run_health.get("source", "catalog")),
+            "health": run_health,
+            "review_candidates": review_candidates(settings),
+            "review_decisions": review_decisions(settings),
         }
-    latest = latest_run(settings)
-    health = (latest or {}).get("health") or {}
     return {
         "rows": rows,
-        "members": {row["key"]: proposal_members(settings, row["key"], limit=8) for row in rows},
+        "members": {row["key"]: members.get(str(row["key"]), []) for row in rows},
         "history": history,
         "run": latest,
-        "ignored": Ignored.parse(str(health.get("ignored", ""))),
-        "radius": float(health.get("radius", 0.30)),
-        "rule": str(health.get("rule", "running_mean")),
-        "source": str(health.get("source", "catalog")),
-        "health": health,
+        "ignored": Ignored.parse(str(run_health.get("ignored", ""))),
+        "radius": float(run_health.get("radius", 0.30)),
+        "rule": str(run_health.get("rule", "running_mean")),
+        "source": str(run_health.get("source", "catalog")),
+        "health": run_health,
+        "review_candidates": review_candidates(settings),
+        "review_decisions": review_decisions(settings),
     }
 
 

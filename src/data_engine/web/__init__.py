@@ -7,6 +7,8 @@ from data_engine.web.pages import (
     app_script,
     artifacts_fragment,
     artifacts_page,
+    cluster_detail_fragment,
+    cluster_detail_page,
     clusters_fragment,
     clusters_page,
     episode_detail_page,
@@ -35,6 +37,12 @@ from data_engine.web.pages import (
     theme_or_default,
     vendor_css,
 )
+from data_engine.web.records import (
+    benchmarks_fragment,
+    benchmarks_page,
+    experiments_fragment,
+    experiments_page,
+)
 from data_engine.web.schema import schema_fragment, schema_page
 
 __all__ = [
@@ -43,14 +51,20 @@ __all__ = [
     "app_script",
     "artifacts_fragment",
     "artifacts_page",
+    "benchmarks_fragment",
+    "benchmarks_page",
     "builds_fragment",
     "builds_page",
+    "cluster_detail_fragment",
+    "cluster_detail_page",
     "clusters_fragment",
     "clusters_page",
     "episode_detail_page",
     "episodes_fragment",
     "episodes_page",
     "error_page",
+    "experiments_fragment",
+    "experiments_page",
     "failures_fragment",
     "failures_page",
     "font_bytes",

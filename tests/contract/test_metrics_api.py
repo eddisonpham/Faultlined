@@ -19,6 +19,9 @@ class FakeCatalog:
     def count_jobs(self, state: JobState) -> int:
         return {JobState.QUEUED: 2, JobState.RUNNING: 1}.get(state, 0)
 
+    def count_jobs_by_state(self) -> dict[str, int]:
+        return {state.value: self.count_jobs(state) for state in JobState}
+
     def get_job(self, job_id: str) -> dict[str, Any] | None:
         return None
 

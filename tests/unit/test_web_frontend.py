@@ -30,6 +30,12 @@ from data_engine.web.pages import (
     slices_page,
     status_page,
 )
+from data_engine.web.records import (
+    benchmarks_model,
+    benchmarks_page,
+    experiments_model,
+    experiments_page,
+)
 
 ALL_PAGES = (
     lambda: status_page({}, "vt220"),
@@ -39,6 +45,8 @@ ALL_PAGES = (
     lambda: insights_page({}, "vt220"),
     lambda: metrics_page({}, "vt220"),
     lambda: incidents_page({}, "vt220"),
+    lambda: benchmarks_page(benchmarks_model(), "vt220"),
+    lambda: experiments_page(experiments_model(), "vt220"),
 )
 
 
@@ -647,8 +655,16 @@ def test_the_ui_never_names_its_own_endpoints() -> None:
         # The <link> to the stylesheet and the asset URLs are not prose; the
         # assertion is about what the operator is asked to read.
         assert "/api/v1" not in body, "an endpoint path is visible in the page body"
+        # The word check is about *our* prose: headings, captions, empty states,
+        # hints. A <code> span is a machine identifier quoted verbatim - a
+        # benchmark workload really is called `api-metrics-endpoint`, and
+        # renaming it to satisfy a style rule would be lying about what was
+        # measured. So code spans are excluded from the word check only; the
+        # route-path check above still sees them, so no code span may name a
+        # route.
+        prose = re.sub(r"<code>.*?</code>", "", body, flags=re.DOTALL)
         for word in ("POST /api", "GET /api", "endpoint", "API latency"):
-            assert word not in body, f"{word!r} appears in operator-facing copy"
+            assert word not in prose, f"{word!r} appears in operator-facing copy"
 
     # Latency is reported per operation, in words.
     assert _operation("/api/v1/episodes") == "episode listing"

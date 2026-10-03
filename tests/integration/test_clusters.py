@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Iterator
+from typing import Any
 
 import pytest
 
@@ -130,16 +131,17 @@ def test_a_second_rebuild_replaces_the_first_rather_than_adding_to_it(
     assert before[0] in [row["id"] for row in after], "the earlier run survives the rebuild"
 
 
-def test_the_page_model_reports_no_run_before_one_has_happened(settings: Settings) -> None:
-    """The empty state the Clusters page renders. A model that fakes one is a lie."""
-    store.rebuild(settings, source="sample")
+def test_the_page_model_keeps_run_history_when_proposals_are_empty(settings: Settings) -> None:
+    """Removing current proposals must not falsify the persisted run history."""
+    result = store.rebuild(settings, source="sample")
     with store.connect(settings) as connection:
         connection.execute("DELETE FROM task_cluster_members")
         connection.execute("DELETE FROM task_clusters")
     empty = store.model(settings)
     assert empty["rows"] == []
-    assert empty["run"] is None
-    assert empty["health"] == {}
+    assert empty["run"] is not None
+    assert empty["run"]["source"] == "sample"
+    assert empty["health"]["clusters"] == result["health"]["clusters"]
 
 
 def test_the_page_model_does_not_recompute_what_the_run_stored(settings: Settings) -> None:
@@ -283,6 +285,70 @@ def test_a_confirmation_whose_strings_are_gone_is_counted_as_orphaned(
     )
 
 
+def test_review_decision_is_persisted_filtered_and_reopened(settings: Settings) -> None:
+    """Review state is independent of automatic proposals and confirmation labels."""
+    token = uuid.uuid4().hex
+    key = f"review-{token}"
+    selected = f"!review-{token}"
+    with store.connect(settings) as connection, connection.transaction():
+        confirmation_count = connection.execute(
+            "SELECT count(*) AS n FROM cluster_confirmations"
+        ).fetchone()["n"]
+        connection.execute(
+            """INSERT INTO task_clusters (key, core, episodes, task_count, source, radius)
+               VALUES (%s, 'unmatched review core', 1, 1, 'catalog', 0.3)""",
+            (key,),
+        )
+        connection.execute(
+            """INSERT INTO task_cluster_members
+                       (cluster_key, task, core, episodes)
+               VALUES (%s, %s, 'unmatched review core', 0)""",
+            (key, selected),
+        )
+
+    try:
+        assert selected in {item["task"] for item in store.review_candidates(settings)}
+        assert (
+            store.decide_review(settings, [selected], disposition="class", label="operator class")
+            == 1
+        )
+        assert selected not in {item["task"] for item in store.review_candidates(settings)}
+        with store.connect(settings) as connection:
+            decision = connection.execute(
+                """SELECT task, disposition, label FROM cluster_review_decisions
+                   WHERE task = %s""",
+                (selected,),
+            ).fetchone()
+        assert decision == {
+            "task": selected,
+            "disposition": "class",
+            "label": "operator class",
+        }
+        assert store.undo_review(settings, [selected]) == 1
+        assert selected in {item["task"] for item in store.review_candidates(settings)}
+        with store.connect(settings) as connection:
+            assert (
+                connection.execute("SELECT count(*) AS n FROM cluster_confirmations").fetchone()[
+                    "n"
+                ]
+                == confirmation_count
+            )
+    finally:
+        with store.connect(settings) as connection, connection.transaction():
+            connection.execute("DELETE FROM cluster_review_decisions WHERE task = %s", (selected,))
+            connection.execute("DELETE FROM task_cluster_members WHERE cluster_key = %s", (key,))
+            connection.execute("DELETE FROM task_clusters WHERE key = %s", (key,))
+
+
+def test_review_rejects_non_candidates_and_unbounded_actions(settings: Settings) -> None:
+    with pytest.raises(ValueError, match="between 1 and 25"):
+        store.decide_review(settings, [], disposition="dismissed")
+    with pytest.raises(ValueError, match="between 1 and 25"):
+        store.undo_review(settings, [f"task-{index}" for index in range(26)])
+    with pytest.raises(ValueError, match="no longer in the candidate queue"):
+        store.decide_review(settings, ["not a current candidate"], disposition="dismissed")
+
+
 def test_confirming_the_same_group_twice_keeps_one_confirmation(
     settings: Settings, cleanup: None
 ) -> None:
@@ -294,3 +360,105 @@ def test_confirming_the_same_group_twice_keeps_one_confirmation(
     assert len(store.confirmations(settings)) == 1
     detail = store.get_proposal(settings, key)
     assert detail is not None and detail["label"] == f"{label}-renamed"
+
+
+# ------------------------------------------------------------- the detail view
+
+
+def _ui_client(settings: Settings) -> object:
+    """The real app over the real catalog, driven only through HTTP."""
+    from fastapi.testclient import TestClient
+
+    from data_engine.api.app import create_app
+
+    app = create_app(
+        Settings(_env_file=None, database_url=settings.database_url),  # type: ignore[arg-type]
+        initialize_database=False,
+    )
+    return TestClient(app)
+
+
+def _mug_proposal(settings: Settings) -> dict[str, Any]:
+    store.replace_proposals(settings, build(CONTROLLED, ignored=Ignored(verb=True, colour=True)))
+    row = max(
+        (row for row in store.list_proposals(settings)),
+        key=lambda row: row["task_count"],
+    )
+    assert "mug" in row["core"]
+    return row
+
+
+def test_the_detail_page_serves_the_stored_proposal_and_its_members(settings: Settings) -> None:
+    from fastapi.testclient import TestClient
+
+    row = _mug_proposal(settings)
+    client = _ui_client(settings)
+    assert isinstance(client, TestClient)
+    response = client.get(f"/ui/clusters/{row['key']}")
+    assert response.status_code == 200
+    body = response.text
+    assert "Cluster detail" in body
+    assert 'href="/ui/clusters"' in body
+    # The stored member task strings, with their extraction facts, are on the page.
+    assert "put the red mug on the plate" in body
+    assert "put" in body
+    assert "red" in body
+    # The tile counts agree with the catalog, and the confirm control is present.
+    assert f'<span class="de-stat-value">{row["episodes"]}</span>' in body
+    assert f'action="/ui/clusters/{row["key"]}/confirm"' in body
+
+
+def test_an_unknown_cluster_is_an_html_404_over_the_real_app(settings: Settings) -> None:
+    from fastapi.testclient import TestClient
+
+    client = _ui_client(settings)
+    assert isinstance(client, TestClient)
+    response = client.get("/ui/clusters/no-such-cluster")
+    assert response.status_code == 404
+    assert "text/html" in response.headers["content-type"]
+
+
+def test_confirm_and_release_round_trip_through_the_detail_page(
+    settings: Settings, cleanup: None
+) -> None:
+    from fastapi.testclient import TestClient
+
+    row = _mug_proposal(settings)
+    client = _ui_client(settings)
+    assert isinstance(client, TestClient)
+    label = _label()
+
+    confirm = client.post(
+        f"/ui/clusters/{row['key']}/confirm", data={"label": label}, follow_redirects=False
+    )
+    assert confirm.status_code == 303
+    assert confirm.headers["location"] == f"/ui/clusters/{row['key']}"
+
+    page = client.get(f"/ui/clusters/{row['key']}").text
+    assert f"confirmed: {label}" in page
+    assert "release confirmation" in page
+
+    release = client.post(f"/ui/clusters/{row['key']}/release", follow_redirects=False)
+    assert release.status_code == 303
+    assert release.headers["location"] == f"/ui/clusters/{row['key']}"
+
+    page = client.get(f"/ui/clusters/{row['key']}").text
+    assert "confirmed:" not in page
+    assert "/confirm" in page
+
+
+def test_the_detail_page_holds_the_extraction_facts_the_catalog_stores(
+    settings: Settings,
+) -> None:
+    """The member rows come from SQL, so the facts on the page must be the stored ones."""
+    from fastapi.testclient import TestClient
+
+    row = _mug_proposal(settings)
+    stored = store.proposal_members(settings, row["key"])
+    assert all({"task", "core", "episodes", "verb", "colours"} <= set(m) for m in stored)
+
+    client = _ui_client(settings)
+    assert isinstance(client, TestClient)
+    body = client.get(f"/ui/clusters/{row['key']}").text
+    for member in stored:
+        assert str(member["task"]) in body

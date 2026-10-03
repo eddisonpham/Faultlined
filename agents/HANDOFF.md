@@ -2,9 +2,9 @@
 
 Current state of Faultlined for whoever picks it up next. Recent slices are listed in [§14](#14-recent-slices); detail lives in the linked ADR, experiment and review records.
 
-- Stage: production baseline, open since 2026-09-30. MVP complete, all 27 criteria evidenced ([definition of done](spec/definition-of-done.md)).
-- Suite: 1285 passing, coverage 92.31%, mypy strict clean, OpenAPI contract matches.
-- Everything is committed on `main`. Do not tag `scaffold-complete` until the open items in [§6](#6-known-technical-risks) and [§7](#7-next-steps) close.
+- Stage: Production Baseline **closed 2026-10-01**; Performance/Scaling (stage 4) is next ([definition of done](spec/definition-of-done.md)). All five stage-3 criteria are checked with evidence. Not closed with them: the restore drill has not been run, `de gc` and `de migrate` do not exist, and F8/F12/F15 rows name stage-4/5 work rather than a `planned` test.
+- Latest local `just ci`: 1,304 passed, coverage 91.33%, strict mypy clean (76 source + 22 experiment files), repository hygiene and OpenAPI contract pass. `just ui-audit` clean at 60 page loads across 4 themes. One Starlette/httpx deprecation warning remains.
+- The worktree contains the current UI/cluster-review slice and earlier uncommitted user work. Do not assume files are committed or clean. Do not tag `scaffold-complete` until stage gates and outstanding items close.
 
 ## 1. Problem
 
@@ -27,6 +27,7 @@ Local-first robot episode data engine: ingest, validate, curate and build reprod
 | `tests/` | unit, contract, integration, e2e |
 | `scripts/` | Port checks, dev Postgres, reset, OpenAPI contract, e2e driver, MCAP log generator |
 | `agents/` | Specs, architecture, implementation status, testing, benchmarking, observability, ADRs, reviews, experiments, prompts |
+| `docs/` | OpenAPI contract and `docs/runbooks/` (backup-and-restore, worker-operations) |
 
 ## 4. Technology stack
 
@@ -47,7 +48,7 @@ Python 3.14, uv with a committed lock, just, Ruff, mypy, pytest with a 70% cover
 - **Monitoring**: deterministic notifier, eleven rules, per-scope EWMA and median-MAD control limits over a versioned 26-feature vector, completion contracts, fingerprint dedup, cooldown, evidence and severity gates, hard alert budget. No model, no LLM call, no network in the detection path ([ADR 0020](decisions/0020-deterministic-monitoring-notifier.md), [plan](implementation/automated-monitoring-plan.md)).
 - **Chaos harness, first increment**: replay seams and labeled window scoring through the unmodified tick pipeline ([EXP-0006](experiments/0006-chaos-harness-first-increment.md)). No accuracy figure yet.
 - **Cluster proposals**: task strings are reduced to an object core by a lexicon, grouped by cosine radius with a running-mean centroid, and presented as proposals a human confirms. A confirmation is stored as the *task strings it covers*, so it survives a rebuild that re-keys every proposal; one that no longer holds together is reported as orphaned rather than reattached. `/ui/clusters`, `GET/POST /api/v1/clusters`, four tables, no model and no numpy ([ADR 0026](decisions/0026-cluster-proposals.md), `tests/unit/test_clustering_extraction.py`, `tests/unit/test_cluster_figures.py`, `tests/contract/test_cluster_api.py`, `tests/integration/test_clusters.py`).
-- **Operator UI**: server-rendered, works with JavaScript disabled, visible failure policy in one client runtime, HTML error pages ([ADR 0014](decisions/0014-minimal-ui-server-rendered.md), [ADR 0021](decisions/0021-frontend-instrument-pass.md), [ADR 0024](decisions/0024-observability-visual-surface.md)). `/docs` and `/redoc` removed; `/openapi.json` kept for the drift gate. Charts are pure functions from data to markup, asserted on path coordinates and empty states rather than screenshots. No glow anywhere: no `text-shadow`, no `filter`, no `backdrop-filter`, no navigation indicator, and exactly one theme stylesheet loaded before the layout sheet.
+- **Operator UI**: server-rendered, works with JavaScript disabled, visible failure policy in one client runtime, HTML error pages ([ADR 0014](decisions/0014-minimal-ui-server-rendered.md), [ADR 0021](decisions/0021-frontend-instrument-pass.md), [ADR 0024](decisions/0024-observability-visual-surface.md)). `/docs` and `/redoc` removed; `/openapi.json` kept for the drift gate. Cluster review UI, ranked size view, grouped nav, and robot wordmark are covered by [ADR 0027](decisions/0027-cluster-review-and-ui-information-architecture.md). `just ui-audit` passed 52 loads across 13 routes × four themes; EXP-0008 records the audit false-positive fix and limitations. Desktop/narrow screenshots and screen-reader/operator studies remain outstanding.
 - **Benchmarks**: schema v2, deterministic statistics, provenance capture, a CLI that refuses to publish from a failed run, and a `WORKLOADS` registry including the heavy-load workloads from [EXP-0007](experiments/0007-heavy-load-and-sink-tail-read.md).
 
 ### Not working
@@ -78,7 +79,9 @@ More detail: [implementation status](implementation/status.md), [failure modes](
 6. Write down the per-stage ingest targets the owner prefers, replacing the unreachable 50 MB/s one.
 7. Consider formal catalog migrations; inline DDL plus an `ALTER TABLE` block is the current mechanism.
 
-Done and closed: the baseline runbook (2026-09-28), clean-clone and secrets validation (2026-09-28), the whole MVP engineering order (real LeRobot reader, rule-based validation and quarantine, content-addressed build, MCAP reader) on 2026-09-29, the stage 2.5 clustering assessment on 2026-09-30, and the cluster proposal surface on 2026-10-01.
+Done and closed: the baseline runbook (2026-09-28), clean-clone and secrets validation (2026-09-28), the whole MVP engineering order (real LeRobot reader, rule-based validation and quarantine, content-addressed build, MCAP reader) on 2026-09-29, the stage 2.5 clustering assessment on 2026-09-30, the cluster proposal surface on 2026-10-01, and **all five Production Baseline criteria on 2026-10-01**.
+
+Stage 4 entry state, in the order it will bite: no experiment record exists yet for a *profiling-attributed* bottleneck (EXP-0005 names the ceiling but the campaign is not a scaling study); no scaling curve has been measured; and the NFR targets in [requirements §2](spec/requirements.md) are still the ones EXP-0005 showed to be unreachable. **The restore drill written in [backup-and-restore.md](../docs/runbooks/backup-and-restore.md) has not been run** — a procedure nobody has executed is a document, not a capability, and stage 5's first task is to execute it.
 
 ## 8. Open questions
 
@@ -99,18 +102,19 @@ Done and closed: the baseline runbook (2026-09-28), clean-clone and secrets vali
 
 ## 10. Testing
 
-- Latest gates: format, lint, strict mypy over 75 source modules, tests, hygiene and OpenAPI drift all pass. 1285 passing, coverage above 92%.
+- Latest `just ci`: Ruff/format, strict mypy over 75 source + 22 experiment modules, 1,279 tests passing at 91.25% coverage, hygiene, and OpenAPI drift all pass. One Starlette/httpx deprecation warning remains.
 - Integration tests need `DE_DATABASE_URL` and skip cleanly without it; `just pg-up` plus the README DSN runs the whole suite with nothing skipped.
 - The `network` tests are the only ones that touch the Hugging Face Hub. Two mechanisms that made the hosted runner go red for reasons unrelated to the code are now closed: a truncated body is detected against `Content-Length` and retried rather than written as a fixture (`IncompleteRead` is an `http.client` exception and used to escape the retry entirely), and the real-dataset assertions read their expected values from the dataset's own published index rather than from constants copied out of a live repository. The fetcher has its own unit tests against a local HTTP server, so the behaviour is checked without egress.
 - **There is no hosted runner.** `.github/workflows/` was removed on 2026-09-30 after four consecutive red runs whose cause could not be pinned down from outside the machine (the job log is behind a login). Every gate still exists and still passes locally; `just ci` runs all of them. The difference is that nothing enforces it but the person committing, and the pre-commit hooks cover lint, types and hygiene on changed files only.
-- Visual defects are checked in a real browser by `just ui-audit` (Node 22+ and Chrome, against a running `just run`). It loads all twelve pages under all four themes, 48 loads, each rendered in a different theme than the one stored so the client-side theme swap actually runs. It is deliberately not part of `just ci`: it needs a browser and a live server. Text assertions against the stylesheet cannot see a rule that only applies mid-navigation, nor a cascade that depends on what a script appended at runtime; both shipped.
+- Visual defects are checked in a real browser by `just ui-audit` (Node 22+ and Chrome, against a running server). On 2026-10-01 it passed 52 loads across 13 route entries × four themes, each with a forced theme swap. The first pass found SVG SMIL false positives from unnamed browser animations; the script now checks explicit app CSS animation names. This audit was read-only against a temporary API process; no screenshot or screen-reader audit was run. See [EXP-0008](experiments/0008-production-baseline-workflow-smoke.md).
 - A Starlette/httpx `TestClient` deprecation warning is non-blocking and deferred.
 - Repeat every gate after any change.
 
 ## 11. Observability
 
-- JSON logs and correlation IDs flow API to persisted job to worker to logs. Host telemetry covers CPU, RAM, disk and network, with nullable host fields on psutil errors and an AccessDenied test in the suite.
-- Runtime metrics: `jobs_queue_depth`, `jobs_queue_time_seconds`, `jobs_run_time_seconds`, `jobs_failures_total`, `pipeline_stage_duration_seconds`, `episodes_ingested_total`, `artifacts_written_bytes_total`, plus API request latency, catalog query timing and worker heartbeats. JSONL sink at `DE_METRICS_PATH`. Labels stay low-cardinality; ids appear only in logs. Sink failures never break the pipeline.
+- JSON logs and correlation IDs flow API to persisted job to worker to logs. Host telemetry covers CPU, RAM, disk and network, with nullable host fields on psutil errors and an AccessDenied test in the suite. **The `system_*` host/GPU gauges are now emitted on a runtime interval** (worker loop, every 60 s), which closed the last gap in the metric registry: a field the sampler could not read is omitted rather than zeroed, and a sampler that raises is logged as `host_sample_failed` and skipped.
+- Runtime metrics: `jobs_queue_depth`, `jobs_queue_time_seconds`, `jobs_run_time_seconds`, `jobs_failures_total`, `pipeline_stage_duration_seconds`, `episodes_ingested_total`, `artifacts_written_bytes_total`, plus API request latency, catalog query timing, worker heartbeats, and the `monitor_*`/`incidents_*` family. **Every row in the registry is emitted by a call site.** JSONL sink at `DE_METRICS_PATH`. Labels stay low-cardinality; ids appear only in logs. Sink failures never break the pipeline.
+- Runnable queries for all of it are in [observability conventions](observability/conventions.md#queries) — HTTP forms and one-liners over the sink, plus the log events worth alerting on.
 - `observability/aggregate.py` reads the sink back into percentile summaries, time-bucketed series and heartbeat ages for `GET /api/v1/metrics` and `/ui/metrics`.
 - Distributed tracing deferred per [ADR 0008](decisions/0008-observability.md); psutil recorded in [ADR 0013](decisions/0013-cross-platform-resource-telemetry.md).
 
@@ -163,6 +167,7 @@ One line each. Detail in the linked record.
 | 2026-09-30 | Live clustering demo: `just cluster watch` streams task strings into the frozen configuration and serves a page where a confirmed cluster visibly stops moving. Stdlib `http.server`, no new dependency | [findings](../experiments/clustering/results/README.md) |
 | 2026-10-01 | Full-scale run over 1200 labelled strings plus 46 real Hub task sentences: the shipped sentence-embedding object view shatters (533 clusters for 48 classes, B-cubed 0.073, zero intact classes), order decides the partition (ARI -0.0005), and extracting the object core before embedding fixes it (47 clusters, B-cubed 0.986). Decision: extract, do not embed | [findings](../experiments/clustering/results/README.md) |
 | 2026-10-01 | Cluster proposals shipped: extracted-core grouping in the engine, four catalog tables, confirmations stored as the task strings they cover, and a Clusters page in the nav. The integration test found and fixed a matching rule that would have moved a broken confirmation onto an arbitrary neighbour | [ADR 0026](decisions/0026-cluster-proposals.md) |
+| 2026-10-01 | Human triage actions, ranked class-size visual and grouped robot-data nav; browser audit passed 52 loads in four themes. One-episode real-data ingest/validation smoke only; build/export and scale campaign remain open | [ADR 0027](decisions/0027-cluster-review-and-ui-information-architecture.md), [EXP-0008](experiments/0008-production-baseline-workflow-smoke.md) |
 | 2026-09-29 | Deterministic monitoring notifier, eleven rules, alert budget | [ADR 0020](decisions/0020-deterministic-monitoring-notifier.md), [EXP-0003](experiments/0003-deterministic-notifier-latency.md) |
 | 2026-09-29 | Instrument UI pass: theme hooks, visible failure policy, HTML error pages | [ADR 0021](decisions/0021-frontend-instrument-pass.md) |
 | 2026-09-29 | MVP complete: content-addressed builds and the MCAP reader | [ADR 0022](decisions/0022-mcap-ingest-reader.md), [EXP-0004](experiments/0004-mcap-ingest-baseline.md) |
@@ -171,6 +176,7 @@ One line each. Detail in the linked record.
 | 2026-09-30 | Observability visual surface: dimensionless charts, live schema page, lineage DAG, motion trace with recording gaps | [ADR 0024](decisions/0024-observability-visual-surface.md) |
 | 2026-09-30 | MCAP dimension layout compiled per message shape: ingest 3.5x faster, target re-scoped | [EXP-0005](experiments/0005-mcap-ingest-flatten-plan.md), [ADR 0025](decisions/0025-lerobot-v3-export-of-builds.md) |
 | 2026-09-30 | Chaos harness first increment: replay seams, labeled window scoring | [EXP-0006](experiments/0006-chaos-harness-first-increment.md) |
+| 2026-10-01 | Production Baseline closed: failure-mode catalog with no `planned` row (three closed with code), every registered metric emitted, host gauges on a 60 s runtime interval, documented log/metric queries, the production-like local tier specified down to what is manual, backup/restore + worker-ops runbooks, and `/ui/benchmarks` + `/ui/experiments` reading the repository rather than adding catalog tables | [definition of done](spec/definition-of-done.md) |
 | 2026-09-30 | e2e driver hardened and adopted as `scripts/verify_e2e.py`, preflight and nonzero exit | [B-016](benchmarking/backlog.md) |
 | 2026-09-30 | Heavy-load campaign, metrics sink tail-read | [EXP-0007](experiments/0007-heavy-load-and-sink-tail-read.md) |
 | 2026-09-30 | Adversarial API probing: correlation-id sanitizing, page-limit clamping (F17, F18) | [failure modes](testing/failure-modes.md) |
@@ -186,3 +192,5 @@ One line each. Detail in the linked record.
 - Write the probe first. Chaos-harness and adversarial-probing defects were all found by a test or script that could fail, never by reading the code.
 - A metric with units is not a metric with a scale. Plotting an L2 norm in source units put episodes at `1.0e8` beside joints at `0.02`; the chart was not misdrawn, it was showing nothing.
 - Measure before optimizing, and attribute before claiming. `_dimensions` was 51% of ingest time; the disk was 65 ms and would have been blamed by order of magnitude.
+- A `planned` row is a promise, not a note. Three stage-3 catalog rows named tests for behaviour that does not exist; closing them honestly meant restating what *is* implemented and naming the stage the rest belongs to, not building three subsystems to tick a box and not quietly leaving them unchecked.
+- Say what is not automated. The production-like tier's value was entirely in the table listing what the OS scheduler and a human still do — `de gc` and `de migrate` do not exist, and a doc that implied otherwise would have been worse than no doc.

@@ -7,6 +7,7 @@ import string
 import uuid
 from typing import Any
 
+import psycopg
 from fastapi import FastAPI, Request
 from fastapi.exceptions import HTTPException as FastAPIHTTPException
 from fastapi.responses import HTMLResponse, JSONResponse, Response
@@ -98,6 +99,51 @@ def install_error_handling(app: FastAPI) -> None:
                 "code": "INVALID_TRANSITION",
                 "detail": f"The requested transition is not allowed: {exc}",
                 "correlation_id": correlation_id_var.get(),
+            },
+        )
+
+    @app.exception_handler(psycopg.OperationalError)
+    async def database_unavailable_handler(
+        request: Request, exc: psycopg.OperationalError
+    ) -> Response:
+        """A database outage answers 503, not 500 (failure-modes F10).
+
+        The queue lives in Postgres, so nothing is lost while it is unreachable:
+        the caller is told to come back (`Retry-After`) and the worker loop
+        already survives the same exception (F23). Reporting it as an internal
+        error would tell the operator to file a bug for a database that is
+        simply down, and a stack trace in the body would leak SQL state.
+        """
+        correlation = correlation_id_var.get()
+        logger.warning(
+            "database unavailable correlation_id=%s path=%s error=%s",
+            correlation,
+            request.url.path,
+            type(exc).__name__,
+            extra={"event": "database_unavailable", "correlation_id": correlation},
+        )
+        headers = {"Retry-After": "5"}
+        if _wants_html(request):
+            return HTMLResponse(
+                error_page(
+                    503,
+                    f"The database is temporarily unreachable; retry shortly. "
+                    f"// correlation {correlation}",
+                    theme_or_default(request.query_params.get("theme")),
+                ),
+                status_code=503,
+                headers=headers,
+            )
+        return JSONResponse(
+            status_code=503,
+            headers=headers,
+            content={
+                "type": "about:blank",
+                "title": "Service unavailable",
+                "status": 503,
+                "code": "SERVICE_UNAVAILABLE",
+                "detail": "The database is temporarily unreachable. Retry with backoff.",
+                "correlation_id": correlation,
             },
         )
 

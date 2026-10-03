@@ -127,11 +127,13 @@ def _assemble_quality_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
     """
     measured = [row for row in rows if row.get("frame_count") is not None]
     lengths = [int(row["frame_count"]) for row in measured]
+    # The population stats are computed once: the z-score of every episode is
+    # relative to the same population, so recomputing the mean/std per row made
+    # assembly quadratic - ~18 s at a 10k-episode catalog (EXP-0010c), against
+    # ~20 ms with the stats hoisted. Same numbers, same rounding, one pass.
+    length_stats = {"mean": _mean(lengths), "std": _std(lengths)}
     zscores = {
-        str(row["episode_id"]): _zscore(
-            row["frame_count"], {"mean": _mean(lengths), "std": _std(lengths)}
-        )
-        for row in measured
+        str(row["episode_id"]): _zscore(row["frame_count"], length_stats) for row in measured
     }
 
     dim_names = sorted({dim["name"] for row in rows for dim in row.get("dims") or []})
@@ -1058,6 +1060,25 @@ class PostgresCatalog:
         if row is None:
             return 0
         return cast(int, row["total"])
+
+    def count_jobs_by_state(self) -> dict[str, int]:
+        """Queue depth per state in one round trip.
+
+        The status and metrics models need every state; asking for them one query
+        at a time cost 8 connections and 8 scans per request - 588 ms of the 599 ms
+        `/api/v1/metrics` took at 10 rps (EXP-0010e). One GROUP BY is the same
+        numbers in one scan. States with no rows are reported as 0 rather than
+        omitted, because "not present" and "zero deep" are the same fact to a
+        queue-depth gauge but not to a JSON consumer indexing by state.
+        """
+        with connect(self.settings) as connection:
+            rows = connection.execute(
+                "SELECT state, count(*) AS total FROM jobs GROUP BY state"
+            ).fetchall()
+        counts = {state.value: 0 for state in JobState}
+        for row in rows:
+            counts[str(row["state"])] = cast(int, row["total"])
+        return counts
 
     def list_jobs(
         self,

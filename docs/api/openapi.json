@@ -301,6 +301,20 @@
             "title": "Proposals",
             "type": "array"
           },
+          "review_candidates": {
+            "items": {
+              "$ref": "#/components/schemas/ClusterReviewCandidate"
+            },
+            "title": "Review Candidates",
+            "type": "array"
+          },
+          "review_decisions": {
+            "items": {
+              "$ref": "#/components/schemas/ClusterReviewDecision"
+            },
+            "title": "Review Decisions",
+            "type": "array"
+          },
           "run": {
             "anyOf": [
               {
@@ -330,6 +344,11 @@
           "core": {
             "title": "Core",
             "type": "string"
+          },
+          "distance": {
+            "default": 0.0,
+            "title": "Distance",
+            "type": "number"
           },
           "episodes": {
             "title": "Episodes",
@@ -470,6 +489,173 @@
           }
         },
         "title": "ClusterRebuildRequest",
+        "type": "object"
+      },
+      "ClusterReviewCandidate": {
+        "properties": {
+          "cluster_key": {
+            "title": "Cluster Key",
+            "type": "string"
+          },
+          "core": {
+            "title": "Core",
+            "type": "string"
+          },
+          "distance": {
+            "title": "Distance",
+            "type": "number"
+          },
+          "episodes": {
+            "title": "Episodes",
+            "type": "integer"
+          },
+          "proposal_core": {
+            "title": "Proposal Core",
+            "type": "string"
+          },
+          "radius": {
+            "title": "Radius",
+            "type": "number"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "task": {
+            "title": "Task",
+            "type": "string"
+          }
+        },
+        "required": [
+          "task",
+          "core",
+          "cluster_key",
+          "proposal_core",
+          "episodes",
+          "distance",
+          "radius",
+          "reason",
+          "source"
+        ],
+        "title": "ClusterReviewCandidate",
+        "type": "object"
+      },
+      "ClusterReviewDecision": {
+        "properties": {
+          "disposition": {
+            "enum": [
+              "class",
+              "dismissed"
+            ],
+            "title": "Disposition",
+            "type": "string"
+          },
+          "label": {
+            "default": "",
+            "title": "Label",
+            "type": "string"
+          },
+          "task": {
+            "title": "Task",
+            "type": "string"
+          }
+        },
+        "required": [
+          "task",
+          "disposition"
+        ],
+        "title": "ClusterReviewDecision",
+        "type": "object"
+      },
+      "ClusterReviewDecisionResponse": {
+        "properties": {
+          "decisions": {
+            "items": {
+              "$ref": "#/components/schemas/ClusterReviewDecision"
+            },
+            "title": "Decisions",
+            "type": "array"
+          },
+          "reviewed": {
+            "title": "Reviewed",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "reviewed"
+        ],
+        "title": "ClusterReviewDecisionResponse",
+        "type": "object"
+      },
+      "ClusterReviewListResponse": {
+        "properties": {
+          "candidates": {
+            "items": {
+              "$ref": "#/components/schemas/ClusterReviewCandidate"
+            },
+            "title": "Candidates",
+            "type": "array"
+          },
+          "decisions": {
+            "items": {
+              "$ref": "#/components/schemas/ClusterReviewDecision"
+            },
+            "title": "Decisions",
+            "type": "array"
+          }
+        },
+        "title": "ClusterReviewListResponse",
+        "type": "object"
+      },
+      "ClusterReviewRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "disposition": {
+            "enum": [
+              "class",
+              "dismissed"
+            ],
+            "title": "Disposition",
+            "type": "string"
+          },
+          "label": {
+            "default": "",
+            "maxLength": 120,
+            "title": "Label",
+            "type": "string"
+          },
+          "tasks": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 25,
+            "minItems": 1,
+            "title": "Tasks",
+            "type": "array"
+          }
+        },
+        "required": [
+          "tasks",
+          "disposition"
+        ],
+        "title": "ClusterReviewRequest",
+        "type": "object"
+      },
+      "ClusterReviewUndoResponse": {
+        "properties": {
+          "reopened": {
+            "title": "Reopened",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "reopened"
+        ],
+        "title": "ClusterReviewUndoResponse",
         "type": "object"
       },
       "ClusterRun": {
@@ -3239,6 +3425,105 @@
         "summary": "Rebuild Clusters"
       }
     },
+    "/api/v1/clusters/review": {
+      "delete": {
+        "description": "Reopen up to 25 reviewed task strings by removing their disposition.",
+        "operationId": "reopen_cluster_review_api_v1_clusters_review_delete",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "tasks",
+            "required": true,
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 25,
+              "minItems": 1,
+              "title": "Tasks",
+              "type": "array"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClusterReviewUndoResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reopen Cluster Review"
+      },
+      "get": {
+        "description": "Current bounded triage queue and the latest human decisions.",
+        "operationId": "list_cluster_review_api_v1_clusters_review_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClusterReviewListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Cluster Review"
+      },
+      "post": {
+        "description": "Create a named annotation or dismiss selected unresolved candidates.",
+        "operationId": "decide_cluster_review_api_v1_clusters_review_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClusterReviewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClusterReviewDecisionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Decide Cluster Review"
+      }
+    },
     "/api/v1/clusters/{key}": {
       "get": {
         "description": "One proposal and the task strings behind it.",
@@ -5104,6 +5389,69 @@
         "summary": "Ui Artifacts"
       }
     },
+    "/ui/benchmarks": {
+      "get": {
+        "description": "Committed benchmark baselines and the runs recorded on this machine.\n\nReads `benchmarks/` off disk, so it needs no database and no catalog\ntable. A benchmark claim is a repository artifact, not a row.",
+        "operationId": "ui_benchmarks_ui_benchmarks_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "theme",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Theme"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-fragment",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Fragment"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ui Benchmarks"
+      }
+    },
     "/ui/builds": {
       "get": {
         "description": "Content-addressed builds. The address is the content.",
@@ -5316,6 +5664,128 @@
           }
         },
         "summary": "Ui Rebuild Clusters"
+      }
+    },
+    "/ui/clusters/review": {
+      "post": {
+        "description": "Plain form workflow for assigning a human class or dismissing candidates.",
+        "operationId": "ui_decide_cluster_review_ui_clusters_review_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Ui Decide Cluster Review"
+      }
+    },
+    "/ui/clusters/review/undo": {
+      "post": {
+        "description": "Reopen a reviewed task string so it can be reconsidered on the queue.",
+        "operationId": "ui_undo_cluster_review_ui_clusters_review_undo_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Ui Undo Cluster Review"
+      }
+    },
+    "/ui/clusters/{key}": {
+      "get": {
+        "description": "Review one group without leaving it: the detail view behind the\n\"and N more\" links (ADR 0027).",
+        "operationId": "ui_cluster_detail_ui_clusters__key__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "title": "Key",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "theme",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Theme"
+            }
+          },
+          {
+            "in": "query",
+            "name": "error",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Error"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-fragment",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Fragment"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ui Cluster Detail"
       }
     },
     "/ui/clusters/{key}/confirm": {
@@ -5540,6 +6010,69 @@
           }
         },
         "summary": "Ui Episode Detail"
+      }
+    },
+    "/ui/experiments": {
+      "get": {
+        "description": "Every experiment record, indexed from its own metadata block.",
+        "operationId": "ui_experiments_ui_experiments_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "theme",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Theme"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-fragment",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Fragment"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ui Experiments"
       }
     },
     "/ui/failures": {

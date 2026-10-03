@@ -10,6 +10,7 @@ from data_engine.observability.metrics import (
     Timer,
     metric_point,
 )
+from data_engine.observability.telemetry import TelemetrySample
 
 
 @pytest.mark.unit
@@ -90,3 +91,76 @@ def test_runtime_metrics_emits_registry_names(tmp_path: Path) -> None:
         "episodes",
         "bytes",
     ]
+
+
+def _sample(**overrides: Any) -> TelemetrySample:
+    """A host sample with every field readable, then overridden per test."""
+    fields: dict[str, Any] = {
+        "timestamp": "2026-10-01T00:00:00+00:00",
+        "cpu_percent": 12.5,
+        "process_rss_bytes": 1_000,
+        "memory_used_bytes": 2_000,
+        "memory_available_bytes": 3_000,
+        "disk_used_bytes": 4_000,
+        "disk_free_bytes": 5_000,
+        "network_bytes_sent_total": 6_000,
+        "network_bytes_recv_total": 7_000,
+        "gpu_present": False,
+    }
+    fields.update(overrides)
+    return TelemetrySample(**fields)
+
+
+@pytest.mark.unit
+def test_host_gauges_are_emitted_and_unreadable_fields_are_skipped(tmp_path: Path) -> None:
+    """The `system_*` registry rows must exist as records, not just as documentation."""
+    metrics = RuntimeMetrics(JsonlMetricSink(tmp_path / "metrics.jsonl"))
+
+    metrics.emit_host_sample(
+        _sample(cpu_percent=None, network_bytes_recv_total=None),
+    )
+
+    points = [json.loads(line) for line in (tmp_path / "metrics.jsonl").read_text().splitlines()]
+    by_name = {point["name"]: point for point in points}
+    assert set(by_name) == {
+        "system_memory_used_bytes",
+        "process_rss_bytes",
+        "system_disk_free_bytes",
+        "system_network_bytes_sent_total",
+    }
+    assert by_name["process_rss_bytes"]["labels"] == {"process_role": "worker"}
+    assert by_name["system_disk_free_bytes"]["labels"] == {"volume": "."}
+    assert by_name["system_network_bytes_sent_total"]["labels"] == {"interface": "aggregate"}
+    # No GPU answered, so no zeroed GPU record: absent beats fabricated.
+    assert "system_gpu_utilization_percent" not in by_name
+
+
+@pytest.mark.unit
+def test_gpu_gauges_appear_only_when_a_device_answers(tmp_path: Path) -> None:
+    metrics = RuntimeMetrics(JsonlMetricSink(tmp_path / "metrics.jsonl"))
+
+    metrics.emit_host_sample(
+        _sample(gpu_present=True, gpu_utilization_percent=40.0, gpu_memory_used_bytes=8_000)
+    )
+
+    points = [json.loads(line) for line in (tmp_path / "metrics.jsonl").read_text().splitlines()]
+    gpu = {point["name"]: point for point in points if point["name"].startswith("system_gpu")}
+    assert gpu["system_gpu_utilization_percent"]["value"] == 40.0
+    assert gpu["system_gpu_memory_used_bytes"]["labels"] == {"device_index": "0"}
+
+
+@pytest.mark.unit
+def test_a_host_sample_that_cannot_be_taken_is_logged_and_dropped(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ADR 0008 again: the sampler runs in the worker loop, so it must not raise."""
+
+    def _broken(**_kwargs: Any) -> TelemetrySample:
+        raise RuntimeError("psutil exploded")
+
+    monkeypatch.setattr("data_engine.observability.metrics.sample_resources", _broken)
+    metrics = RuntimeMetrics(JsonlMetricSink(tmp_path / "metrics.jsonl"))
+
+    metrics.sample_host()
+
+    assert not (tmp_path / "metrics.jsonl").exists()

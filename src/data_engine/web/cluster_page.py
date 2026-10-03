@@ -1,33 +1,18 @@
-"""The Clusters page, composed.
-
-Kept out of `pages.py` because this is the only page that is a *review* surface rather
-than a read-only mirror: it has controls, it explains its own numbers, and it is the
-place a human decides that a group of task strings is real. That is a different shape of
-page from the other ten and putting it in the same 2100-line module would bury it.
-
-The figures come from `web/clusters.py`. This module decides what the reader is told, and
-in what order: health first (is this run worth looking at), then the two figures, then
-the proposals with their controls, then the run history. A reader who stops after the
-first section should still know whether to trust the rest.
-"""
+"""The Clusters page's review and proposal components (ADR 0027)."""
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from html import escape
 from typing import Any
 
 from data_engine.clustering import AXES, ProposalSet
 from data_engine.web.clusters import (
-    cluster_colour,
-    cluster_map,
-    empty_map,
+    class_size_view,
     health_table,
-    layout_note,
     member_rows,
     proposal_rows,
-    treemap,
 )
 
 
@@ -62,7 +47,7 @@ def rows_for(proposals: ProposalSet) -> list[Row]:
                 colour=summary.colour,
                 merged=summary.merged,
                 core=proposal.core,
-                members=tuple(member_rows(proposal)[:8]),
+                members=tuple(member_rows(proposal)),
                 verbs=tuple(proposal.verbs().most_common(4)),
                 colours=tuple(proposal.colours().most_common(4)),
             )
@@ -70,47 +55,34 @@ def rows_for(proposals: ProposalSet) -> list[Row]:
     return out
 
 
-# --------------------------------------------------------------------- health
-
-
 def interpretation(proposals: ProposalSet) -> str:
-    """One sentence saying whether to trust this run, derived from its own numbers.
-
-    Written rather than styled because the two failure modes pull in opposite
-    directions and a reader needs to know which one they are looking at: too few
-    clusters means merging, too many means fragmentation, and both look like a
-    successful page.
-    """
+    """Explain the run's measured shape without implying semantic correctness."""
     health = proposals.health()
     tasks = int(health["tasks"])
     clusters = int(health["clusters"])
     if not tasks:
         return "Nothing to propose over: the catalog has no task strings yet."
-    ratio = clusters / tasks if tasks else 0.0
+    ratio = clusters / tasks
     if tasks < 5:
         return (
             f"{clusters} cluster{'s' if clusters != 1 else ''} from {tasks} distinct task "
-            "string(s). Too few to judge: ingest a corpus before reading anything into "
-            "this run."
+            "string(s). Too few to judge: ingest a corpus before reading anything into this run."
         )
     if ratio > 0.75:
         verdict = (
             f"Fragmenting: {clusters} clusters for {tasks} distinct task strings. "
-            "Each string is nearly its own cluster, which is what the sentence-embedding "
-            "pipeline did at scale (EXP-2.5-08). Check the verb coverage below, then "
-            "consider ignoring an axis."
+            "Check verb coverage and extraction axes before confirming groups."
         )
     elif ratio < 0.35:
         verdict = (
-            f"Merging: {clusters} clusters for {tasks} distinct task strings. Groups are "
-            "larger than the variation in the corpus justifies; look for a proposal whose "
-            "cores are unrelated before confirming it."
+            f"Merging: {clusters} clusters for {tasks} distinct task strings. "
+            "Inspect merged cores before confirming a group."
         )
     else:
         verdict = (
             f"{clusters} clusters over {tasks} distinct task strings, with "
             f"{proposals.singletons} singletons and {proposals.merges} merged cores. "
-            "Confirm the ones that are real groups; leave the rest for the next rebuild."
+            "Confirm only groups that hold up against their example strings."
         )
     if float(health["verb_rate"]) < 0.8:
         verdict += (
@@ -121,12 +93,7 @@ def interpretation(proposals: ProposalSet) -> str:
 
 
 def has_run(model: dict[str, Any]) -> bool:
-    """Whether a clustering run has produced anything yet.
-
-    `ProposalSet` is always truthy - it is a dataclass with no `__len__` - so the page
-    has to look inside it. Getting this wrong renders a healthy-looking zero-filled
-    dashboard on a catalog that has never been clustered.
-    """
+    """A run exists when a proposal has been stored, not when its wrapper is truthy."""
     proposals = model.get("proposals")
     return bool(proposals is not None and proposals.proposals)
 
@@ -149,16 +116,8 @@ def health_section(proposals: ProposalSet) -> str:
     )
 
 
-# ------------------------------------------------------------------- controls
-
-
 def controls(proposals: ProposalSet, *, error: str = "") -> str:
-    """Recompute and confirm, as plain form posts.
-
-    No JavaScript: a control that only works with scripting on is a control that fails
-    silently in the one situation an operator needs it - a browser with a blocked script,
-    or a page that half-loaded.
-    """
+    """Recompute options remain a real, accessible no-JavaScript form."""
     ignored = set(proposals.ignored.names())
     boxes = "".join(
         f'<label class="de-check"><input type="checkbox" name="ignore" value="{escape(axis)}"'
@@ -175,15 +134,15 @@ def controls(proposals: ProposalSet, *, error: str = "") -> str:
         f"{' selected' if name == proposals.source else ''}>{escape(name)}</option>"
         for name in ("catalog", "sample")
     )
-    banner = f'<p class="de-error">{escape(error)}</p>' if error else ""
+    banner = f'<p class="de-error" role="alert">{escape(error)}</p>' if error else ""
     return (
         f"{banner}"
         '<form class="de-controls" method="post" action="/ui/clusters/rebuild">'
         f"{boxes}"
         '<label class="de-field"><span class="de-field-label">radius</span>'
-        f'<input name="radius" type="text" value="{escape(str(proposals.radius))}"'
-        ' size="6"></label>'
-        f'<label class="de-field"><span class="de-field-label">rule</span>'
+        f'<input name="radius" type="text" value="{escape(str(proposals.radius))}" '
+        'size="6"></label>'
+        '<label class="de-field"><span class="de-field-label">rule</span>'
         f'<select name="rule">{rules}</select></label>'
         '<label class="de-field"><span class="de-field-label">source</span>'
         f'<select name="source">{sources}</select></label>'
@@ -192,40 +151,91 @@ def controls(proposals: ProposalSet, *, error: str = "") -> str:
     )
 
 
-# -------------------------------------------------------------------- figures
-
-
 def figures_section(proposals: ProposalSet) -> str:
-    if not proposals.proposals:
-        return empty_map(message="no proposals yet // rebuild to group the catalog's tasks")
-    return (
-        f"<p>{treemap(proposals.proposals)}</p>"
-        f"{colour_legend(proposals)}"
-        f"<p>{cluster_map(proposals)}</p>"
-        f'<p class="de-dim">{escape(layout_note())}</p>'
+    return class_size_view(proposals.proposals)
+
+
+def review_section(
+    candidates: Sequence[dict[str, Any]],
+    decisions: Sequence[dict[str, Any]],
+    *,
+    error: str = "",
+) -> str:
+    """A bounded human queue; the signal is stated as evidence, never probability."""
+    if candidates:
+        rows = "".join(
+            "<tr>"
+            f'<td><input type="checkbox" name="task" value="{escape(str(item["task"]))}" '
+            f'aria-label="review {escape(str(item["task"]))}"></td>'
+            f"<td>{escape(str(item['task']))}</td>"
+            f"<td>{escape(str(item['reason']))}</td>"
+            f'<td class="num">{int(item["episodes"])}</td>'
+            f'<td class="num">{float(item["distance"]):.3f} / {float(item["radius"]):.3f}</td>'
+            f"<td>{escape(str(item['proposal_core']))}</td>"
+            "</tr>"
+            for item in candidates[:100]
+        )
+        queue = (
+            (f'<p class="de-error" role="alert">{escape(error)}</p>' if error else "")
+            + '<form method="post" action="/ui/clusters/review" class="de-review-form">'
+            + '<fieldset class="de-review-selection">'
+            + '<legend class="de-sr">Select task strings to review</legend>'
+            + '<div class="de-table-wrap" tabindex="0" role="region" '
+            + 'aria-label="uncertain task strings">'
+            + '<table class="de-table">'
+            + '<caption class="de-sr">Task strings for human review</caption>'
+            + "<thead><tr><th>select</th><th>task string</th><th>signal</th>"
+            + '<th class="num">episodes</th><th class="num">distance / radius</th>'
+            + "<th>current core</th></tr></thead>"
+            + f"<tbody>{rows}</tbody></table></div></fieldset>"
+            + '<label class="de-field"><span class="de-field-label">human class name</span>'
+            + '<input type="text" name="label" maxlength="120" autocomplete="off"></label>'
+            + '<div class="de-review-actions">'
+            + '<button class="de-button" type="submit" name="disposition" value="class">'
+            + "create human class</button>"
+            + '<button class="de-button de-button-quiet" type="submit" '
+            + 'name="disposition" value="dismissed">'
+            + "not a useful class</button></div>"
+            + '<p class="de-dim">Select up to 25 strings. A human class is an annotation; '
+            + "it does not rewrite episode metadata or automatic proposals. "
+            + "Distance is a review heuristic, not confidence.</p>"
+            + "</form>"
+        )
+    else:
+        queue = (
+            (f'<p class="de-error" role="alert">{escape(error)}</p>' if error else "")
+            + '<p class="de-empty">// no unresolved singleton or near-boundary strings '
+            + "in this run</p>"
+        )
+    if not decisions:
+        return queue
+    history_rows = "".join(
+        "<tr>"
+        f"<td>{escape(str(item['task']))}</td>"
+        f"<td>{escape(str(item['disposition']))}</td>"
+        f"<td>{escape(str(item['label']) or '—')}</td>"
+        '<td><form method="post" action="/ui/clusters/review/undo">'
+        f'<input type="hidden" name="task" value="{escape(str(item["task"]))}">'
+        '<button class="de-button de-button-quiet" type="submit">reopen</button></form></td>'
+        "</tr>"
+        for item in decisions[:30]
     )
-
-
-# ------------------------------------------------------------------- proposals
-
-
-def _swatches(row: Row) -> str:
-    return (
-        f'<span class="de-dot" style="background:{escape(row.colour)}" '
-        f'aria-hidden="true"></span><code>{escape(row.key[:10])}</code>'
+    history = (
+        '<details class="de-review-history"><summary>Recent human decisions</summary>'
+        '<div class="de-table-wrap" tabindex="0" role="region" '
+        'aria-label="recent human review decisions">'
+        '<table class="de-table"><caption class="de-sr">Recent human review decisions</caption>'
+        "<thead><tr><th>task string</th><th>decision</th><th>class</th><th>action</th></tr></thead>"
+        f"<tbody>{history_rows}</tbody></table></div></details>"
     )
+    return '<div class="de-review">' + queue + history + "</div>"
 
 
 MEMBERS_SHOWN = 4
 
 
-def proposal_table(proposals: ProposalSet) -> str:
-    """One row per cluster: big enough to confirm from, and no taller than its neighbours.
-
-    A cluster of eight merged cores used to list all eight task strings, which made one
-    row taller than the rest of the table. Four plus a count and a link to the full member
-    list says the same thing and keeps the rows comparable at a glance.
-    """
+def proposal_table(proposals: ProposalSet, *, read_only: bool = False) -> str:
+    """Show compact examples and exact counts; preview data cannot be mutated."""
     rows: list[str] = []
     for row in rows_for(proposals):
         shown = row.members[:MEMBERS_SHOWN]
@@ -235,7 +245,7 @@ def proposal_table(proposals: ProposalSet) -> str:
         )
         if len(row.members) > len(shown):
             hidden = len(row.members) - len(shown)
-            tasks += f'<br><a href="/api/v1/clusters/{escape(row.key)}">and {hidden} more</a>'
+            tasks += f'<br><a href="/ui/clusters/{escape(row.key)}">and {hidden} more</a>'
         flags = []
         if row.frozen:
             flags.append('<span class="de-tag">confirmed</span>')
@@ -243,19 +253,24 @@ def proposal_table(proposals: ProposalSet) -> str:
             flags.append(f'<span class="de-tag de-tag-warn">{row.merged} cores merged</span>')
         if row.tasks == 1:
             flags.append('<span class="de-tag de-tag-warn">single task</span>')
-        control = (
-            f'<form method="post" action="/ui/clusters/{escape(row.key)}/confirm">'
-            f'<input type="text" name="label" value="{escape(row.name)}" size="30" '
-            f'aria-label="label for cluster {escape(row.key[:10])}">'
-            f'<button type="submit" class="de-button">'
-            f"{'rename' if row.frozen else 'confirm'}</button></form>"
-            if not row.frozen
-            else f'<form method="post" action="/ui/clusters/{escape(row.key)}/release">'
-            f'<button type="submit" class="de-button">release</button></form>'
-        )
+        if read_only:
+            control = '<span class="de-dim">preview only</span>'
+        elif row.frozen:
+            control = (
+                f'<form method="post" action="/ui/clusters/{escape(row.key)}/release">'
+                '<button type="submit" class="de-button">release</button></form>'
+            )
+        else:
+            control = (
+                f'<form method="post" action="/ui/clusters/{escape(row.key)}/confirm">'
+                f'<input type="text" name="label" value="{escape(row.name)}" size="30" '
+                f'aria-label="label for cluster {escape(row.key[:10])}">'
+                '<button type="submit" class="de-button">confirm</button></form>'
+            )
         rows.append(
             "<tr>"
-            f"<td>{_swatches(row)}</td>"
+            f'<td><span class="de-dot" style="background:{escape(row.colour)}"></span> '
+            f"<code>{escape(row.key[:10])}</code></td>"
             f"<td>{escape(row.name)}</td>"
             f'<td class="num">{row.episodes}</td>'
             f'<td class="num">{row.tasks}</td>'
@@ -266,7 +281,9 @@ def proposal_table(proposals: ProposalSet) -> str:
         )
     return (
         '<div class="de-table-wrap" tabindex="0" role="region" aria-label="cluster proposals">'
-        '<table class="de-table"><thead><tr>'
+        '<table class="de-table">'
+        '<caption class="de-sr">Automatic cluster proposals for human confirmation</caption>'
+        "<thead><tr>"
         '<th>key</th><th>cluster</th><th class="num">episodes</th>'
         '<th class="num">tasks</th><th>flags</th><th>task strings</th><th>confirm</th>'
         f"</tr></thead><tbody>{''.join(rows)}</tbody></table></div>"
@@ -274,9 +291,6 @@ def proposal_table(proposals: ProposalSet) -> str:
         f"confirmation is keyed by the cluster's content hash, so it survives a rebuild. "
         f"Members are the task strings behind the core, biggest episode count first.</p>"
     )
-
-
-# ---------------------------------------------------------------------- history
 
 
 def history_section(runs: Sequence[dict[str, Any]]) -> str:
@@ -296,9 +310,10 @@ def history_section(runs: Sequence[dict[str, Any]]) -> str:
     )
     return (
         '<div class="de-table-wrap" tabindex="0" role="region" aria-label="clustering runs">'
-        '<table class="de-table"><thead><tr><th class="num">run</th><th>source</th>'
-        '<th>ignored</th><th class="num">radius</th><th>rule</th>'
-        '<th class="num">clusters</th><th>when</th></tr></thead>'
+        '<table class="de-table">'
+        '<caption class="de-sr">Clustering runs, newest first</caption><thead><tr>'
+        '<th class="num">run</th><th>source</th><th>ignored</th><th class="num">radius</th>'
+        '<th>rule</th><th class="num">clusters</th><th>when</th></tr></thead>'
         f"<tbody>{rows}</tbody></table></div>"
     )
 
@@ -309,28 +324,105 @@ def sample_note() -> str:
     return f'<p class="de-warn">{escape(sample_data.SAMPLE_NOTE)}</p>'
 
 
-LEGEND_SHOWN = 16
+# ------------------------------------------------------------------ detail view
 
 
-def colour_legend(proposals: ProposalSet) -> str:
-    """The colour key, next to the treemap that uses it.
-
-    Colour is a hash of the cluster key, so a cluster keeps its colour across rebuilds and
-    the swatch in the proposals table means the same thing in both figures. Without the key
-    the colours look like decoration and the two figures look unrelated.
-    """
-    ordered = proposals.ordered()
-    items = "".join(
-        f'<span class="de-chip" title="{escape(proposal.label or proposal.core)}">'
-        f'<span class="de-dot" style="background:{escape(cluster_colour(proposal.key))}"></span>'
-        f"{escape((proposal.label or proposal.core)[:28])}</span>"
-        for proposal in ordered[:LEGEND_SHOWN]
+def detail_tiles(proposal: Mapping[str, Any]) -> str:
+    """Identity, volume, and freeze state for one proposal, in the health style."""
+    label = str(proposal.get("label", ""))
+    merged = [str(core) for core in (proposal.get("merged_cores") or [])]
+    cells = [
+        ("key", str(proposal.get("key", ""))[:12]),
+        ("core", str(proposal.get("core", ""))),
+        ("status", f"confirmed: {label}" if label else "proposal"),
+        ("episodes", int(proposal.get("episodes", 0))),
+        ("task strings", int(proposal.get("task_count", 0))),
+        ("merged cores", len(merged)),
+    ]
+    tiles = "".join(
+        f'<div class="de-stat"><span class="de-stat-value">{escape(str(value))}</span>'
+        f'<span class="de-stat-label">{escape(name)}</span></div>'
+        for name, value in cells
     )
-    if not items:
-        return ""
-    rest = len(ordered) - LEGEND_SHOWN
-    tail = f'<span class="de-dim">and {rest} more in the table</span>' if rest > 0 else ""
+    return f'<div class="de-stat-row">{tiles}</div>'
+
+
+def detail_members(members: Sequence[Mapping[str, Any]]) -> str:
+    """Every task string behind the proposal, with its extraction facts."""
+    if not members:
+        return '<p class="de-empty">// no task strings recorded for this proposal</p>'
+    rows = "".join(
+        "<tr>"
+        f"<td>{escape(str(member['task']))}</td>"
+        f"<td>{escape(str(member['core']))}</td>"
+        f"<td>{escape(str(member.get('verb') or '') or chr(8212))}</td>"
+        f"<td>{escape(', '.join(str(c) for c in (member.get('colours') or [])) or chr(8212))}</td>"
+        f'<td class="num">{int(member["episodes"])}</td>'
+        "</tr>"
+        for member in members
+    )
     return (
-        '<p class="de-dim">colour follows the cluster key, so it is stable across '
-        f'rebuilds:</p><p class="de-chips">{items}{tail}</p>'
+        '<div class="de-table-wrap" tabindex="0" role="region" aria-label="cluster members">'
+        '<table class="de-table">'
+        '<caption class="de-sr">Task strings grouped under this proposal</caption>'
+        "<thead><tr><th>task string</th><th>object core</th><th>verb</th>"
+        '<th>colours</th><th class="num">episodes</th></tr></thead>'
+        f"<tbody>{rows}</tbody></table></div>"
+        f'<p class="de-dim">{len(members)} task strings. Cores and verbs are what the '
+        "lexicon extracted, not ground truth; episode counts are exact.</p>"
+    )
+
+
+def detail_control(proposal: Mapping[str, Any], *, read_only: bool = False, error: str = "") -> str:
+    """Confirm or release this proposal without leaving the page."""
+    key = str(proposal.get("key", ""))
+    label = str(proposal.get("label", ""))
+    banner = f'<p class="de-error" role="alert">{escape(error)}</p>' if error else ""
+    if read_only:
+        return banner + '<span class="de-dim">preview only</span>'
+    if label:
+        control = (
+            f'<form method="post" action="/ui/clusters/{escape(key)}/release">'
+            '<button type="submit" class="de-button">release confirmation</button></form>'
+        )
+    else:
+        control = (
+            f'<form method="post" action="/ui/clusters/{escape(key)}/confirm" '
+            'class="de-review-form">'
+            '<label class="de-field"><span class="de-field-label">human class name</span>'
+            f'<input type="text" name="label" value="{escape(str(proposal.get("core", "")))}" '
+            f'size="30" aria-label="label for cluster {escape(key[:10])}"></label>'
+            '<button type="submit" class="de-button">confirm</button></form>'
+        )
+    return banner + control
+
+
+def detail_body(
+    proposal: Mapping[str, Any],
+    members: Sequence[Mapping[str, Any]],
+    *,
+    read_only: bool = False,
+    error: str = "",
+) -> str:
+    """One proposal with everything a reviewer needs on one page (ADR 0027)."""
+    merged = [str(core) for core in (proposal.get("merged_cores") or [])]
+    merged_note = (
+        f'<p class="de-dim">merged cores: {escape(", ".join(merged))}</p>' if merged else ""
+    )
+    total = int(proposal.get("task_count", len(members)))
+    cap_note = (
+        f'<p class="de-dim">showing the first {len(members)} of {total} task strings; '
+        "the API serves the rest.</p>"
+        if len(members) < total
+        else ""
+    )
+    return (
+        '<p><a href="/ui/clusters">&larr; all clusters</a></p>'
+        + detail_tiles(proposal)
+        + merged_note
+        + '<div class="de-review">'
+        + detail_members(members)
+        + cap_note
+        + detail_control(proposal, read_only=read_only, error=error)
+        + "</div>"
     )

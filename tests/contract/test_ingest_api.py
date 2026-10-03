@@ -1,17 +1,26 @@
 from typing import Any
 
+import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
 from data_engine.api.app import create_app
-from data_engine.catalog.repository import InvalidTransition
+from data_engine.catalog.repository import IdempotencyConflict, InvalidTransition
 from data_engine.config import Settings
 
 
 class FakeCatalog:
+    """In-memory stand-in with the repository's idempotency semantics.
+
+    Key reuse replays only an *identical* request; a different request under the
+    same key is a conflict (F4). The identity mirror is kept beside the job map
+    rather than inside the job row, because the row is also the response body.
+    """
+
     def __init__(self) -> None:
         self.jobs_by_key: dict[str, dict[str, Any]] = {}
         self.jobs_by_id: dict[str, dict[str, Any]] = {}
+        self.identities: dict[str, tuple[Any, ...]] = {}
         self.submissions: list[dict[str, Any]] = []
         self.last_payload: dict[str, Any] = {}
 
@@ -29,7 +38,10 @@ class FakeCatalog:
             {"max_attempts": max_attempts, "deadline_seconds": deadline_seconds}
         )
         self.last_payload = payload
+        identity = (job_type, payload, max_attempts, deadline_seconds)
         if key and key in self.jobs_by_key:
+            if self.identities.get(key) != identity:
+                raise IdempotencyConflict(key)
             return self.jobs_by_key[key], False
         job = {
             "id": f"job-{len(self.jobs_by_id) + 1}",
@@ -49,6 +61,7 @@ class FakeCatalog:
         self.jobs_by_id[job["id"]] = job
         if key:
             self.jobs_by_key[key] = job
+            self.identities[key] = identity
         return job, True
 
     def request_cancel(self, job_id: str) -> dict[str, Any]:
@@ -116,6 +129,64 @@ def test_job_submission_uses_public_contract_and_correlation_header() -> None:
     assert response.headers["x-correlation-id"] == "corr-1"
     assert response.headers["x-idempotent-replay"] == "false"
     assert response.json()["state"] == "queued"
+
+
+@pytest.mark.contract
+def test_replaying_an_identical_submission_reuses_the_job_and_says_so() -> None:
+    """F4 at the HTTP edge: the second POST must not queue a second job."""
+    client = _client()
+    headers = {"Idempotency-Key": "key-replay"}
+
+    first = client.post("/api/v1/jobs", json=_payload(), headers=headers)
+    second = client.post("/api/v1/jobs", json=_payload(), headers=headers)
+
+    assert first.status_code == 202, first.text
+    assert second.status_code == 202, second.text
+    assert first.headers["x-idempotent-replay"] == "false"
+    assert second.headers["x-idempotent-replay"] == "true"
+    assert second.json()["id"] == first.json()["id"]
+
+
+@pytest.mark.contract
+def test_reusing_an_idempotency_key_for_a_different_request_conflicts() -> None:
+    """F4: a key identifies one request, so a second one must 409, not replay."""
+    client = _client()
+    headers = {"Idempotency-Key": "key-conflict"}
+    assert client.post("/api/v1/jobs", json=_payload(), headers=headers).status_code == 202
+
+    other = _payload()
+    other["payload"]["episode"]["task"] = "a_different_task"
+    response = client.post("/api/v1/jobs", json=other, headers=headers)
+
+    assert response.status_code == 409, response.text
+    body = response.json()
+    assert body["code"] == "IDEMPOTENCY_KEY_CONFLICT"
+    assert body["correlation_id"]
+
+
+class DatabaseDownCatalog(FakeCatalog):
+    """The catalog as it answers while Postgres is unreachable (F10)."""
+
+    def submit_job(self, *_args: Any, **_kwargs: Any) -> tuple[dict[str, Any], bool]:
+        raise psycopg.OperationalError("connection refused: server closed the connection")
+
+
+@pytest.mark.contract
+def test_a_database_outage_is_a_retryable_503_not_a_500() -> None:
+    """A database that is down is a condition to retry, not an internal bug."""
+    app = create_app(Settings(_env_file=None), initialize_database=False)
+    app.state.catalog = DatabaseDownCatalog()
+    client = TestClient(app)
+
+    response = client.post("/api/v1/jobs", json=_payload())
+
+    assert response.status_code == 503, response.text
+    assert response.headers["retry-after"] == "5"
+    assert response.headers["x-correlation-id"]
+    body = response.json()
+    assert body["code"] == "SERVICE_UNAVAILABLE"
+    assert body["status"] == 503
+    assert body["correlation_id"] == response.headers["x-correlation-id"]
 
 
 @pytest.mark.contract

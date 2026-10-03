@@ -24,8 +24,9 @@ import pytest
 
 from data_engine.builds import DatasetBuilder
 from data_engine.catalog.repository import IdempotencyConflict
-from data_engine.jobs.worker import _is_terminal
-from data_engine.validation.profile import profile_from_dict, profile_hash
+from data_engine.jobs.worker import _failure_reason_code, _is_terminal
+from data_engine.observability.reason_codes import ReasonCode
+from data_engine.validation.profile import InvalidProfile, profile_from_dict, profile_hash
 
 pytestmark = [pytest.mark.unit]
 
@@ -165,6 +166,22 @@ def test_a_conflicting_profile_is_a_terminal_failure() -> None:
     trip the notifier's repeated-failure rule on the operator's own bad input.
     """
     assert _is_terminal(IdempotencyConflict("so101-staged@1")) is True
+
+
+def test_a_malformed_profile_is_a_terminal_failure_with_its_own_reason_code() -> None:
+    """F3: the profile document rides in the payload, so retrying cannot fix it.
+
+    It used to raise `InvalidProfile` through the generic path: three identical
+    attempts, three `INTERNAL_ERROR` failures counted, and the operator told
+    "internal bug" for their own malformed profile. The documented reason code
+    (`VALIDATION_PROFILE_INVALID`, ADR 0016) was never emitted by a job.
+    """
+    with pytest.raises(InvalidProfile):
+        profile_from_dict({"name": "staged", "version": "1", "min_frames": 10, "max_frames": 5})
+
+    exc = InvalidProfile("min_frames (10) is greater than max_frames (5)")
+    assert _is_terminal(exc) is True
+    assert _failure_reason_code(exc) == ReasonCode.VALIDATION_PROFILE_INVALID
 
 
 # ------------------------------------------------------------------ reverse path

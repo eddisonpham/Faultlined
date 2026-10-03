@@ -4,6 +4,8 @@ The state machine in `jobs/state.py` is only worth anything if the SQL that driv
 holds, so these exercise the repository directly rather than a fake connection.
 """
 
+import errno
+import json
 import uuid
 from datetime import timedelta
 from pathlib import Path
@@ -20,6 +22,8 @@ from data_engine.catalog.repository import (
 from data_engine.config import Settings
 from data_engine.jobs.state import JobState
 from data_engine.jobs.worker import IngestWorker
+from data_engine.observability.metrics import JsonlMetricSink, RuntimeMetrics
+from data_engine.storage.artifacts import FileArtifactStore
 from tests.conftest import postgres_test_dsn
 
 pytestmark = [pytest.mark.integration]
@@ -314,3 +318,58 @@ def test_worker_times_out_a_job_whose_deadline_passed_before_it_ran(tmp_path: Pa
     timed_out = catalog.get_job(job["id"])
     assert timed_out["state"] == JobState.TIMED_OUT.value
     assert timed_out["attempts"] == 1
+
+
+@pytest.mark.integration
+def test_an_artifact_write_failure_fails_the_job_and_registers_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """F9: a store that cannot write leaves a failed job, not a dangling row.
+
+    ENOSPC is injected at the artifact store, the last thing that can succeed
+    before the catalog write: `register_episode` runs only once the bytes exist, so
+    a failed write must leave artifacts, episodes and lineage exactly as they were.
+    One attempt is enough because a full disk fails the same way three times, and
+    the reason code the kernel gave us is the one the operator is shown.
+    """
+    settings = _settings(tmp_path)
+    catalog = PostgresCatalog(settings)
+    job, _ = catalog.submit_job(
+        "ingest",
+        {
+            "episode": {
+                "task": "pick_place",
+                "robot": "test_arm",
+                "timestamps": [0.0, 0.1],
+                "observations": [[0.0], [1.0]],
+                "actions": [[0.1], [0.2]],
+            }
+        },
+        f"diskfull-{uuid.uuid4()}",
+        "test-correlation",
+        max_attempts=1,
+    )
+    # Sort ahead of the shared queue so the first claim is this job.
+    with connect(settings) as connection:
+        connection.execute(
+            "UPDATE jobs SET created_at = now() - interval '1 day' WHERE id = %s",
+            (job["id"],),
+        )
+        connection.commit()
+
+    def _full_disk(_self: FileArtifactStore, _data: bytes) -> str:
+        raise OSError(errno.ENOSPC, "No space left on device")
+
+    monkeypatch.setattr(FileArtifactStore, "put_bytes", _full_disk)
+    metrics_path = tmp_path / "metrics" / "runtime.jsonl"
+    worker = IngestWorker(settings, metrics=RuntimeMetrics(JsonlMetricSink(metrics_path)))
+
+    _drain(worker, catalog, job["id"])
+
+    final = catalog.get_job(job["id"])
+    assert final["state"] == JobState.FAILED.value
+    assert final["error"]["type"] == "OSError"
+    assert catalog.episodes_produced_by(str(job["id"])) == []
+    points = [json.loads(line) for line in metrics_path.read_text(encoding="utf-8").splitlines()]
+    failures = [point for point in points if point["name"] == "jobs_failures_total"]
+    assert failures[0]["labels"]["reason_code"] == "IO_DISK_FULL"

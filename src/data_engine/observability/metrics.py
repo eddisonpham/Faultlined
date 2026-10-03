@@ -10,6 +10,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from data_engine.observability.telemetry import TelemetrySample, sample_resources
+
 
 @dataclass(frozen=True, slots=True)
 class MetricPoint:
@@ -154,6 +156,75 @@ class RuntimeMetrics:
     def worker_heartbeat(self, *, worker_state: str) -> None:
         """Liveness ping; the record's timestamp is the heartbeat, its value is 0."""
         self._emit("workers_heartbeat_age_seconds", 0, "seconds", {"worker_state": worker_state})
+
+    # ---- host gauges (the `system_*` registry rows) ----
+
+    def sample_host(self, *, process_role: str = "worker") -> None:
+        """Take one host sample and record the registry's `system_*` gauges.
+
+        This is what makes those registry rows real rather than aspirational: they
+        were documented, sampled once per benchmark run into provenance, and never
+        emitted on the runtime interval an operator actually watches.
+
+        A sampling error is logged and dropped (ADR 0008) because this runs inside
+        the worker loop: telemetry must not be able to stop the worker.
+        """
+        try:
+            sample = sample_resources()
+        except Exception:
+            logger.warning("host sample failed", extra={"event": "host_sample_failed"})
+            return
+        self.emit_host_sample(sample, process_role=process_role)
+
+    def emit_host_sample(self, sample: TelemetrySample, *, process_role: str = "worker") -> None:
+        """Record one already-taken host sample.
+
+        A field the host could not report is skipped rather than emitted as zero.
+        `sample_resources` represents "could not read it" as `null`, and a fabricated
+        0 would read as a measured value on the metrics page - the same reason a
+        missing GPU produces no `system_gpu_*` record at all rather than a zeroed one.
+        """
+        gauges: tuple[tuple[str, float | int | None, str, dict[str, str] | None], ...] = (
+            ("system_cpu_percent", sample.cpu_percent, "percent", None),
+            ("system_memory_used_bytes", sample.memory_used_bytes, "bytes", None),
+            (
+                "process_rss_bytes",
+                sample.process_rss_bytes,
+                "bytes",
+                {"process_role": process_role},
+            ),
+            # The sample is taken on the process's working directory, so `volume` is
+            # the one directory this deployment writes artifacts under.
+            ("system_disk_free_bytes", sample.disk_free_bytes, "bytes", {"volume": "."}),
+            (
+                "system_network_bytes_sent_total",
+                sample.network_bytes_sent_total,
+                "bytes",
+                {"interface": "aggregate"},
+            ),
+            (
+                "system_network_bytes_recv_total",
+                sample.network_bytes_recv_total,
+                "bytes",
+                {"interface": "aggregate"},
+            ),
+            (
+                "system_gpu_utilization_percent",
+                sample.gpu_utilization_percent,
+                "percent",
+                {"device_index": "0"},
+            ),
+            (
+                "system_gpu_memory_used_bytes",
+                sample.gpu_memory_used_bytes,
+                "bytes",
+                {"device_index": "0"},
+            ),
+        )
+        for name, value, unit, labels in gauges:
+            if value is None:
+                continue
+            self._emit(name, float(value), unit, labels)
 
     # ---- monitor self-observability (ADR 0020) ----
     #

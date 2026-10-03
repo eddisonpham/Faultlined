@@ -7,10 +7,13 @@ kept ADR 0014's mechanism and changed what the UI is *for*. Style mandate (spec 
 technically credible — a purpose-built engineering tool, not a generic dashboard.
 
 **Implemented so far:** Status/Overview, Jobs (list + detail), Artifacts, Episodes (list +
-detail), Insights, Metrics, Failures, Slices, and Incidents, at `/ui`, `/ui/jobs`, `/ui/jobs/{id}`,
+detail), Insights, Metrics, Failures, Slices, Incidents, Clusters, Schema, Builds (list + detail
+with the lineage graph), Benchmarks, and Experiments, at `/ui`, `/ui/jobs`, `/ui/jobs/{id}`,
 `/ui/artifacts`, `/ui/episodes`, `/ui/episodes/{id}`, `/ui/insights`, `/ui/metrics`, `/ui/failures`,
-`/ui/slices`, and `/ui/incidents`. Polling re-requests the same page with `X-Fragment: 1` and swaps the
-returned HTML, so Python stays the only renderer. Datasets & Builds, Runs, and Benchmarks remain stage-3 work.
+`/ui/slices`, `/ui/incidents`, `/ui/clusters`, `/ui/schema`, `/ui/builds`, `/ui/builds/{hash}`,
+`/ui/benchmarks`, and `/ui/experiments`. Polling re-requests the same page with `X-Fragment: 1` and
+swaps the returned HTML, so Python stays the only renderer. Runs (workload run records) remains
+stage-4 work.
 
 ## Scope
 
@@ -30,9 +33,10 @@ needs only the **Jobs / Artifacts / Status** slice; the rest lands by Production
 | **Failures** | Validation failures grouped by reason code; job failures; revalidate/cancel actions | **Implemented** (read view; revalidate/cancel actions still Baseline) | data |
 | **Slices** | Named curation filters, member counts, links to each slice's curated manifest | **Implemented** | data |
 | **Incidents** | The notifier's queue: severity badges, occurrence counters, per-incident evidence line, ack/resolve, a monitor-health strip, and a rendered notify preview | **Implemented** (ADR 0020) | platform, data |
-| **Datasets & Builds** | Builds list; build detail: manifest view, **lineage graph** (backwards to episodes, forwards to runs) | Baseline | ML, eval |
-| **Runs** | Workload run records: provenance fields, metrics | Baseline | eval |
-| **Benchmarks** | Result tables + charts (p50/p95/p99, throughput), baseline diffs, regression flags | Baseline | platform |
+| **Datasets & Builds** | Builds list; build detail: manifest view, **lineage graph** (backwards to episodes, forwards to runs) | **Implemented** (`/ui/builds`) | ML, eval |
+| **Benchmarks** | Committed baselines (P50, throughput, trials, commit, input hash) and the runs recorded on this machine, newest first, with any workload that has no committed baseline named | **Implemented** (`/ui/benchmarks`) | platform |
+| **Experiments** | Every `agents/experiments/` record: id, title, status, date, author, and the record's own Result prose | **Implemented** (`/ui/experiments`) | platform, all |
+| **Runs** | Workload run records: provenance fields, metrics | Stage 4 | eval |
 
 ## API boundary rules
 

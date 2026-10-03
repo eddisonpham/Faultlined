@@ -27,7 +27,7 @@ from dataclasses import dataclass, field, replace
 
 from data_engine.clustering.extract import Coverage, coverage, extract
 from data_engine.clustering.lexicon import Ignored, Lexicon
-from data_engine.clustering.online import OnlineCentroids
+from data_engine.clustering.online import OnlineCentroids, cosine, token_vector
 
 
 def proposal_key(core: str) -> str:
@@ -44,6 +44,8 @@ class Member:
     episodes: int
     verb: str = ""
     colours: tuple[str, ...] = ()
+    #: Cosine distance from the final proposal centroid; a review heuristic, not probability.
+    distance: float = 0.0
 
     @property
     def weight(self) -> int:
@@ -208,6 +210,10 @@ def build(
         model.observe(item.core)
 
     clusters = model.by_core()
+    final_distances = {
+        core: 1.0 - cosine(model.centroid_of(index), token_vector(core))
+        for core, index in clusters.items()
+    }
     buckets: dict[int, _Bucket] = {}
     for core, index in clusters.items():
         bucket = buckets.setdefault(index, _Bucket())
@@ -225,6 +231,7 @@ def build(
                 episodes=int(tasks[task]),
                 verb=item.verb,
                 colours=item.colours,
+                distance=final_distances[item.core],
             )
         )
 

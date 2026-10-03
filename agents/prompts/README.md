@@ -16,6 +16,7 @@ Invoke with `/phase NN` or paste the file. Every prompt ends with a commit; chec
 | 11 | [engineering review](11-engineering-review.md) | reusable at every stage gate |
 | 12 | [frontend research + design](12-frontend-design.md) | before building the UI |
 | 13 | [resume readiness](13-resume-readiness.md) | final stage |
+| 14 | [production baseline and user-workflow stress](14-production-baseline.md) | stage-3 evidence before any production claim |
 
 Tips
 - If an agent asks a question a doc should have answered, fix the doc, not just the answer.

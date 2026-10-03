@@ -32,3 +32,7 @@ supersede it with a new ADR and update the affected docs.
 | [0022](0022-mcap-ingest-reader.md) | MCAP ingest: one file is one episode, and the file's own words are the only metadata | accepted |
 | [0023](0023-quality-metrics-honesty.md) | Quality metrics: refuse what cannot be measured, judge by majority, and score time | accepted |
 | [0024](0024-observability-visual-surface.md) | The visual layer is server-rendered SVG over data the product already collects | accepted |
+| [0025](0025-lerobot-v3-export-of-builds.md) | LeRobot v3 export of content-addressed builds | accepted |
+| [0026](0026-cluster-proposals.md) | Cluster task strings into proposals a human confirms | accepted |
+| [0027](0027-cluster-review-and-ui-information-architecture.md) | Triage uncertain task strings and organize the operator surface around work | accepted |
+| [0028](0028-versioned-catalog-migrations.md) | Versioned forward-only catalog migrations behind `de migrate` | accepted |

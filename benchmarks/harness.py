@@ -26,6 +26,7 @@ from benchmarks.statistics import summarize
 from data_engine.analysis.quality import analyze
 from data_engine.ingest.readers.base import ChannelStats, EpisodeExtraction
 from data_engine.ingest.service import EpisodeIngestService, SyntheticEpisodeIngestService
+from data_engine.jobs.state import JobState
 from data_engine.observability.aggregate import (
     series as metric_series,
 )
@@ -475,6 +476,9 @@ class _BenchApiCatalog:
 
     def count_jobs(self, _state: Any) -> int:
         return 3
+
+    def count_jobs_by_state(self) -> dict[str, int]:
+        return {state.value: 3 for state in JobState}
 
     def quality_summary(self) -> dict[str, Any]:
         return _summary_model()

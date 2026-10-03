@@ -4,19 +4,20 @@ Project knowledge that outlives a session. If it is not here, it is not known.
 
 | Directory | Holds | State |
 |---|---|---|
-| [spec/](spec/) | Problem, requirements, environment, original specs, definition of done | Current; MVP stage closed |
+| [spec/](spec/) | Problem, requirements, environment, original specs, definition of done | Current; stages 1-3 closed, stage 4 next |
 | [research/](research/) | Source log, industry patterns, technology matrix | Written in phases 01-02 |
 | [architecture/](architecture/) | Overview, components, data flow, API, storage, repo layout, decision matrix | Written; matches the shipped code |
 | [implementation/](implementation/) | Coding standards, implementation status, slice plans | Current |
 | [testing/](testing/) | Testing standards, failure-mode catalog | Catalog complete, no row left `planned` |
 | [benchmarking/](benchmarking/) | Methodology, metric schema, backlog | One baseline committed, more need owner approval |
-| [observability/](observability/) | Logging, metrics, tracing conventions | JSON logs, correlation ids, runtime metrics |
-| [experiments/](experiments/) | Experiment records and the registry | EXP-0001 to EXP-0007 |
+| [observability/](observability/) | Logging, metrics, tracing conventions | JSON logs, correlation ids, every registered metric emitted, documented queries |
+| [experiments/](experiments/) | Experiment records and the registry | EXP-0001 to EXP-0008 |
 | [reviews/](reviews/) | Engineering reviews and assessments | Three reviews, findings closed |
-| [decisions/](decisions/) | Architecture decision records | ADR 0001 to ADR 0025 |
+| [decisions/](decisions/) | Architecture decision records | ADR 0001 to ADR 0027 |
 | [roles/](roles/) | Agent role definitions | Seeded |
 | [prompts/](prompts/) | Phase prompts, run in order | Phases 01-03 used, 04-07 remaining |
 | [HANDOFF.md](HANDOFF.md) | Current state, risks, next steps | Read this first |
+| [../docs/runbooks/](../docs/runbooks/) | Operational runbooks (backup/restore, worker ops) | Written for the production-like local tier; restore drill not yet run |
 
 ## Conventions
 

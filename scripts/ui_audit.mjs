@@ -47,6 +47,9 @@ const PAGES = [
   "/ui/artifacts",
   "/ui/schema",
   "/ui/builds",
+  "/ui/benchmarks",
+  "/ui/experiments",
+  "/ui/clusters/preview",
 ];
 
 /*
@@ -167,10 +170,12 @@ const AUDIT = `(() => {
     }
   }
 
-  // Animations running without being asked for.
+  // Only CSS motion declared by this app is subject to its allowlist. The
+  // browser can also report an inline SVG SMIL animation as the generic name
+  // "css"; that is not an animation-name authored by our stylesheet.
   for (const anim of document.getAnimations()) {
-    const name = anim.animationName || (anim.effect && anim.effect.getKeyframes && "css");
-    if (typeof name === "string" && !ALLOWED.includes(name)) {
+    const name = anim.animationName;
+    if (typeof name === "string" && name && !ALLOWED.includes(name)) {
       findings.push({ kind: "animation", el: name, value: anim.playState });
     }
   }
@@ -323,6 +328,25 @@ async function main() {
     }
 
     /*
+     * The cluster detail pages are dynamic routes (/ui/clusters/{key}), so the
+     * audit discovers one from the live proposals table instead of hard-coding
+     * a key nobody can promise. With no clustering run (or no over-four-member
+     * cluster) there is no link and the audit proceeds without it - the route
+     * itself is covered by the contract and integration tests.
+     */
+    let clusterDetail = null;
+    try {
+      const res = await fetch(BASE + "/ui/clusters");
+      const html = await res.text();
+      const match = html.match(/href="\/ui\/clusters\/([0-9a-f]{8,})"/);
+      if (match) clusterDetail = "/ui/clusters/" + match[1];
+    } catch {
+      /* preflight already proved the server is reachable; treat as none */
+    }
+    if (clusterDetail) console.log("also visiting discovered " + clusterDetail);
+    const ALL_PAGES = clusterDetail ? [...PAGES, clusterDetail] : PAGES;
+
+    /*
      * Every page under every theme. The theme matters and is not redundant:
      * two of the four vendored sheets ship a glow rule and two do not, and the
      * stylesheet the client appends on a swap only exists once a theme has been
@@ -339,14 +363,18 @@ async function main() {
        * default - would silently test nothing. That gap is how this bug shipped.
        */
       const seed = theme === "vt220" ? "amber" : "vt220";
+      const preview = theme === "vt220" ? "amber" : "vt220";
       await visit(BASE + PAGES[0] + "?theme=" + seed);
       await cdp.send("Runtime.evaluate", {
         expression: "localStorage.setItem('faultlined.theme', " + JSON.stringify(theme) + ")",
       }, sessionId);
 
-      for (const path of PAGES) {
+      for (const path of ALL_PAGES) {
         checks += 1;
-        const evaluated = await visit(BASE + path + "?theme=" + seed);
+        const target = path === "/ui/clusters/preview"
+          ? BASE + "/ui/clusters"
+          : BASE + path;
+        const evaluated = await visit(target + "?theme=" + seed);
         const result = evaluated.result.value;
         if (!result) {
           console.error("FAIL [" + theme + "] " + path + ": the page produced no result");

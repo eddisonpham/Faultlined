@@ -14,9 +14,15 @@ from data_engine.jobs.state import DEFAULT_MAX_ATTEMPTS
 class FakeConnection:
     def __init__(self) -> None:
         self.statements: list[str] = []
+        self.params: list[object] = []
+        self.commits = 0
 
-    def execute(self, statement: str) -> None:
+    def execute(self, statement: str, params: object = None) -> None:
         self.statements.append(statement)
+        self.params.append(params)
+
+    def commit(self) -> None:
+        self.commits += 1
 
 
 @pytest.mark.unit
@@ -34,9 +40,13 @@ def test_initialize_schema_executes_each_nonempty_statement() -> None:
         len([s for s in script.split(";") if s.strip()])
         for script in (database._SCHEMA, database._MIGRATIONS)
     )
-    assert len(connection.statements) == expected
+    # The DDL statements plus the baseline ledger row (ADR 0028).
+    assert len(connection.statements) == expected + 1
     assert all(statement.strip() for statement in connection.statements)
     assert "CREATE TABLE IF NOT EXISTS jobs" in connection.statements[0]
+    assert "INSERT INTO schema_migrations" in connection.statements[-1]
+    assert connection.params[-1] == (database.BASELINE_VERSION, database.BASELINE_NAME)
+    assert connection.commits == 1
 
 
 @pytest.mark.unit

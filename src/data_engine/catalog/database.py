@@ -232,6 +232,19 @@ CREATE TABLE IF NOT EXISTS task_cluster_members (
 
 CREATE INDEX IF NOT EXISTS task_cluster_members_task_idx ON task_cluster_members (task);
 
+-- Human disposition of uncertain strings is independent from the automatic proposal
+-- partition. Review must not rewrite episode metadata or pretend to retrain the engine.
+CREATE TABLE IF NOT EXISTS cluster_review_decisions (
+    task text PRIMARY KEY,
+    disposition text NOT NULL CHECK (disposition IN ('class', 'dismissed')),
+    label text NOT NULL DEFAULT '',
+    reviewed_at timestamptz NOT NULL DEFAULT now(),
+    reviewed_by text NOT NULL DEFAULT 'operator'
+);
+
+CREATE INDEX IF NOT EXISTS cluster_review_decisions_disposition_idx
+    ON cluster_review_decisions (disposition, reviewed_at DESC);
+
 CREATE TABLE IF NOT EXISTS cluster_confirmations (
     id bigserial PRIMARY KEY,
     label text NOT NULL,
@@ -253,6 +266,15 @@ CREATE TABLE IF NOT EXISTS cluster_runs (
 );
 
 CREATE INDEX IF NOT EXISTS cluster_runs_created_idx ON cluster_runs (created_at DESC);
+
+-- The migration ledger (ADR 0028). initialize_schema writes the baseline row
+-- here, and `de migrate` appends one row per applied migration, so the schema
+-- state a database is in is recorded in the database itself.
+CREATE TABLE IF NOT EXISTS schema_migrations (
+    version text PRIMARY KEY,
+    name text NOT NULL,
+    applied_at timestamptz NOT NULL DEFAULT now()
+);
 
 """
 
@@ -350,10 +372,35 @@ CONNECT_TIMEOUT_SECONDS = 5
 STATEMENT_TIMEOUT_MILLISECONDS = 15_000
 
 
+#: The version `initialize_schema` records for itself (ADR 0028): the idempotent
+#: DDL *is* the baseline migration, so a database the code has merely started
+#: already reads as baseline-applied and `de migrate` runs only real pending work.
+BASELINE_VERSION = "0001"
+BASELINE_NAME = "baseline"
+
+
+def run_schema_ddl(connection: Connection[dict[str, object]]) -> None:
+    """Execute the idempotent DDL on an open connection.
+
+    Split out of `initialize_schema` so the baseline migration (ADR 0028) can
+    run the same statements inside its own transaction instead of opening a
+    second connection mid-migration.
+    """
+    for script in (_SCHEMA, _MIGRATIONS):
+        for statement in script.split(";"):
+            if statement.strip():
+                connection.execute(statement)
+
+
 def initialize_schema(settings: Settings | None = None) -> None:
     """Create vertical-slice tables if absent; safe to call on every startup."""
     with connect(settings) as connection:
-        for script in (_SCHEMA, _MIGRATIONS):
-            for statement in script.split(";"):
-                if statement.strip():
-                    connection.execute(statement)
+        run_schema_ddl(connection)
+        # Record the baseline (ADR 0028). The table exists because _SCHEMA now
+        # creates it; ON CONFLICT keeps every later start a silent no-op.
+        connection.execute(
+            "INSERT INTO schema_migrations (version, name) VALUES (%s, %s) "
+            "ON CONFLICT (version) DO NOTHING",
+            (BASELINE_VERSION, BASELINE_NAME),
+        )
+        connection.commit()

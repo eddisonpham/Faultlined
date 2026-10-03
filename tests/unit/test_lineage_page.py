@@ -119,7 +119,7 @@ def test_the_members_table_lists_every_episode_the_graph_truncated() -> None:
 def test_a_build_that_does_not_exist_says_so_instead_of_drawing_an_empty_graph() -> None:
     body = lineage_page({}, "vt220")
     assert "no such build" in body
-    assert "<svg" not in body
+    assert 'class="de-graph"' not in body
 
 
 @pytest.mark.unit

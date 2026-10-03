@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import logging
 import time
 from datetime import UTC, datetime
@@ -19,7 +20,7 @@ from data_engine.observability.logging import correlation_id_var
 from data_engine.observability.metrics import RuntimeMetrics
 from data_engine.observability.reason_codes import ReasonCode
 from data_engine.storage.artifacts import FileArtifactStore
-from data_engine.validation.profile import profile_from_dict, profile_hash
+from data_engine.validation.profile import InvalidProfile, profile_from_dict, profile_hash
 from data_engine.validation.service import ValidationService
 
 logger = logging.getLogger(__name__)
@@ -44,12 +45,15 @@ class _JobTimedOut(Exception):
 #: `IdempotencyConflict` belongs here for the same reason and was missing: a profile
 #: name/version that already resolves to different content is a property of the
 #: payload, so all three attempts failed identically while `jobs_failures_total`
-#: counted three failures for one operator mistake.
+#: counted three failures for one operator mistake. `InvalidProfile` is the same
+#: property stated earlier: a malformed profile document fails at construction on
+#: every attempt (architecture/failure-handling.md F3).
 _TERMINAL_FAILURES: tuple[type[Exception], ...] = (
     ReaderError,
     InvalidJobPayload,
     UnsupportedJobType,
     IdempotencyConflict,
+    InvalidProfile,
     ExportBuildUnknown,
     ExportError,
 )
@@ -70,8 +74,16 @@ def _failure_reason_code(exc: Exception) -> ReasonCode:
         return ReasonCode.INGEST_PARSE_FAILED
     if isinstance(exc, UnsupportedJobType):
         return ReasonCode.INGEST_FORMAT_UNKNOWN
+    if isinstance(exc, InvalidProfile):
+        return ReasonCode.VALIDATION_PROFILE_INVALID
     if isinstance(exc, FileNotFoundError):
         return ReasonCode.IO_ARTIFACT_MISSING
+    if isinstance(exc, OSError):
+        # ENOSPC is the kernel naming the failure (failure-handling.md F9); every
+        # other write error is an IO failure the operator can act on, not an
+        # opaque internal error. FileNotFoundError is handled above - it is an
+        # OSError subclass, so the order is load-bearing.
+        return ReasonCode.IO_DISK_FULL if exc.errno == errno.ENOSPC else ReasonCode.IO_WRITE_FAILED
     if isinstance(exc, KeyError):
         return ReasonCode.INGEST_PARSE_FAILED
     return ReasonCode.INTERNAL_ERROR

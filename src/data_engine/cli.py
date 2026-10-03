@@ -22,6 +22,11 @@ from data_engine.observability.metrics import JsonlMetricSink, RuntimeMetrics
 #: How long to wait after a failed database call before trying the queue again.
 DB_ERROR_BACKOFF_SECONDS = 5.0
 
+#: How often the worker records host gauges (`system_*`) into the runtime sink.
+#: Once a minute is often enough to notice a filling disk or a growing RSS, and
+#: rare enough that eight gauges a minute do not bury the job metrics in the JSONL.
+HOST_SAMPLE_INTERVAL_SECONDS = 60.0
+
 
 def build_metrics(settings: Any) -> RuntimeMetrics:
     """Runtime recorder writing to the configured JSONL sink."""
@@ -34,18 +39,27 @@ def _parent_alive() -> bool:
     `dev` runs the worker as a child process. If the parent is killed outright the
     child is not reaped, and an orphan keeps claiming jobs from the shared catalog,
     which silently breaks `just test` and steals work from any other worker.
+
+    A worker started standalone (`de worker`, `just worker`) has no multiprocessing
+    parent at all - `parent_process()` returning `None` means "not a child of a
+    multiprocessing spawn", not "orphaned". Reading `None` as dead made every
+    standalone worker exit on its first loop iteration; only `de dev`'s children
+    ever ran. Found by the worker-kill drill (EXP-0011), which starts workers the
+    way the runbook says to.
     """
     parent = multiprocessing.parent_process()
-    return parent is not None and parent.is_alive()
+    return parent is None or parent.is_alive()
 
 
 def _worker_loop(stop: Any, poll_seconds: float = 0.25) -> None:
     settings = load_settings()
-    worker = IngestWorker(settings, metrics=build_metrics(settings))
+    metrics = build_metrics(settings)
+    worker = IngestWorker(settings, metrics=metrics)
     log = logging.getLogger(__name__)
     # The reapers used to exist but nothing called them, so F6 deadlines were never
     # enforced on a job that was already running and a dead worker's job was stranded.
     next_reap = time.monotonic()
+    next_sample = time.monotonic()
     while not stop.is_set():
         if not _parent_alive():
             log.warning("parent process gone; worker exiting")
@@ -53,6 +67,9 @@ def _worker_loop(stop: Any, poll_seconds: float = 0.25) -> None:
         if time.monotonic() >= next_reap:
             _reap(worker, log)
             next_reap = time.monotonic() + REAP_INTERVAL_SECONDS
+        if time.monotonic() >= next_sample:
+            _sample_host(metrics, log)
+            next_sample = time.monotonic() + HOST_SAMPLE_INTERVAL_SECONDS
         try:
             result = worker.process_one()
         except Exception:
@@ -65,6 +82,14 @@ def _worker_loop(stop: Any, poll_seconds: float = 0.25) -> None:
             continue
         if result is None:
             stop.wait(poll_seconds)
+
+
+def _sample_host(metrics: Any, log: Any) -> None:
+    """Record host gauges on an interval; telemetry must not stop the worker."""
+    try:
+        metrics.sample_host()
+    except Exception:
+        log.exception("host sample failed; continuing")
 
 
 def _reap(worker: IngestWorker, log: Any) -> None:
@@ -88,6 +113,29 @@ def _reap(worker: IngestWorker, log: Any) -> None:
         )
 
 
+def _run_migrate(settings: Any, *, status_only: bool) -> None:
+    """Apply pending catalog migrations, or just report them (ADR 0028)."""
+    from data_engine.catalog import migrations as migration_runner
+
+    if status_only:
+        state = migration_runner.status(settings)
+        print("applied: " + (", ".join(state["applied"]) or "(none)"))
+        print("pending: " + (", ".join(state["pending"]) or "(none)"))
+        if state["unknown"]:
+            print(
+                "unknown: " + ", ".join(state["unknown"]),
+                "-- the database is newer than this code",
+            )
+            raise SystemExit(1)
+        print("unknown: (none)")
+        return
+    applied = migration_runner.upgrade(settings)
+    if applied:
+        print("applied: " + ", ".join(applied))
+    else:
+        print("catalog migrations: nothing to apply")
+
+
 def main(argv: Sequence[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="de", description="Faultlined robot episode data engine")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -96,10 +144,19 @@ def main(argv: Sequence[str] | None = None) -> None:
         command.add_argument(
             "--once", action="store_true", help="process at most one job (worker only)"
         )
+    migrate = subparsers.add_parser("migrate", help="apply pending catalog migrations (ADR 0028)")
+    migrate.add_argument(
+        "--status",
+        action="store_true",
+        help="print applied and pending versions; exit nonzero if ahead of the code",
+    )
     args = parser.parse_args(argv)
     settings = load_settings()
     configure_logging(settings.log_level)
 
+    if args.command == "migrate":
+        _run_migrate(settings, status_only=bool(args.status))
+        return
     if args.command == "doctor":
         initialize_schema(settings)
         print("PostgreSQL connection and catalog schema: OK")

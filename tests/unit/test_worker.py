@@ -466,6 +466,35 @@ def test_worker_does_not_retry_a_failure_that_cannot_improve(
 
 
 @pytest.mark.unit
+def test_worker_does_not_retry_a_malformed_profile(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """F3: a profile the constructor rejects fails identically on every attempt.
+
+    Terminal like F1, but with the reason code that names the operator's own
+    mistake (`VALIDATION_PROFILE_INVALID`) instead of `INTERNAL_ERROR`.
+    """
+    job = _job(attempts=0, max_attempts=3)
+    job["type"] = "validate"
+    job["payload"] = {
+        "profile": {"name": "staged", "version": "1", "min_frames": 10, "max_frames": 5},
+        "episode_ids": ["ep-1"],
+    }
+    catalog = FakeCatalog(job)
+    worker, metrics_path = _failing_worker(catalog, tmp_path, monkeypatch)
+
+    result = worker.process_one()
+
+    assert result is not None
+    assert result["state"] == JobState.FAILED.value
+    assert result["error"]["type"] == "InvalidProfile"
+    assert catalog.requeues == 0, "a malformed profile fails the same way twice"
+    failures = [p for p in _points(metrics_path) if p["name"] == "jobs_failures_total"]
+    assert failures[0]["labels"]["reason_code"] == "VALIDATION_PROFILE_INVALID"
+    assert "jobs_retries_total" not in {p["name"] for p in _points(metrics_path)}
+
+
+@pytest.mark.unit
 def test_worker_retries_a_transient_failure_with_budget_left(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

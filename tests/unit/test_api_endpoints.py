@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 
 from data_engine.api.app import create_app
 from data_engine.config import Settings
+from data_engine.jobs.state import JobState
 
 
 class CatalogStub:
@@ -295,6 +296,9 @@ class ListingCatalogStub(CatalogStub):
     def count_jobs(self, state: Any) -> int:
         return sum(1 for s in self.states if s == state.value)
 
+    def count_jobs_by_state(self) -> dict[str, int]:
+        return {state.value: self.count_jobs(state) for state in JobState}
+
     def count_artifacts(self) -> int:
         return 1
 
@@ -316,6 +320,9 @@ class IngestCatalogStub(ListingCatalogStub):
 
     def count_jobs(self, state: Any) -> int:
         return 0
+
+    def count_jobs_by_state(self) -> dict[str, int]:
+        return {state.value: 0 for state in JobState}
 
     def count_artifacts(self) -> int:
         return 0

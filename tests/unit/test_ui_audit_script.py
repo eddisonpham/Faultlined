@@ -59,7 +59,7 @@ def test_the_audit_checks_every_page_the_nav_advertises() -> None:
     duplication that drifts. This asserts the two lists agree, so adding a page
     to the nav fails here rather than quietly going unmeasured.
     """
-    for href, _label, _key in NAV_LINKS:
+    for href, _label, _key, *_group in NAV_LINKS:
         assert f'"{href}"' in TEXT, f"{href} is in the nav but not in the audit"
 
 

@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from data_engine.clustering.lexicon import AXES
 
@@ -84,6 +84,52 @@ class ClusterMember(BaseModel):
     episodes: int
     verb: str = ""
     colours: list[str] = Field(default_factory=list)
+    distance: float = 0.0
+
+
+class ClusterReviewDecision(BaseModel):
+    task: str
+    disposition: Literal["class", "dismissed"]
+    label: str = ""
+
+
+class ClusterReviewCandidate(BaseModel):
+    task: str
+    core: str
+    cluster_key: str
+    proposal_core: str
+    episodes: int
+    distance: float
+    radius: float
+    reason: str
+    source: str
+
+
+class ClusterReviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    tasks: list[str] = Field(min_length=1, max_length=25)
+    disposition: Literal["class", "dismissed"]
+    label: str = Field(default="", max_length=120)
+
+    @field_validator("tasks")
+    @classmethod
+    def _distinct_nonblank_tasks(cls, values: list[str]) -> list[str]:
+        cleaned = list(dict.fromkeys(value.strip() for value in values if value.strip()))
+        if not cleaned:
+            raise ValueError("select at least one task string")
+        return cleaned
+
+    @field_validator("label")
+    @classmethod
+    def _clean_label(cls, value: str) -> str:
+        return value.strip()
+
+    @model_validator(mode="after")
+    def _required_for_class(self) -> ClusterReviewRequest:
+        if self.disposition == "class" and not self.label:
+            raise ValueError("a human class needs a label")
+        return self
 
 
 class ClusterProposal(BaseModel):
@@ -112,10 +158,26 @@ class ClusterRun(BaseModel):
     health: dict[str, object] = Field(default_factory=dict)
 
 
+class ClusterReviewListResponse(BaseModel):
+    candidates: list[ClusterReviewCandidate] = Field(default_factory=list)
+    decisions: list[ClusterReviewDecision] = Field(default_factory=list)
+
+
+class ClusterReviewDecisionResponse(BaseModel):
+    reviewed: int
+    decisions: list[ClusterReviewDecision] = Field(default_factory=list)
+
+
+class ClusterReviewUndoResponse(BaseModel):
+    reopened: int
+
+
 class ClusterListResponse(BaseModel):
     proposals: list[ClusterProposal]
     run: ClusterRun | None = None
     health: dict[str, object] = Field(default_factory=dict)
+    review_candidates: list[ClusterReviewCandidate] = Field(default_factory=list)
+    review_decisions: list[ClusterReviewDecision] = Field(default_factory=list)
 
 
 class ClusterDetailResponse(BaseModel):

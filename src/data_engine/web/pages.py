@@ -35,25 +35,26 @@ APP_JS_URL = "/ui/app.js"
 THEMES = ("vt220", "amber", "github-dark", "monochrome")
 DEFAULT_THEME = "vt220"
 
-# (href, label, number-key). The key is printed in the nav and handled by
-# app.js; keeping the two in one tuple means a link cannot advertise a shortcut
-# the runtime does not implement. Ordered by how often an operator looks, not by
-# alphabet - Status first because it is the landing page, Incidents second
-# because a night-time notifier is the reason to come back to this UI.
+# (href, label, shortcut, group). Grouping follows operator work, not code
+# modules; keep destinations distinct until frequency data justifies merging them.
 NAV_LINKS = (
-    ("/ui", "Status", "1"),
-    ("/ui/incidents", "Incidents", "2"),
-    ("/ui/jobs", "Jobs", "3"),
-    ("/ui/episodes", "Episodes", "4"),
-    ("/ui/failures", "Failures", "5"),
-    ("/ui/slices", "Slices", "6"),
-    ("/ui/clusters", "Clusters", "c"),
-    ("/ui/insights", "Insights", "7"),
-    ("/ui/metrics", "Metrics", "8"),
-    ("/ui/artifacts", "Artifacts", "9"),
-    ("/ui/schema", "Schema", "0"),
-    ("/ui/builds", "Builds", "b"),
+    ("/ui", "Status", "1", "workspace"),
+    ("/ui/episodes", "Episodes", "4", "curate"),
+    ("/ui/failures", "Failures", "5", "curate"),
+    ("/ui/clusters", "Clusters", "c", "curate"),
+    ("/ui/slices", "Slices", "6", "curate"),
+    ("/ui/builds", "Builds", "b", "curate"),
+    ("/ui/experiments", "Experiments", "e", "curate"),
+    ("/ui/jobs", "Jobs", "3", "operate"),
+    ("/ui/incidents", "Incidents", "2", "operate"),
+    ("/ui/metrics", "Metrics", "8", "operate"),
+    ("/ui/insights", "Insights", "7", "catalog"),
+    ("/ui/artifacts", "Artifacts", "9", "catalog"),
+    ("/ui/benchmarks", "Benchmarks", "k", "catalog"),
+    ("/ui/schema", "Schema", "0", "catalog"),
 )
+
+NAV_GROUPS = (("curate", "Curate"), ("operate", "Operate"), ("catalog", "Catalog"))
 
 FONT_URL = "/ui/vendor/departure-mono/DepartureMono-Regular.woff2"
 FONT_PATH = HERE / "vendor" / "departure-mono" / "DepartureMono-Regular.woff2"
@@ -119,29 +120,41 @@ def theme_or_default(name: str | None) -> str:
 
 
 def _nav(active: str, theme: str) -> str:
-    links = "".join(
-        f'<a href="{href}" data-key="{key}" class="fine-use-focusable"'
-        f"{' aria-current="page"' if href == active else ''}>{label}</a>"
-        for href, label, key in NAV_LINKS
-    )
+    groups: list[str] = []
+    for group_name, title in NAV_GROUPS:
+        children = "".join(
+            f'<a href="{href}" data-key="{key}" class="fine-use-focusable"'
+            f"{' aria-current="page"' if href == active else ''}>{label}</a>"
+            for href, label, key, group in NAV_LINKS
+            if group == group_name and href != "/ui"
+        )
+        opened = any(
+            href == active and group == group_name for href, _label, _key, group in NAV_LINKS
+        )
+        groups.append(
+            '<details class="de-nav-group"'
+            + (" open" if opened else "")
+            + f'><summary>{title}</summary><div class="de-nav-menu">{children}</div></details>'
+        )
     options = "".join(
         f'<option value="{t}"{" selected" if t == theme else ""}>{t}</option>' for t in THEMES
     )
     return (
         '<nav class="de-nav fine-use-focusable" aria-label="Sections">'
-        '<a class="de-brand" href="/ui">Faultlined'
-        "<span> / data engine</span></a>"
-        f"{links}"
-        '<span class="de-spacer"></span>'
-        # Link health. Hidden by default: an unchanging "live" badge in the
-        # corner of every page reads as branding, not as information. app.js
-        # reveals it the moment the state is anything but healthy, which is the
-        # only time it carries news. The word is still always present, so the
-        # state is never conveyed by hue alone.
+        '<a class="de-brand" href="/ui">'
+        '<svg class="de-brand-mark" viewBox="0 0 28 28" aria-hidden="true" focusable="false">'
+        '<path d="M8 4h12v3h3v12h-3v3H8v-3H5V7h3zM10 10v3m8-3v3m-7 4h6M12 22v3h4v-3" '
+        'fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="square"/>'
+        '<path d="M3 10H1v6h4m22-6h-2v6h2" fill="none" stroke="currentColor" stroke-width="1.4"/>'
+        '</svg><span class="de-brand-copy"><strong>Faultlined</strong>'
+        "<small>robot data engine</small></span></a>"
+        '<a class="de-home-link" href="/ui" data-key="1"'
+        + (' aria-current="page"' if active == "/ui" else "")
+        + ">Status</a>"
+        + "".join(groups)
+        + '<span class="de-spacer"></span>'
         '<span class="de-led" data-led data-state="ok" role="status" hidden>'
         "<span data-led-text></span></span>"
-        # Hidden until app.js confirms it can switch the stylesheet; the form
-        # submit below is the no-JS path and stays in the markup.
         f'<form method="get" action="{escape(active)}" class="de-theme-form">'
         '<select class="de-theme theme-dropdown fine-use-focusable" name="theme" '
         f'data-theme-select hidden onchange="this.form.submit()">{options}</select>'
@@ -263,6 +276,8 @@ _SUBTITLES = {
     "/ui/artifacts": "content addressed // hash is the identity",
     "/ui/schema": "live catalog // read from the database, not a drawing",
     "/ui/builds": "content addressed // the hash is the identity",
+    "/ui/experiments": "measured claims // one row per experiment record",
+    "/ui/benchmarks": "committed baselines // runs observed on this machine",
 }
 
 
@@ -1637,7 +1652,8 @@ def slice_impact_page(impact: dict[str, Any], theme: str) -> str:
 
 
 def clusters_page(model: dict[str, Any], theme: str, *, error: str = "") -> str:
-    """Task-string cluster proposals, and the controls that confirm or reject them."""
+    """Task-string proposals, review queue, and operator decisions."""
+    from data_engine.clustering import build
     from data_engine.web.cluster_page import (
         controls,
         figures_section,
@@ -1645,50 +1661,121 @@ def clusters_page(model: dict[str, Any], theme: str, *, error: str = "") -> str:
         health_section,
         history_section,
         proposal_table,
+        review_section,
         sample_note,
     )
 
     proposals = model.get("proposals")
-    if proposals is None or not has_run(model):
-        return _page(
-            "Clusters",
-            "/ui/clusters",
+    if proposals is None:
+        proposals = build({}, source="catalog")
+    body: list[str] = []
+    if has_run(model):
+        body.append(
+            _section("Run health", health_section(proposals), "read this before confirming")
+        )
+        body.append(_section("Largest classes", figures_section(proposals), "episode volume"))
+        if model.get("source") == "sample":
+            body.append(sample_note())
+    elif model.get("source") == "sample":
+        body.append(sample_note())
+    else:
+        body.append(
+            _section(
+                "Start with a proposal run",
+                '<p class="de-empty">// no clustering run yet</p>'
+                "<p>Rebuild from catalog task strings, or use the labelled sample "
+                "to preview the workflow.</p>",
+                "no catalog changes until rebuild",
+            )
+        )
+    candidates = model.get("review_candidates", [])
+    decisions = model.get("review_decisions", [])
+    body.append(
+        _section(
+            "Human review",
+            review_section(candidates, decisions, error=error),
+            f"{len(candidates)} unresolved candidates // annotations stay separate",
+        )
+    )
+    if has_run(model):
+        body.append(
             _section(
                 "Proposals",
-                '<p class="de-empty">// no clustering run yet</p>',
-                "rebuild to propose groups",
-            ),
-            theme,
+                proposal_table(proposals, read_only=model.get("source") == "sample"),
+                "preview only"
+                if model.get("source") == "sample"
+                else "confirm groups that hold up",
+            )
         )
-    body = [_section("Health", health_section(proposals), "is this run worth reading")]
-    if model.get("source") == "sample":
-        body.append(sample_note())
-    body.append(_section("Controls", controls(proposals, error=error), "rebuild"))
-    body.append(_section("Figures", figures_section(proposals), "size and boundary"))
-    body.append(_section("Proposals", proposal_table(proposals), "confirm to freeze"))
-    body.append(_section("History", history_section(model.get("history", [])), "every rebuild"))
+    body.append(
+        '<details class="de-advanced"><summary>Rebuild settings</summary>'
+        + _section("Rebuild", controls(proposals, error=error), "change grouping inputs")
+        + "</details>"
+    )
+    body.append(_section("Run history", history_section(model.get("history", [])), "latest 20"))
     return _page("Clusters", "/ui/clusters", "".join(body), theme)
 
 
 def clusters_fragment(model: dict[str, Any]) -> str:
-    """The part that changes on a rebuild: health, figures, proposals, history."""
+    """Volatile readouts only; leave forms and operator input intact during polling."""
+    from data_engine.clustering import build
     from data_engine.web.cluster_page import (
         figures_section,
         has_run,
         health_section,
         history_section,
         proposal_table,
+        review_section,
     )
 
-    proposals = model.get("proposals")
-    if not has_run(model) or proposals is None:
-        return '<p class="de-empty">// no clustering run yet</p>'
-    return (
-        _section("Health", health_section(proposals), "is this run worth reading")
-        + _section("Figures", figures_section(proposals), "size and boundary")
-        + _section("Proposals", proposal_table(proposals), "confirm to freeze")
-        + _section("History", history_section(model.get("history", [])), "every rebuild")
+    proposals = model.get("proposals") or build({})
+    body = []
+    if has_run(model):
+        body.extend(
+            [
+                _section("Run health", health_section(proposals), "read this before confirming"),
+                _section("Largest classes", figures_section(proposals), "episode volume"),
+            ]
+        )
+    body.append(
+        _section(
+            "Human review",
+            review_section(model.get("review_candidates", []), model.get("review_decisions", [])),
+            f"{len(model.get('review_candidates', []))} unresolved candidates // "
+            "annotations stay separate",
+        )
     )
+    if has_run(model):
+        body.append(_section("Proposals", proposal_table(proposals), "confirm groups that hold up"))
+    body.append(_section("Run history", history_section(model.get("history", [])), "latest 20"))
+    return "".join(body)
+
+
+def cluster_detail_page(
+    proposal: dict[str, Any],
+    members: list[dict[str, Any]],
+    theme: str,
+    *,
+    read_only: bool = False,
+    error: str = "",
+) -> str:
+    """One proposal, its task strings, and the confirm control on one page (ADR 0027)."""
+    from data_engine.web.cluster_page import detail_body
+
+    key = str(proposal.get("key", ""))
+    body = _section(
+        "Cluster detail",
+        detail_body(proposal, members, read_only=read_only, error=error),
+        "a proposal is a suggestion until a human confirms it",
+    )
+    return _page(f"Cluster {key[:10] or '?'}", "/ui/clusters", body, theme)
+
+
+def cluster_detail_fragment(proposal: dict[str, Any], members: list[dict[str, Any]]) -> str:
+    """The detail body alone, for X-Fragment polls of a detail page."""
+    from data_engine.web.cluster_page import detail_body
+
+    return detail_body(proposal, members)
 
 
 def episodes_page(

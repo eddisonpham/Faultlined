@@ -58,6 +58,11 @@ class InMemoryCatalog:
     def count_jobs(self, state: str) -> int:
         return sum(1 for job in self.jobs.values() if job["state"] == state)
 
+    def count_jobs_by_state(self) -> dict[str, int]:
+        from data_engine.jobs.state import JobState
+
+        return {state.value: self.count_jobs(state.value) for state in JobState}
+
     def claim_job(self) -> dict[str, Any] | None:
         job = next((item for item in self.jobs.values() if item["state"] == "queued"), None)
         if job is None:

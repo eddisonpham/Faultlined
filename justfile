@@ -83,6 +83,12 @@ api:
 worker *ARGS:
     uv run --all-extras de worker {{ARGS}}
 
+# Apply pending catalog migrations (ADR 0028). `just migrate --status` reports
+# applied/pending without changing anything and fails when the database is
+# newer than the code.
+migrate *ARGS:
+    uv run --all-extras de migrate {{ARGS}}
+
 # Check database connectivity and catalog schema
 doctor:
     uv run --all-extras de doctor
