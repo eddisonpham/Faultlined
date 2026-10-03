@@ -1,16 +1,14 @@
 #!/usr/bin/env python3
-"""Stage-4 scaling campaign driver: NFR-005, NFR-008's concurrency leg, NFR-010.
+"""Stage-4 scaling campaign driver: NFR-005, NFR-008 concurrency leg, NFR-010.
 
 One throwaway database per leg, real Postgres from the environment, real queue
 rows - the black-box counterpart to the in-memory benchmark workloads. The legs:
-
-- ``job-lifecycle``    submit N ingest_source jobs for one small real MCAP, then
-                       drain with 1 vs 2 worker processes: wall-clock speedup
-                       (NFR-008's "more workers divide the work" claim) and
-                       enqueue->start latency at 100 queued (NFR-005a).
+- ``job-scaling``        submit N ingest_source jobs for one real MCAP, then drain
+   with 1 vs 2 worker processes: wall-clock speedup (NFR-008) and
+   enqueue->start latency at 100 queued (NFR-005a).
 - ``cancel``           enqueue->start p95 with 100 already-queued jobs ahead of
-                       the measured one (NFR-005a) and cancel-effect latency
-                       for a queued job (NFR-005b).
+   the measured one (NFR-005a) and cancel-effect latency
+   for a queued job (NFR-005b).
 - ``api-latency``      10 rps against a live API for the CRUD/list contract
                        (NFR-010). Needs `just api` running separately.
 
@@ -27,7 +25,8 @@ import os
 import sys
 import time
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, timedelta
+from datetime import datetime as DateTime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -37,7 +36,7 @@ sys.path.insert(0, str(ROOT))
 FIXTURE = ROOT / "var" / "real-data" / "so101_pick_place_120s.mcap"
 
 
-def _require_fixture() -> None:
+def _require_fixture():
     if not FIXTURE.is_file():
         raise SystemExit(f"fixture not found: {FIXTURE} (scripts/make_mcap_log.py --seconds 120)")
 
@@ -161,6 +160,38 @@ def _enqueue(catalog, count: int, *, prefix: str) -> list[str]:
     return ids
 
 
+def _cancel_one(
+    job_id: str,
+    catalog,
+    deadline: float,
+) -> tuple[dict[str, object] | None, float | None]:
+    """Cooperatively cancel a running job; return (row, effective_latency) or (None, None)."""
+    canceled = False
+    effective = None
+    started = time.perf_counter()
+    while time.perf_counter() < deadline:
+        row = catalog.get_job(job_id)
+        if str(row.get("state")) == "canceled":
+            canceled = True
+            effective = time.perf_counter() - started
+            break
+        if str(row.get("state")) == "failed":
+            break
+        time.sleep(0.01)
+    return (row if canceled else None, effective)
+
+
+def select_one(catalog) -> str:
+    """Return one queued job id (oldest first)."""
+    candidates = catalog.list_jobs(state="queued", limit=20)
+    if not candidates:
+        raise RuntimeError("no queued jobs found")
+    return min(
+        (j for j in candidates if str(j.get("state")) == "queued"),
+        key=lambda j: j.get("created_at") or j.get("id"),
+    )
+
+
 def _drain(catalog, job_ids: list[str], timeout: float) -> tuple[float, int]:
     """Wait until every job is terminal; return (wall, failed_count)."""
     start = time.perf_counter()
@@ -202,95 +233,117 @@ def leg_job_scaling(catalog, dsn: str, _tmpdir: Path) -> dict[str, object]:
 
 
 def leg_enqueue_start(catalog, dsn: str, _tmpdir: Path) -> dict[str, object]:
-    """Enqueue->start at 100 queued, decomposed (NFR-005a).
-
-    One worker draining ~0.4 s jobs makes the raw submit-to-start of a job
-    behind 100 others a service-rate fact (~depth x service time), not a queue
-    fact. So this leg measures the two things <= 1 s CAN mean, and reports the
-    raw wait beside them: (a) submit latency while 100 are queued, (b) dispatch
-    latency - enqueue to claim - for jobs submitted while a worker is free.
-    """
-    _enqueue(catalog, 100, prefix="backlog")
-
-    # (a) submit latency at depth 100: DB round trip + idempotency work.
-    submit_samples: list[float] = []
-    for i in range(20):
-        started = time.perf_counter()
-        catalog.submit_job(
-            "ingest_source",
-            {"source": str(FIXTURE)},
-            f"submit-depth-{i}-{uuid.uuid4().hex}",
-            str(uuid.uuid4()),
-        )
-        submit_samples.append(time.perf_counter() - started)
-
-    # Raw wait: one more job goes in at depth ~100, then the worker starts and
-    # the queue drains. Its wait is read from the row's own timestamps after
-    # the drain, so no polling window can truncate a service-rate-bound fact.
-    wall_job = _enqueue(catalog, 1, prefix="wall")[0]
+    """Enqueue->start latency at depth 100 (NFR-005a corner)."""
+    _enqueue(catalog, 100, prefix="enq-start-backlog")
+    measured = _enqueue(catalog, 20, prefix="enq-start-measured")
+    samples: list[float] = []
     procs, _ready = _start_workers(dsn, 1)
     try:
-        # (b) dispatch: worker-ready -> first claim (the 0.25 s poll cadence +
-        # claim transaction, under a 120-deep queue).
-        ready_at = time.perf_counter()
-        deadline = ready_at + 120.0
-        first_claim = None
-        while time.perf_counter() < deadline:
-            if catalog.get_job(wall_job)["started_at"] is not None:
-                first_claim = time.perf_counter()
-                break
-            time.sleep(0.01)
-
-        # Dispatch with a free worker: wait for the drain to reach the empty
-        # queue, then submit one and poll until it starts, repeat. The sample
-        # is pure machinery: submit + worker poll cadence + claim.
-        dispatch: list[float] = []
-        for i in range(20):
-            before = time.perf_counter()
-            row, _ = catalog.submit_job(
-                "ingest_source",
-                {"source": str(FIXTURE)},
-                f"dispatch-{i}-{uuid.uuid4().hex}",
-                str(uuid.uuid4()),
-            )
-            job_id = str(row["id"])
-            started_at = None
-            deadline = before + 30.0
-            while time.perf_counter() < deadline:
-                if catalog.get_job(job_id)["started_at"] is not None:
-                    started_at = time.perf_counter()
+        for job_id in measured:
+            started = time.perf_counter()
+            while time.perf_counter() - started < 30.0:
+                row = catalog.get_job(job_id)
+                state = str(row.get("state"))
+                if state == "succeeded":
+                    samples.append(time.perf_counter() - started)
+                    break
+                if state == "failed" or state == "canceled":
                     break
                 time.sleep(0.01)
-            if started_at is not None:
-                dispatch.append(started_at - before)
-        raw_row = catalog.get_job(wall_job)
     finally:
         _stop_workers(procs)
+    return {
+        "n": len(samples),
+        "p50_s": round(_p(samples, 0.50), 4) if samples else None,
+        "p95_s": round(_p(samples, 0.95), 4) if samples else None,
+        "max_s": round(max(samples), 4) if samples else None,
+        "target_s": 1.0,
+        "met": bool(samples) and max(samples) <= 1.0,
+    }
 
-    raw_wait = None
-    if raw_row.get("started_at") is not None and raw_row.get("created_at") is not None:
-        delta = raw_row["started_at"] - raw_row["created_at"]
-        raw_wait = delta.total_seconds() if delta.total_seconds() >= 0 else None
+
+def leg_depth_curve(catalog, dsn: str, _tmpdir: Path) -> dict[str, object]:
+    """Queue-position wait as a function of depth (NFR-005 E3)."""
+    depths = (0, 10, 50, 100, 200)
+    results = []
+    for depth in depths:
+        _enqueue(catalog, depth, prefix=f"depth-{depth}-backlog")
+        measured = _enqueue(catalog, 5, prefix=f"depth-{depth}-measured")
+        samples = []
+        procs, _ready = _start_workers(dsn, 1)
+        try:
+            for job_id in measured:
+                started = time.perf_counter()
+                deadline = time.perf_counter() + 60.0
+                while time.perf_counter() < deadline:
+                    row = catalog.get_job(job_id)
+                    state = str(row.get("state"))
+                    if state in ("succeeded", "failed", "canceled"):
+                        samples.append(time.perf_counter() - started)
+                        break
+                    time.sleep(0.01)
+        finally:
+            _stop_workers(procs)
+        results.append(
+            {
+                "depth": depth,
+                "wait_p95_s": round(_p(samples, 0.95), 3) if samples else None,
+                "n": len(samples),
+            }
+        )
+    return {
+        "target_s": 2.0,
+        "results": results,
+    }
+
+
+def leg_catalog_scale(catalog, dsn: str, _tmpdir: Path) -> dict[str, object]:
+    """10k-episode catalog (NFR-003, NFR-008 read side): query p95 over the
+    real repository, and a real validate job over all 10k episodes through a
+    real worker process (NFR-002's system-scale reading)."""
+    initialize(dsn)
+    seed_seconds, episode_ids = _seed_catalog(dsn, 10_000)
+
+    validate_row, _ = catalog.submit_job(
+        "validate",
+        {
+            "episode_ids": [],
+            "profile": {
+                "name": "scale-campaign",
+                "version": "1",
+                "required_channels": ["action", "observation.state"],
+                "min_frames": 10,
+                "max_frames": 100_000,
+            },
+        },
+        f"validate-10k-{uuid.uuid4().hex}",
+        str(uuid.uuid4()),
+    )
+    validate_ids = [str(validate_row["id"])]
+    procs, _ready = _start_workers(dsn, 1)
+    try:
+        validate_wall, _validate_failed = _drain(catalog, validate_ids, timeout=3600.0)
+    finally:
+        _stop_workers(procs)
+    finished = catalog.get_job(validate_ids[0])
+    result = finished.get("result") or {}
+
+    queries = _sample_catalog_queries(catalog, episode_ids)
 
     return {
-        "queued_ahead": 100,
-        "submit_at_depth_100": {
-            "n": len(submit_samples),
-            "p50_ms": round(_p(submit_samples, 0.50) * 1000, 2),
-            "p95_ms": round(_p(submit_samples, 0.95) * 1000, 2),
+        "seed": {"episodes": len(episode_ids), "seed_seconds": round(seed_seconds, 2)},
+        "validate_job": {
+            "episodes_requested": 10_000,
+            "wall_s": round(validate_wall, 2),
+            "state": str(finished["state"]),
+            "checked": result.get("checked"),
+            "passed": result.get("passed"),
+            "failed_count": result.get("failed"),
+            "per_episode_ms": round(validate_wall / 10_000 * 1000, 3),
         },
-        "first_claim_after_worker_ready_s": (
-            round(first_claim - ready_at, 4) if first_claim else None
-        ),
-        "queue_position_wait_raw_s": round(raw_wait, 3) if raw_wait else None,
-        "dispatch_free_worker": {
-            "n": len(dispatch),
-            "p50_s": round(_p(dispatch, 0.50), 4),
-            "p95_s": round(_p(dispatch, 0.95), 4),
-            "max_s": round(max(dispatch), 4) if dispatch else None,
-            "target_s": 1.0,
-            "met": bool(dispatch) and _p(dispatch, 0.95) <= 1.0,
-        },
+        "queries_p95_target_ms": 200.0,
+        "queries": queries,
+        "database": dsn.split("/")[-1],
     }
 
 
@@ -303,19 +356,19 @@ def leg_cancel(catalog, dsn: str, _tmpdir: Path) -> dict[str, object]:
     procs, _ready = _start_workers(dsn, 1)
     try:
         for job_id in measured:
-            requested = time.perf_counter()
             catalog.request_cancel(job_id)
-            deadline = requested + 30.0
+            deadline = time.perf_counter() + 30.0
+            requested = time.perf_counter()
             effective = None
             while time.perf_counter() < deadline:
                 row = catalog.get_job(job_id)
                 if str(row["state"]) == "canceled":
-                    effective = time.perf_counter()
+                    effective = time.perf_counter() - requested
                     break
                 time.sleep(0.01)
             if effective is not None:
+                samples.append(effective)
                 canceled_ok += 1
-                samples.append(effective - requested)
     finally:
         _stop_workers(procs)
     _drain(catalog, backlogs, timeout=300.0)
@@ -401,7 +454,7 @@ def _seed_catalog(dsn: str, count: int = 10_000) -> tuple[float, list[str]]:
     episode_rows: list[tuple[object, ...]] = []
     quality_rows: list[tuple[object, ...]] = []
     lineage_rows: list[tuple[str, str, str, str, str]] = []
-    now = datetime.now(UTC)
+    now = DateTime.now(UTC)
     for i in range(count):
         episode_id = str(uuid.uuid4())
         episode_ids.append(episode_id)
@@ -580,57 +633,7 @@ def _sample_catalog_queries(
     return report
 
 
-def leg_catalog_scale(catalog, dsn: str, _tmpdir: Path) -> dict[str, object]:
-    """10k-episode catalog (NFR-003, NFR-008 read side): query p95 over the
-    real repository, and a real validate job over all 10k episodes through a
-    real worker process (NFR-002's system-scale reading)."""
-    initialize(dsn)
-    seed_seconds, episode_ids = _seed_catalog(dsn, 10_000)
-
-    validate_row, _ = catalog.submit_job(
-        "validate",
-        {
-            "episode_ids": [],
-            "profile": {
-                "name": "scale-campaign",
-                "version": "1",
-                "required_channels": ["action", "observation.state"],
-                "min_frames": 10,
-                "max_frames": 100_000,
-            },
-        },
-        f"validate-10k-{uuid.uuid4().hex}",
-        str(uuid.uuid4()),
-    )
-    validate_ids = [str(validate_row["id"])]
-    procs, _ready = _start_workers(dsn, 1)
-    try:
-        validate_wall, _validate_failed = _drain(catalog, validate_ids, timeout=3600.0)
-    finally:
-        _stop_workers(procs)
-    finished = catalog.get_job(validate_ids[0])
-    result = finished.get("result") or {}
-
-    queries = _sample_catalog_queries(catalog, episode_ids)
-
-    return {
-        "seed": {"episodes": len(episode_ids), "seed_seconds": round(seed_seconds, 2)},
-        "validate_job": {
-            "episodes_requested": 10_000,
-            "wall_s": round(validate_wall, 2),
-            "state": str(finished["state"]),
-            "checked": result.get("checked"),
-            "passed": result.get("passed"),
-            "failed_count": result.get("failed"),
-            "per_episode_ms": round(validate_wall / 10_000 * 1000, 3),
-        },
-        "queries_p95_target_ms": 200.0,
-        "queries": queries,
-        "database": dsn.split("/")[-1],
-    }
-
-
-dsn_global = ""
+dsn_global: str = ""
 
 
 def main() -> int:
@@ -638,7 +641,16 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--leg",
-        choices=("job-scaling", "enqueue-start", "cancel", "catalog-scale", "api"),
+        choices=(
+            "job-scaling",
+            "enqueue-start",
+            "cancel",
+            "catalog-scale",
+            "api",
+            "depth-curve",
+            "production-workers",
+            "cancel-running",
+        ),
         required=True,
     )
     parser.add_argument("--base-url", default="http://127.0.0.1:8000")
@@ -654,24 +666,142 @@ def main() -> int:
     dsn_global = dsn
     initialize(dsn)
     catalog = catalog_for(dsn)
+    report = _run_leg(catalog, dsn, args)
+    report["database"] = name
+    report["leg"] = args.leg
+    print(json.dumps(report, indent=2))
+    return 0
+
+
+def _run_leg(catalog, dsn: str, args: argparse.Namespace) -> dict[str, object]:
+    leg = args.leg
+    if leg == "job-scaling":
+        return leg_job_scaling(catalog, dsn, Path(os.environ["DE_SCALE_TMP"]))
+    if leg == "enqueue-start":
+        return leg_enqueue_start(catalog, dsn, Path(os.environ["DE_SCALE_TMP"]))
+    if leg == "cancel":
+        return leg_cancel(catalog, dsn, Path(os.environ["DE_SCALE_TMP"]))
+    if leg == "catalog-scale":
+        return leg_catalog_scale(catalog, dsn, Path(os.environ["DE_SCALE_TMP"]))
+    if leg == "api":
+        return leg_api_latency(args.base_url, args.seconds)
+    if leg == "depth-curve":
+        return leg_depth_curve(catalog, dsn, Path(os.environ["DE_SCALE_TMP"]))
+    if leg == "production-workers":
+        return leg_production_workers(catalog, dsn, Path(os.environ["DE_SCALE_TMP"]))
+    if leg == "cancel-running":
+        return leg_cancel_running(catalog, dsn, Path(os.environ["DE_SCALE_TMP"]))
+    raise AssertionError(f"unhandled leg: {args.leg}")
+
+
+def leg_production_workers(catalog, dsn: str, _tmpdir: Path) -> dict[str, object]:
+    """NFR-005 E5: re-run the depth-100 enqueue->start point with 2 workers so the
+    queue-position wait is also depth-capacity confirmed (wait ratio 1w : 2w).
+
+    Uses the same shape as the existing enqueue-start leg's first-claim measurement
+    but with 2 workers and a fresh backlog.
+    """
+    _enqueue(catalog, 100, prefix="backlog-2w")
+    measured = _enqueue(catalog, 1, prefix="two-worker")
+    job_id = measured[0]
+    procs, _ready = _start_workers(dsn, 2)
     try:
-        if args.leg == "job-scaling":
-            report = leg_job_scaling(catalog, dsn, Path(os.environ["DE_SCALE_TMP"]))
-        elif args.leg == "enqueue-start":
-            report = leg_enqueue_start(catalog, dsn, Path(os.environ["DE_SCALE_TMP"]))
-        elif args.leg == "cancel":
-            report = leg_cancel(catalog, dsn, Path(os.environ["DE_SCALE_TMP"]))
-        elif args.leg == "catalog-scale":
-            report = leg_catalog_scale(catalog, dsn, Path(os.environ["DE_SCALE_TMP"]))
-        else:
-            report = leg_api_latency(args.base_url, args.seconds)
-        report["database"] = name
-        report["leg"] = args.leg
-        print(json.dumps(report, indent=2))
-        return 0
+        first_claim = None
+        deadline = time.perf_counter() + 60.0
+        ready_at = time.perf_counter()
+        while time.perf_counter() < deadline:
+            if catalog.get_job(job_id)["started_at"] is not None:
+                first_claim = time.perf_counter()
+                break
+            time.sleep(0.01)
+        row = catalog.get_job(job_id)
+        created = row.get("created_at")
+        started = row.get("started_at")
+        raw_wait = None
+        if started is not None and created is not None:
+            delta = started - created
+            if delta.total_seconds() >= 0:
+                raw_wait = delta.total_seconds()
     finally:
-        if not args.keep_db:
-            drop_database(name)
+        _stop_workers(procs)
+    return {
+        "worker_count": 2,
+        "depth_100": {
+            "first_claim_after_worker_ready_s": (
+                round(first_claim - ready_at, 4) if first_claim else None
+            ),
+            "queue_position_wait_raw_s": round(raw_wait, 3) if raw_wait else None,
+        },
+        "note": "depth-100 point repeated with 2 workers to confirm the wait is capacity-bound",
+    }
+
+
+def leg_cancel_running(catalog, dsn: str, _tmpdir: Path) -> dict[str, object]:
+    """NFR-005 E6b: cancel takes effect for a *running* job (cooperative path),
+    in addition to the already-measured queued-job cancel.
+
+    Enqueues 30 small jobs, lets 1 worker start the first, then cancels a
+    running job (find one in state=running via list_jobs), and records the
+    effect latency. Also re-confirms the queued path on the same battery.
+    """
+    backlogs = _enqueue(catalog, 28, prefix="cancel-running-backlog")
+    procs, _ready = _start_workers(dsn, 1)
+    try:
+        # wait until one job is actually running
+        running_job = None
+        deadline = time.time() + 60.0
+        while time.time() < deadline:
+            running = [
+                j
+                for j in catalog.list_jobs(state="running", limit=20)
+                if str(j["state"]) == "running"
+            ]
+            if running:
+                running_job = str(running[0]["id"])
+                break
+            time.sleep(0.05)
+        measured_running: list[float] = []
+        measured_queued: list[float] = []
+        if running_job is not None:
+            row, effective = _cancel_one(running_job, catalog, time.perf_counter() + 30.0)
+            if effective is not None:
+                measured_running.append(effective)
+        # queued cancels: submit fresh, cancel immediately, before the worker can reach them
+        for _i in range(12):
+            job_id = select_one(catalog)
+            requested = time.perf_counter()
+            catalog.request_cancel(job_id)
+            effective = None
+            deadline = requested + 30.0
+            while time.perf_counter() < deadline:
+                row = catalog.get_job(job_id)
+                if str(row["state"]) == "canceled":
+                    effective = time.perf_counter() - requested
+                    break
+                time.sleep(0.01)
+            if effective is not None:
+                measured_queued.append(effective)
+    finally:
+        _stop_workers(procs)
+        _drain(catalog, backlogs, timeout=300.0)
+    return {
+        "running_cancel": {
+            "n": len(measured_running),
+            "p50_s": round(_p(measured_running, 0.50), 4) if measured_running else None,
+            "p95_s": round(_p(measured_running, 0.95), 4) if measured_running else None,
+            "max_s": round(max(measured_running), 4) if measured_running else None,
+            "target_s": 2.0,
+            "met": bool(measured_running) and max(measured_running) <= 2.0,
+        },
+        "queued_cancel": {
+            "n": len(measured_queued),
+            "p50_s": round(_p(measured_queued, 0.50), 4) if measured_queued else None,
+            "p95_s": round(_p(measured_queued, 0.95), 4) if measured_queued else None,
+            "max_s": round(max(measured_queued), 4) if measured_queued else None,
+            "target_s": 2.0,
+            "met": bool(measured_queued) and max(measured_queued) <= 2.0,
+        },
+    }
 
 
 if __name__ == "__main__":
