@@ -1026,15 +1026,29 @@ class PostgresCatalog:
         return _assemble_quality_summary([dict(row) for row in rows])
 
     def list_episodes(
-        self, *, limit: int = 50, state: str | None = None, flag: str | None = None
+        self,
+        *,
+        limit: int = 50,
+        state: str | None = None,
+        flag: str | None = None,
+        before: datetime | None = None,
     ) -> list[dict[str, Any]]:
         """Episode page with quality columns for the Episodes UI.
 
         Flags are curation views: `jerky`/`stalled` filter on quality signals and
         rank by the signal, `short`/`long` reorder by frame count so the tails of
         the length distribution surface first. Default is newest first.
+
+        With ``before`` the page is cursor-based on ``created_at`` and ordered
+        newest first regardless of flag ranking: a signal ranking cannot page
+        consistently (page 2 would re-include ranked rows the cursor filter
+        admits), and a download needs every matching row exactly once.
         """
         where, params, order = episode_predicates(state, flag, prefix="e.")
+        if before is not None:
+            where = [*where, "e.created_at < %s"]
+            params = [*params, before]
+            order = "e.created_at DESC"
         clause = " WHERE " + " AND ".join(where) if where else ""
         frames = EPISODE_FRAMES_SQL.format(prefix="e.")
         with connect(self.settings) as connection:

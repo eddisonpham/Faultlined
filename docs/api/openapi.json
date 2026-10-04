@@ -3229,7 +3229,7 @@
     },
     "/api/v1/artifacts": {
       "get": {
-        "description": "Newest-first page of content-addressed artifacts with their referencing episodes.",
+        "description": "Newest-first page of content-addressed artifacts with their referencing episodes.\n\n``?format=csv|jsonl`` streams every artifact as a file download.",
         "operationId": "list_artifacts_api_v1_artifacts_get",
         "parameters": [
           {
@@ -3258,6 +3258,22 @@
                 }
               ],
               "title": "Before"
+            }
+          },
+          {
+            "in": "query",
+            "name": "format",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Format"
             }
           }
         ],
@@ -3654,6 +3670,7 @@
     },
     "/api/v1/contracts": {
       "get": {
+        "description": "Completion contracts, newest first.\n\n``?format=csv|jsonl`` streams the filtered set as a download.",
         "operationId": "list_contracts_api_v1_contracts_get",
         "parameters": [
           {
@@ -3698,6 +3715,22 @@
                 }
               ],
               "title": "Before"
+            }
+          },
+          {
+            "in": "query",
+            "name": "format",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Format"
             }
           }
         ],
@@ -3815,7 +3848,7 @@
     },
     "/api/v1/episodes": {
       "get": {
-        "description": "Scriptable episode catalog with the same curation views as the UI.",
+        "description": "Scriptable episode catalog with the same curation views as the UI.\n\n``?format=csv|jsonl`` streams every matching episode as a file download,\nnewest first.",
         "operationId": "list_episodes_api_api_v1_episodes_get",
         "parameters": [
           {
@@ -3860,6 +3893,22 @@
               "minimum": 1,
               "title": "Limit",
               "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "format",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Format"
             }
           }
         ],
@@ -4143,7 +4192,7 @@
     },
     "/api/v1/failures/episodes": {
       "get": {
-        "description": "Quarantined episodes with the reason codes that put them there.",
+        "description": "Quarantined episodes with the reason codes that put them there.\n\n``?format=csv|jsonl`` streams the whole quarantined set as a download.",
         "operationId": "failures_episodes_api_v1_failures_episodes_get",
         "parameters": [
           {
@@ -4188,6 +4237,22 @@
                 }
               ],
               "title": "Reason Code"
+            }
+          },
+          {
+            "in": "query",
+            "name": "format",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Format"
             }
           }
         ],
@@ -4240,7 +4305,7 @@
     },
     "/api/v1/incidents": {
       "get": {
-        "description": "The incident queue, newest first. Read-only.",
+        "description": "The incident queue, newest first. Read-only.\n\n``?format=csv|jsonl`` streams the filtered queue as a download.",
         "operationId": "list_incidents_api_v1_incidents_get",
         "parameters": [
           {
@@ -4317,6 +4382,22 @@
                 }
               ],
               "title": "Before"
+            }
+          },
+          {
+            "in": "query",
+            "name": "format",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Format"
             }
           }
         ],
@@ -4484,7 +4565,7 @@
     },
     "/api/v1/jobs": {
       "get": {
-        "description": "Newest-first page of jobs for the Jobs UI.\n\nCursor-based: pass the last item's ``created_at`` back as ``before``. The UI\nnever asks for every row.",
+        "description": "Newest-first page of jobs for the Jobs UI.\n\nCursor-based: pass the last item's ``created_at`` back as ``before``. The UI\nnever asks for every row. ``?format=csv|jsonl`` streams the whole filtered\nset as a file download instead; ``limit``/``before`` page the JSON view only.",
         "operationId": "list_jobs_api_v1_jobs_get",
         "parameters": [
           {
@@ -4545,6 +4626,22 @@
                 }
               ],
               "title": "Before"
+            }
+          },
+          {
+            "in": "query",
+            "name": "format",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Format"
             }
           }
         ],
@@ -4806,7 +4903,7 @@
     },
     "/api/v1/metrics": {
       "get": {
-        "description": "Aggregated runtime telemetry from the JSONL metrics sink.\n\nSummaries describe every (metric, labels) sample set; series are bucketed\nmeans per metric name for sparklines. Worker heartbeat age is derived from\nthe newest heartbeat record's timestamp, over all records rather than the\nwindow (a dead worker must not vanish from a narrow window).",
+        "description": "Aggregated runtime telemetry from the JSONL metrics sink.\n\nSummaries describe every (metric, labels) sample set; series are bucketed\nmeans per metric name for sparklines. Worker heartbeat age is derived from\nthe newest heartbeat record's timestamp, over all records rather than the\nwindow (a dead worker must not vanish from a narrow window).\n\n``?format=csv|jsonl`` downloads the sparkline series (metric, t, v,\ncount) for the same window.",
         "operationId": "runtime_metrics_api_v1_metrics_get",
         "parameters": [
           {
@@ -4833,6 +4930,22 @@
               "default": 60.0,
               "title": "Bucket Seconds",
               "type": "number"
+            }
+          },
+          {
+            "in": "query",
+            "name": "format",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Format"
             }
           }
         ],
@@ -5345,6 +5458,22 @@
                 }
               ],
               "title": "Theme"
+            }
+          },
+          {
+            "in": "query",
+            "name": "format",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Format"
             }
           },
           {
@@ -5916,6 +6045,22 @@
             }
           },
           {
+            "in": "query",
+            "name": "format",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Format"
+            }
+          },
+          {
             "in": "header",
             "name": "x-fragment",
             "required": false,
@@ -6108,6 +6253,22 @@
             }
           },
           {
+            "in": "query",
+            "name": "format",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Format"
+            }
+          },
+          {
             "in": "header",
             "name": "x-fragment",
             "required": false,
@@ -6167,7 +6328,6 @@
     },
     "/ui/incidents": {
       "get": {
-        "description": "Honours `X-Fragment`, like every other polled page.\n\nThis route used to ignore the header and always return a whole document,\nwhile the page's own `data-poll` pointed at this URL. The poller then\ninjected the entire page - nav bar and all - inside the panel it was\nmeant to replace, and the operator got a page inside a page. The\nseparate `/ui/incidents/fragment` route that made the fragment reachable\nexisted and was tested, but nothing ever polled it, which is why the bug\nsurvived a test that asserted the fragment was bare.",
         "operationId": "incidents_page_route_ui_incidents_get",
         "parameters": [
           {
@@ -6184,6 +6344,22 @@
                 }
               ],
               "title": "Theme"
+            }
+          },
+          {
+            "in": "query",
+            "name": "format",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Format"
             }
           },
           {
@@ -6325,6 +6501,22 @@
                 }
               ],
               "title": "Theme"
+            }
+          },
+          {
+            "in": "query",
+            "name": "format",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Format"
             }
           },
           {
@@ -6495,7 +6687,7 @@
     },
     "/ui/metrics": {
       "get": {
-        "description": "Live telemetry dashboard over the same model as /api/v1/metrics.",
+        "description": "Live telemetry dashboard over the same model as the metrics read.",
         "operationId": "ui_metrics_ui_metrics_get",
         "parameters": [
           {
@@ -6528,6 +6720,22 @@
                 }
               ],
               "title": "Theme"
+            }
+          },
+          {
+            "in": "query",
+            "name": "format",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Format"
             }
           },
           {

@@ -29,10 +29,18 @@ from data_engine.api.cluster_schemas import (
     ClusterReviewRequest,
     ClusterReviewUndoResponse,
 )
+from data_engine.api.download import (
+    CURSOR_START,
+    columns_of,
+    download_response,
+    paged_rows,
+    parse_download_format,
+)
 from data_engine.api.errors import install_error_handling
 from data_engine.api.schemas import (
     AnyJobRequest,
     ArtifactListResponse,
+    ArtifactSummary,
     BuildDetailResponse,
     BuildListResponse,
     ContractListResponse,
@@ -42,7 +50,9 @@ from data_engine.api.schemas import (
     EpisodeListResponse,
     EpisodeQualityResponse,
     EpisodeResponse,
+    EpisodeSummary,
     EpisodeValidationResponse,
+    FailingEpisodeRow,
     FailingEpisodesResponse,
     FailureSummaryResponse,
     IncidentListResponse,
@@ -52,6 +62,7 @@ from data_engine.api.schemas import (
     JobListResponse,
     JobReportResponse,
     JobResponse,
+    JobSummary,
     MetricsResponse,
     MonitoringHealthResponse,
     QualitySummaryResponse,
@@ -165,6 +176,11 @@ def _first_message(exc: ValidationError) -> str:
 #: things depending on which endpoint a client called.
 Limit = Annotated[int, Query(ge=1, le=500)]
 
+#: ``?format=csv|jsonl`` on a list route streams the same read as a file
+#: download (ADR 0030). Named ``download`` in Python because ``format`` shadows
+#: the builtin; the wire name is what matters. Absent = the JSON view.
+Download = Annotated[str | None, Query(alias="format")]
+
 
 def _parse_state(state: str | None) -> JobState | None:
     if state is None:
@@ -230,6 +246,17 @@ def _route_template(app: FastAPI, request: Request) -> str:
             if getattr(route, "endpoint", None) is endpoint:
                 return str(getattr(route, "path", "unmatched"))
     return "unmatched"
+
+
+def _download_redirect(request: Request, api_path: str) -> RedirectResponse:
+    """Resolve a UI download link to the same read's serializer (ADR 0030).
+
+    The link is the page's own URL with ``format`` added; the browser follows
+    this redirect silently, so the download is literally the view on screen and
+    the transport never appears in the operator's page.
+    """
+    query = str(request.url.query)
+    return RedirectResponse(f"{api_path}?{query}" if query else api_path, status_code=302)
 
 
 def _parse_cursor(before: str | None) -> datetime | None:
@@ -410,14 +437,31 @@ def create_app(
         type: str | None = None,
         limit: Limit = 50,
         before: str | None = None,
-    ) -> dict[str, Any]:
+        download: Download = None,
+    ) -> Response | dict[str, Any]:
         """Newest-first page of jobs for the Jobs UI.
 
         Cursor-based: pass the last item's ``created_at`` back as ``before``. The UI
-        never asks for every row.
+        never asks for every row. ``?format=csv|jsonl`` streams the whole filtered
+        set as a file download instead; ``limit``/``before`` page the JSON view only.
         """
         catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
         parsed_state = _parse_state(state)
+        fmt = parse_download_format(download)
+        if fmt:
+
+            def fetch(*, limit: int, before: datetime | None) -> list[dict[str, Any]]:
+                return catalog_for_request.list_jobs(
+                    state=parsed_state, job_type=type, limit=limit, before=before
+                )
+
+            return download_response(
+                stem="jobs",
+                fmt=fmt,
+                columns=columns_of(JobSummary),
+                rows=paged_rows(fetch),
+                item_model=JobSummary,
+            )
         parsed_before = _parse_cursor(before)
         rows = catalog_for_request.list_jobs(
             state=parsed_state, job_type=type, limit=limit, before=parsed_before
@@ -428,10 +472,29 @@ def create_app(
 
     @app.get("/api/v1/artifacts", response_model=ArtifactListResponse)
     def list_artifacts(
-        request: Request, limit: Limit = 50, before: str | None = None
-    ) -> dict[str, Any]:
-        """Newest-first page of content-addressed artifacts with their referencing episodes."""
+        request: Request,
+        limit: Limit = 50,
+        before: str | None = None,
+        download: Download = None,
+    ) -> Response | dict[str, Any]:
+        """Newest-first page of content-addressed artifacts with their referencing episodes.
+
+        ``?format=csv|jsonl`` streams every artifact as a file download.
+        """
         catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
+        fmt = parse_download_format(download)
+        if fmt:
+
+            def fetch(*, limit: int, before: datetime | None) -> list[dict[str, Any]]:
+                return catalog_for_request.list_artifacts(limit=limit, before=before)
+
+            return download_response(
+                stem="artifacts",
+                fmt=fmt,
+                columns=columns_of(ArtifactSummary),
+                rows=paged_rows(fetch),
+                item_model=ArtifactSummary,
+            )
         rows = catalog_for_request.list_artifacts(limit=limit, before=_parse_cursor(before))
         next_before = rows[-1]["created_at"] if len(rows) == limit else None
         return {"items": rows, "next_before": next_before}
@@ -447,16 +510,34 @@ def create_app(
         request: Request,
         window_seconds: float | None = None,
         bucket_seconds: float = 60.0,
-    ) -> dict[str, Any]:
+        download: Download = None,
+    ) -> Response | dict[str, Any]:
         """Aggregated runtime telemetry from the JSONL metrics sink.
 
         Summaries describe every (metric, labels) sample set; series are bucketed
         means per metric name for sparklines. Worker heartbeat age is derived from
         the newest heartbeat record's timestamp, over all records rather than the
         window (a dead worker must not vanish from a narrow window).
+
+        ``?format=csv|jsonl`` downloads the sparkline series (metric, t, v,
+        count) for the same window.
         """
         catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
-        return _metrics_model(configured, catalog_for_request, window_seconds, bucket_seconds)
+        model = _metrics_model(configured, catalog_for_request, window_seconds, bucket_seconds)
+        fmt = parse_download_format(download)
+        if fmt:
+            rows = [
+                {"metric": name, **point}
+                for name, points in model["series"].items()
+                for point in points
+            ]
+            return download_response(
+                stem="metrics-series",
+                fmt=fmt,
+                columns=("metric", "t", "v", "count"),
+                rows=iter(rows),
+            )
+        return model
 
     @app.get("/ui/faultlined.css")
     def ui_layout_css() -> Response:
@@ -497,8 +578,11 @@ def create_app(
         request: Request,
         state: str | None = None,
         theme: str | None = None,
+        download: Download = None,
         x_fragment: str | None = Header(default=None),
-    ) -> HTMLResponse:
+    ) -> Response:
+        if parse_download_format(download):
+            return _download_redirect(request, "/api/v1/jobs")
         catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
         rows = catalog_for_request.list_jobs(state=_parse_state(state), limit=50)
         summaries = {"items": [_job_summary(row) for row in rows]}
@@ -657,8 +741,11 @@ def create_app(
     def ui_artifacts(
         request: Request,
         theme: str | None = None,
+        download: Download = None,
         x_fragment: str | None = Header(default=None),
-    ) -> HTMLResponse:
+    ) -> Response:
+        if parse_download_format(download):
+            return _download_redirect(request, "/api/v1/artifacts")
         catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
         items = {"items": catalog_for_request.list_artifacts(limit=50)}
         if x_fragment:
@@ -734,8 +821,11 @@ def create_app(
         request: Request,
         theme: str | None = None,
         limit: Limit = 50,
+        download: Download = None,
         x_fragment: str | None = Header(default=None),
-    ) -> HTMLResponse:
+    ) -> Response:
+        if parse_download_format(download):
+            return _download_redirect(request, "/api/v1/failures/episodes")
         catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
         model = {
             "summary": catalog_for_request.failure_summary(),
@@ -771,9 +861,12 @@ def create_app(
         request: Request,
         window_seconds: float | None = None,
         theme: str | None = None,
+        download: Download = None,
         x_fragment: str | None = Header(default=None),
-    ) -> HTMLResponse:
-        """Live telemetry dashboard over the same model as /api/v1/metrics."""
+    ) -> Response:
+        """Live telemetry dashboard over the same model as the metrics read."""
+        if parse_download_format(download):
+            return _download_redirect(request, "/api/v1/metrics")
         catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
         model = _metrics_model(configured, catalog_for_request, window_seconds)
         if x_fragment:
@@ -786,9 +879,12 @@ def create_app(
         state: str | None = None,
         flag: str | None = None,
         theme: str | None = None,
+        download: Download = None,
         x_fragment: str | None = Header(default=None),
-    ) -> HTMLResponse:
+    ) -> Response:
         """Episode index with curation flags (jerky / stalled / short / long)."""
+        if parse_download_format(download):
+            return _download_redirect(request, "/api/v1/episodes")
         if state is not None and state not in EPISODE_STATES:
             raise HTTPException(status_code=422, detail=f"unknown episode state: {state}")
         if flag is not None and flag not in EPISODE_FLAGS:
@@ -862,13 +958,40 @@ def create_app(
         state: str | None = None,
         flag: str | None = None,
         limit: Limit = 50,
-    ) -> dict[str, Any]:
-        """Scriptable episode catalog with the same curation views as the UI."""
+        download: Download = None,
+    ) -> Response | dict[str, Any]:
+        """Scriptable episode catalog with the same curation views as the UI.
+
+        ``?format=csv|jsonl`` streams every matching episode as a file download,
+        newest first.
+        """
         if state is not None and state not in EPISODE_STATES:
             raise HTTPException(status_code=422, detail=f"unknown episode state: {state}")
         if flag is not None and flag not in EPISODE_FLAGS:
             raise HTTPException(status_code=422, detail=f"unknown flag: {flag}")
         catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
+        fmt = parse_download_format(download)
+        if fmt:
+
+            def fetch(*, limit: int, before: datetime | None) -> list[dict[str, Any]]:
+                # Always through the cursor path (a far-future first cursor): it
+                # orders newest-first, which is what pages consistently. The
+                # flag views' signal ranking is a display affordance and would
+                # duplicate rows across a page boundary.
+                return catalog_for_request.list_episodes(
+                    limit=limit,
+                    state=state or None,
+                    flag=flag or None,
+                    before=before or CURSOR_START,
+                )
+
+            return download_response(
+                stem="episodes",
+                fmt=fmt,
+                columns=columns_of(EpisodeSummary),
+                rows=paged_rows(fetch),
+                item_model=EpisodeSummary,
+            )
         return {
             "items": catalog_for_request.list_episodes(
                 limit=limit, state=state or None, flag=flag or None
@@ -896,11 +1019,30 @@ def create_app(
         limit: Limit = 50,
         before: str | None = None,
         reason_code: str | None = None,
-    ) -> dict[str, Any]:
-        """Quarantined episodes with the reason codes that put them there."""
+        download: Download = None,
+    ) -> Response | dict[str, Any]:
+        """Quarantined episodes with the reason codes that put them there.
+
+        ``?format=csv|jsonl`` streams the whole quarantined set as a download.
+        """
         if reason_code is not None and reason_code not in REASON_CODES:
             raise HTTPException(status_code=422, detail=f"unknown reason_code: {reason_code}")
         catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
+        fmt = parse_download_format(download)
+        if fmt:
+
+            def fetch(*, limit: int, before: datetime | None) -> list[dict[str, Any]]:
+                return catalog_for_request.failing_episodes(
+                    limit=limit, before=before, reason_code=reason_code or None
+                )
+
+            return download_response(
+                stem="failures",
+                fmt=fmt,
+                columns=columns_of(FailingEpisodeRow),
+                rows=paged_rows(fetch),
+                item_model=FailingEpisodeRow,
+            )
         rows = catalog_for_request.failing_episodes(
             limit=limit, before=_parse_cursor(before), reason_code=reason_code or None
         )
@@ -1436,8 +1578,12 @@ def create_app(
         label: str | None = None,
         limit: Limit = 50,
         before: str | None = None,
-    ) -> dict[str, Any]:
-        """The incident queue, newest first. Read-only."""
+        download: Download = None,
+    ) -> Response | dict[str, Any]:
+        """The incident queue, newest first. Read-only.
+
+        ``?format=csv|jsonl`` streams the filtered queue as a download.
+        """
         if severity is not None and severity not in {item.value for item in Severity}:
             raise HTTPException(status_code=422, detail=f"unknown severity: {severity}")
         if label is not None:
@@ -1446,6 +1592,25 @@ def create_app(
             except ValueError as exc:
                 raise HTTPException(status_code=422, detail=f"unknown label: {label}") from exc
         catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
+        fmt = parse_download_format(download)
+        if fmt:
+
+            def fetch(*, limit: int, before: datetime | None) -> list[dict[str, Any]]:
+                return catalog_for_request.list_incidents(
+                    severity=severity,
+                    status=status,
+                    label=label,
+                    limit=limit,
+                    before=before,
+                )
+
+            return download_response(
+                stem="incidents",
+                fmt=fmt,
+                columns=columns_of(IncidentPayload),
+                rows=paged_rows(fetch),
+                item_model=IncidentPayload,
+            )
         return {
             "items": catalog_for_request.list_incidents(
                 severity=severity,
@@ -1546,9 +1711,32 @@ def create_app(
 
     @app.get("/api/v1/contracts", response_model=ContractListResponse)
     def list_contracts(
-        request: Request, outcome: str | None = None, limit: Limit = 50, before: str | None = None
-    ) -> dict[str, Any]:
+        request: Request,
+        outcome: str | None = None,
+        limit: Limit = 50,
+        before: str | None = None,
+        download: Download = None,
+    ) -> Response | dict[str, Any]:
+        """Completion contracts, newest first.
+
+        ``?format=csv|jsonl`` streams the filtered set as a download.
+        """
         catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
+        fmt = parse_download_format(download)
+        if fmt:
+
+            def fetch(*, limit: int, before: datetime | None) -> list[dict[str, Any]]:
+                return catalog_for_request.list_contracts(
+                    outcome=outcome, limit=limit, before=before
+                )
+
+            return download_response(
+                stem="contracts",
+                fmt=fmt,
+                columns=columns_of(ContractPayload),
+                rows=paged_rows(fetch),
+                item_model=ContractPayload,
+            )
         return {
             "items": catalog_for_request.list_contracts(
                 outcome=outcome, limit=limit, before=_parse_cursor(before)
@@ -1580,8 +1768,11 @@ def create_app(
     def incidents_page_route(
         request: Request,
         theme: str | None = None,
+        download: Download = None,
         x_fragment: str | None = Header(default=None),
-    ) -> HTMLResponse:
+    ) -> Response:
+        if parse_download_format(download):
+            return _download_redirect(request, "/api/v1/incidents")
         """Honours `X-Fragment`, like every other polled page.
 
         This route used to ignore the header and always return a whole document,

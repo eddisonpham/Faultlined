@@ -194,7 +194,19 @@ depends on the other.
    measurement, offline and non-authoritative if at all.
 3. **Phase order swap** (§3) if downloads are not the top operator pain.
 
-## 6. Not built (both NOT-lists, condensed)
+## 6. Execution record
+
+Running log as slices land; deviations from §1-§5 are stated, not hidden.
+
+- **B1 (downloads) — shipped 2026-10-04.** `api/download.py` shared streaming serializer;
+  `?format=csv|jsonl` on jobs/episodes/artifacts/failures/episodes/incidents/contracts/metrics;
+  UI Download links on the six table pages; `catalog.list_episodes` gained a `before` cursor
+  (the flag views' signal ranking cannot page consistently, so downloads order newest-first
+  through the cursor path — membership identical, order differs). ADR 0030. Bound at 50,000
+  rows per download; the first row is pulled before streaming so catalog failures stay JSON
+  errors. No ADR deviation beyond what ADR 0030 records.
+
+## 7. Not built (both NOT-lists, condensed)
 
 No BERTopic/embedding cluster stack; no LLM in the grouping or decision path; no auto-labeling;
 no metrics database or scraper; no OpenLineage/Marquez stack; no email-first delivery; no export

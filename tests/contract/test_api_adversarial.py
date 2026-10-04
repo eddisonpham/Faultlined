@@ -46,7 +46,12 @@ class RecordingCatalog:
         return []
 
     def list_episodes(
-        self, *, limit: int = 50, state: str | None = None, flag: str | None = None
+        self,
+        *,
+        limit: int = 50,
+        state: str | None = None,
+        flag: str | None = None,
+        before: Any = None,
     ) -> list[dict[str, Any]]:
         self.limits["episodes"] = limit
         return []

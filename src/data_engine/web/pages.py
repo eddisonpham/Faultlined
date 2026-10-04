@@ -464,6 +464,23 @@ def _state_badge(state: str) -> str:
     return f'<span class="text-{css}">{escape(state)}</span>'
 
 
+def download_links(page_path: str, query: str = "") -> str:
+    """CSV/JSONL links that reproduce exactly the filtered view (ADR 0030).
+
+    The link is the page's own URL with ``format`` added - the same query string
+    the table was rendered with - so the downloaded rows are the rows on screen.
+    The route resolves it to the shared serializer (a redirect the browser
+    follows silently), which also keeps the transport out of the operator's
+    view. The response's own ``Content-Disposition`` names the file.
+    """
+    href = f"{page_path}{query}{'&' if query else '?'}"
+    links = " · ".join(
+        f'<a class="fine-use-focusable" href="{escape(href)}format={fmt}">{fmt}</a>'
+        for fmt in ("csv", "jsonl")
+    )
+    return f'<p class="de-sub">download // {links}</p>'
+
+
 def _table(caption: str, headers: str, rows: str, extra: str = "", empty: str | None = None) -> str:
     """A data table with a real caption, inside a scroll container.
 
@@ -736,6 +753,7 @@ def jobs_page(model: dict[str, Any], state_filter: str | None, theme: str) -> st
             "newest first",
         )
         + filters
+        + download_links("/ui/jobs", query)
     )
     return _page("Jobs", "/ui/jobs", body, theme)
 
@@ -987,7 +1005,8 @@ def artifacts_page(model: dict[str, Any], theme: str) -> str:
             "Stored artifacts",
             _live("/ui/artifacts", 5000, _artifacts_body(model)),
             "content addressed",
-        ),
+        )
+        + download_links("/ui/artifacts"),
         theme,
     )
 
@@ -1093,7 +1112,12 @@ def _bucket_time(bucket: dict[str, Any]) -> str:
 
 
 def metrics_page(model: dict[str, Any], theme: str) -> str:
-    return _page("Metrics", "/ui/metrics", _live("/ui/metrics", 5000, _metrics_body(model)), theme)
+    return _page(
+        "Metrics",
+        "/ui/metrics",
+        _live("/ui/metrics", 5000, _metrics_body(model)) + download_links("/ui/metrics"),
+        theme,
+    )
 
 
 def metrics_fragment(model: dict[str, Any]) -> str:
@@ -1274,7 +1298,7 @@ def failures_page(model: dict[str, Any], theme: str) -> str:
     return _page(
         "Failures",
         "/ui/failures",
-        _live("/ui/failures", 10000, _failures_body(model)),
+        _live("/ui/failures", 10000, _failures_body(model)) + download_links("/ui/failures"),
         theme,
     )
 
@@ -1368,7 +1392,7 @@ def incidents_page(model: dict[str, Any], theme: str) -> str:
     return _page(
         "Incidents",
         "/ui/incidents",
-        _live("/ui/incidents", 10000, _incidents_body(model)),
+        _live("/ui/incidents", 10000, _incidents_body(model)) + download_links("/ui/incidents"),
         theme,
     )
 
@@ -1803,6 +1827,7 @@ def episodes_page(
             "quality scored at ingest",
         )
         + filters
+        + download_links("/ui/episodes", query)
     )
     return _page("Episodes", "/ui/episodes", body, theme)
 

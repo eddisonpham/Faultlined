@@ -74,6 +74,9 @@ endpoints in the table are architecture targets, not implemented yet.
 - **Auth stance (v1):** none; server binds `127.0.0.1` by default. Remote exposure is opt-in config and documented as
   insecure-by-design (single-user local tier). Multi-user auth is deferred (requirements §7) — never home-grown.
 - **Correlation:** clients may send `X-Correlation-Id`; otherwise one is generated and returned in the header.
+- **Downloads:** every list route accepts `?format=csv|jsonl` and answers with a streamed file
+  (`Content-Disposition: attachment`); the CSV header is the response model's field order and rows
+  stream from the catalog cursor (ADR 0030). The UI's Download links reuse the view's query string.
 
 ## Internal interfaces (narrow seams)
 
