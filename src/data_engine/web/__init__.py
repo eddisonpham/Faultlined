@@ -36,6 +36,9 @@ from data_engine.web.pages import (
     status_page,
     theme_or_default,
     vendor_css,
+    vocabulary_detail_page,
+    vocabulary_fragment,
+    vocabulary_page,
 )
 from data_engine.web.records import (
     benchmarks_fragment,
@@ -89,4 +92,7 @@ __all__ = [
     "status_page",
     "theme_or_default",
     "vendor_css",
+    "vocabulary_detail_page",
+    "vocabulary_fragment",
+    "vocabulary_page",
 ]

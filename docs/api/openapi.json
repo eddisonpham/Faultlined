@@ -224,24 +224,6 @@
         "title": "BuildSummary",
         "type": "object"
       },
-      "ClusterConfirmRequest": {
-        "additionalProperties": false,
-        "description": "Confirm a proposal: give it a name, which also freezes it.",
-        "properties": {
-          "label": {
-            "description": "Human name for the group.",
-            "maxLength": 120,
-            "minLength": 1,
-            "title": "Label",
-            "type": "string"
-          }
-        },
-        "required": [
-          "label"
-        ],
-        "title": "ClusterConfirmRequest",
-        "type": "object"
-      },
       "ClusterDetailResponse": {
         "properties": {
           "members": {
@@ -260,31 +242,6 @@
           "members"
         ],
         "title": "ClusterDetailResponse",
-        "type": "object"
-      },
-      "ClusterHealthResponse": {
-        "description": "The numbers the page leads with, without the proposals.",
-        "properties": {
-          "health": {
-            "additionalProperties": true,
-            "title": "Health",
-            "type": "object"
-          },
-          "run": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ClusterRun"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "health"
-        ],
-        "title": "ClusterHealthResponse",
         "type": "object"
       },
       "ClusterListResponse": {
@@ -432,65 +389,6 @@
         "title": "ClusterProposal",
         "type": "object"
       },
-      "ClusterRebuildRequest": {
-        "additionalProperties": false,
-        "description": "Recompute proposals. Every field changes what the numbers mean, so none is free.",
-        "properties": {
-          "ignore": {
-            "description": "Axes to remove before grouping. Removing too little fragments a task across clusters; removing too much merges unrelated tasks. Defaults to none.",
-            "items": {
-              "enum": [
-                "verb",
-                "colour",
-                "site"
-              ],
-              "type": "string"
-            },
-            "title": "Ignore",
-            "type": "array"
-          },
-          "limit": {
-            "default": 5000,
-            "description": "Maximum distinct task strings to read.",
-            "maximum": 50000.0,
-            "minimum": 1.0,
-            "title": "Limit",
-            "type": "integer"
-          },
-          "radius": {
-            "default": 0.3,
-            "description": "Cosine distance within which a core joins the nearest cluster.",
-            "maximum": 2.0,
-            "minimum": 0.0,
-            "title": "Radius",
-            "type": "number"
-          },
-          "rule": {
-            "default": "running_mean",
-            "description": "How a cluster centroid moves as members arrive.",
-            "enum": [
-              "running_mean",
-              "sliding_8",
-              "sliding_32",
-              "ema_0.98"
-            ],
-            "title": "Rule",
-            "type": "string"
-          },
-          "source": {
-            "default": "catalog",
-            "description": "`catalog` clusters the distinct task strings the catalog holds. `sample` clusters the shipped LeRobot sentences instead, which is illustrative data and is labelled as such.",
-            "enum": [
-              "catalog",
-              "sample"
-            ],
-            "title": "Source",
-            "type": "string"
-          }
-        },
-        "title": "ClusterRebuildRequest",
-        "type": "object"
-      },
       "ClusterReviewCandidate": {
         "properties": {
           "cluster_key": {
@@ -571,26 +469,6 @@
         "title": "ClusterReviewDecision",
         "type": "object"
       },
-      "ClusterReviewDecisionResponse": {
-        "properties": {
-          "decisions": {
-            "items": {
-              "$ref": "#/components/schemas/ClusterReviewDecision"
-            },
-            "title": "Decisions",
-            "type": "array"
-          },
-          "reviewed": {
-            "title": "Reviewed",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "reviewed"
-        ],
-        "title": "ClusterReviewDecisionResponse",
-        "type": "object"
-      },
       "ClusterReviewListResponse": {
         "properties": {
           "candidates": {
@@ -609,53 +487,6 @@
           }
         },
         "title": "ClusterReviewListResponse",
-        "type": "object"
-      },
-      "ClusterReviewRequest": {
-        "additionalProperties": false,
-        "properties": {
-          "disposition": {
-            "enum": [
-              "class",
-              "dismissed"
-            ],
-            "title": "Disposition",
-            "type": "string"
-          },
-          "label": {
-            "default": "",
-            "maxLength": 120,
-            "title": "Label",
-            "type": "string"
-          },
-          "tasks": {
-            "items": {
-              "type": "string"
-            },
-            "maxItems": 25,
-            "minItems": 1,
-            "title": "Tasks",
-            "type": "array"
-          }
-        },
-        "required": [
-          "tasks",
-          "disposition"
-        ],
-        "title": "ClusterReviewRequest",
-        "type": "object"
-      },
-      "ClusterReviewUndoResponse": {
-        "properties": {
-          "reopened": {
-            "title": "Reopened",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "reopened"
-        ],
-        "title": "ClusterReviewUndoResponse",
         "type": "object"
       },
       "ClusterRun": {
@@ -2340,6 +2171,25 @@
         "title": "QualitySummaryResponse",
         "type": "object"
       },
+      "QueueCursor": {
+        "description": "Continuation position in the ranked queue: pass back as after_* params.",
+        "properties": {
+          "episodes": {
+            "title": "Episodes",
+            "type": "integer"
+          },
+          "task_string": {
+            "title": "Task String",
+            "type": "string"
+          }
+        },
+        "required": [
+          "episodes",
+          "task_string"
+        ],
+        "title": "QueueCursor",
+        "type": "object"
+      },
       "ResourceSample": {
         "properties": {
           "cpu_percent": {
@@ -3197,6 +3047,645 @@
         ],
         "title": "ValidationResultResponse",
         "type": "object"
+      },
+      "VocabularyCandidate": {
+        "description": "One ranked suggestion. A suggestion is a queue item, never an action.",
+        "properties": {
+          "core": {
+            "title": "Core",
+            "type": "string"
+          },
+          "entry_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Entry Id"
+          },
+          "entry_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Entry Label"
+          },
+          "episodes": {
+            "title": "Episodes",
+            "type": "integer"
+          },
+          "kind": {
+            "enum": [
+              "attach",
+              "new_entry"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "task_strings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Task Strings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "kind",
+          "core",
+          "task_strings",
+          "episodes"
+        ],
+        "title": "VocabularyCandidate",
+        "type": "object"
+      },
+      "VocabularyCandidateListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/VocabularyCandidate"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "VocabularyCandidateListResponse",
+        "type": "object"
+      },
+      "VocabularyDismissRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "task_string": {
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Task String",
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_string"
+        ],
+        "title": "VocabularyDismissRequest",
+        "type": "object"
+      },
+      "VocabularyEntry": {
+        "description": "One curated activity. The id is stable; the label is what a human approved.",
+        "properties": {
+          "core": {
+            "default": "",
+            "title": "Core",
+            "type": "string"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "created_by": {
+            "default": "",
+            "title": "Created By",
+            "type": "string"
+          },
+          "episodes": {
+            "default": 0,
+            "title": "Episodes",
+            "type": "integer"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "notes": {
+            "default": "",
+            "title": "Notes",
+            "type": "string"
+          },
+          "preferred_label": {
+            "title": "Preferred Label",
+            "type": "string"
+          },
+          "task_count": {
+            "default": 0,
+            "title": "Task Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "preferred_label"
+        ],
+        "title": "VocabularyEntry",
+        "type": "object"
+      },
+      "VocabularyEntryCreateRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "notes": {
+            "default": "",
+            "maxLength": 2000,
+            "title": "Notes",
+            "type": "string"
+          },
+          "preferred_label": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Preferred Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "preferred_label"
+        ],
+        "title": "VocabularyEntryCreateRequest",
+        "type": "object"
+      },
+      "VocabularyEntryDetailResponse": {
+        "properties": {
+          "entry": {
+            "$ref": "#/components/schemas/VocabularyEntry"
+          },
+          "members": {
+            "items": {
+              "$ref": "#/components/schemas/VocabularyMember"
+            },
+            "title": "Members",
+            "type": "array"
+          }
+        },
+        "required": [
+          "entry",
+          "members"
+        ],
+        "title": "VocabularyEntryDetailResponse",
+        "type": "object"
+      },
+      "VocabularyEntryUpdateRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "notes": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          },
+          "preferred_label": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preferred Label"
+          }
+        },
+        "title": "VocabularyEntryUpdateRequest",
+        "type": "object"
+      },
+      "VocabularyEvent": {
+        "properties": {
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "created_by": {
+            "default": "",
+            "title": "Created By",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "title": "Payload",
+            "type": "object"
+          },
+          "undone_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Undone At"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "payload"
+        ],
+        "title": "VocabularyEvent",
+        "type": "object"
+      },
+      "VocabularyEventListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/VocabularyEvent"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "VocabularyEventListResponse",
+        "type": "object"
+      },
+      "VocabularyEventUndoResponse": {
+        "properties": {
+          "event_id": {
+            "title": "Event Id",
+            "type": "integer"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "undone": {
+            "title": "Undone",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "event_id",
+          "kind",
+          "undone"
+        ],
+        "title": "VocabularyEventUndoResponse",
+        "type": "object"
+      },
+      "VocabularyHealth": {
+        "description": "The numbers the page leads with; unmapped share is the headline (ADR 0029 \u00a79).",
+        "properties": {
+          "dismissed_episodes": {
+            "default": 0,
+            "title": "Dismissed Episodes",
+            "type": "integer"
+          },
+          "dismissed_strings": {
+            "default": 0,
+            "title": "Dismissed Strings",
+            "type": "integer"
+          },
+          "entries": {
+            "default": 0,
+            "title": "Entries",
+            "type": "integer"
+          },
+          "episodes": {
+            "default": 0,
+            "title": "Episodes",
+            "type": "integer"
+          },
+          "mapped_episodes": {
+            "default": 0,
+            "title": "Mapped Episodes",
+            "type": "integer"
+          },
+          "mapped_strings": {
+            "default": 0,
+            "title": "Mapped Strings",
+            "type": "integer"
+          },
+          "orphaned_mappings": {
+            "default": 0,
+            "title": "Orphaned Mappings",
+            "type": "integer"
+          },
+          "pending_candidates": {
+            "default": 0,
+            "title": "Pending Candidates",
+            "type": "integer"
+          },
+          "task_strings": {
+            "default": 0,
+            "title": "Task Strings",
+            "type": "integer"
+          },
+          "unmapped_episode_share": {
+            "default": 0.0,
+            "title": "Unmapped Episode Share",
+            "type": "number"
+          },
+          "unmapped_episodes": {
+            "default": 0,
+            "title": "Unmapped Episodes",
+            "type": "integer"
+          },
+          "unmapped_string_share": {
+            "default": 0.0,
+            "title": "Unmapped String Share",
+            "type": "number"
+          },
+          "unmapped_strings": {
+            "default": 0,
+            "title": "Unmapped Strings",
+            "type": "integer"
+          }
+        },
+        "title": "VocabularyHealth",
+        "type": "object"
+      },
+      "VocabularyListResponse": {
+        "properties": {
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/VocabularyEntry"
+            },
+            "title": "Entries",
+            "type": "array"
+          },
+          "health": {
+            "$ref": "#/components/schemas/VocabularyHealth"
+          }
+        },
+        "required": [
+          "entries",
+          "health"
+        ],
+        "title": "VocabularyListResponse",
+        "type": "object"
+      },
+      "VocabularyMapRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "entry_id": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Entry Id",
+            "type": "string"
+          },
+          "task_string": {
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Task String",
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_string",
+          "entry_id"
+        ],
+        "title": "VocabularyMapRequest",
+        "type": "object"
+      },
+      "VocabularyMapping": {
+        "properties": {
+          "entry_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Entry Id"
+          },
+          "provenance": {
+            "title": "Provenance",
+            "type": "string"
+          },
+          "task_string": {
+            "title": "Task String",
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_string",
+          "provenance"
+        ],
+        "title": "VocabularyMapping",
+        "type": "object"
+      },
+      "VocabularyMember": {
+        "properties": {
+          "episodes": {
+            "default": 0,
+            "title": "Episodes",
+            "type": "integer"
+          },
+          "mapped_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mapped At"
+          },
+          "provenance": {
+            "title": "Provenance",
+            "type": "string"
+          },
+          "task_string": {
+            "title": "Task String",
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_string",
+          "provenance"
+        ],
+        "title": "VocabularyMember",
+        "type": "object"
+      },
+      "VocabularyMergeRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "target_entry_id": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Target Entry Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "target_entry_id"
+        ],
+        "title": "VocabularyMergeRequest",
+        "type": "object"
+      },
+      "VocabularyMergeResponse": {
+        "properties": {
+          "event_id": {
+            "title": "Event Id",
+            "type": "integer"
+          },
+          "moved": {
+            "title": "Moved",
+            "type": "integer"
+          },
+          "source": {
+            "$ref": "#/components/schemas/VocabularyEntry"
+          },
+          "target_id": {
+            "title": "Target Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "event_id",
+          "moved",
+          "source",
+          "target_id"
+        ],
+        "title": "VocabularyMergeResponse",
+        "type": "object"
+      },
+      "VocabularySplitRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "new_label": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "New Label",
+            "type": "string"
+          },
+          "task_strings": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 500,
+            "minItems": 1,
+            "title": "Task Strings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "task_strings",
+          "new_label"
+        ],
+        "title": "VocabularySplitRequest",
+        "type": "object"
+      },
+      "VocabularySplitResponse": {
+        "properties": {
+          "entry_id": {
+            "title": "Entry Id",
+            "type": "string"
+          },
+          "event_id": {
+            "title": "Event Id",
+            "type": "integer"
+          },
+          "moved": {
+            "title": "Moved",
+            "type": "integer"
+          },
+          "new_entry": {
+            "$ref": "#/components/schemas/VocabularyEntry"
+          }
+        },
+        "required": [
+          "event_id",
+          "moved",
+          "entry_id",
+          "new_entry"
+        ],
+        "title": "VocabularySplitResponse",
+        "type": "object"
+      },
+      "VocabularyUnmappedResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/VocabularyUnmappedRow"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_after": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/QueueCursor"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "VocabularyUnmappedResponse",
+        "type": "object"
+      },
+      "VocabularyUnmappedRow": {
+        "description": "One novel task string - the bounded review queue's unit.",
+        "properties": {
+          "episodes": {
+            "title": "Episodes",
+            "type": "integer"
+          },
+          "first_seen": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Seen"
+          },
+          "task_string": {
+            "title": "Task String",
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_string",
+          "episodes"
+        ],
+        "title": "VocabularyUnmappedRow",
+        "type": "object"
       }
     }
   },
@@ -3402,89 +3891,7 @@
         "summary": "List Clusters"
       }
     },
-    "/api/v1/clusters/rebuild": {
-      "post": {
-        "description": "Recompute proposals from the catalog's task strings.\n\nSynchronous on purpose: at a few thousand task strings the whole rebuild is\nmilliseconds of pure Python, and a queued job would add a failure mode (a run\nthat never finishes) to a page an operator uses to check their work.",
-        "operationId": "rebuild_clusters_api_v1_clusters_rebuild_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ClusterRebuildRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ClusterHealthResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Rebuild Clusters"
-      }
-    },
     "/api/v1/clusters/review": {
-      "delete": {
-        "description": "Reopen up to 25 reviewed task strings by removing their disposition.",
-        "operationId": "reopen_cluster_review_api_v1_clusters_review_delete",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "tasks",
-            "required": true,
-            "schema": {
-              "items": {
-                "type": "string"
-              },
-              "maxItems": 25,
-              "minItems": 1,
-              "title": "Tasks",
-              "type": "array"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ClusterReviewUndoResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Reopen Cluster Review"
-      },
       "get": {
         "description": "Current bounded triage queue and the latest human decisions.",
         "operationId": "list_cluster_review_api_v1_clusters_review_get",
@@ -3501,43 +3908,6 @@
           }
         },
         "summary": "List Cluster Review"
-      },
-      "post": {
-        "description": "Create a named annotation or dismiss selected unresolved candidates.",
-        "operationId": "decide_cluster_review_api_v1_clusters_review_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ClusterReviewRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ClusterReviewDecisionResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Decide Cluster Review"
       }
     },
     "/api/v1/clusters/{key}": {
@@ -3578,94 +3948,6 @@
           }
         },
         "summary": "Cluster Detail"
-      }
-    },
-    "/api/v1/clusters/{key}/confirm": {
-      "delete": {
-        "description": "Release a confirmation. The proposal remains; it is just a suggestion again.",
-        "operationId": "release_cluster_api_v1_clusters__key__confirm_delete",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "key",
-            "required": true,
-            "schema": {
-              "title": "Key",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ClusterProposal"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Release Cluster"
-      },
-      "post": {
-        "description": "Confirm a proposal under a human label, which freezes it against rebuilds.",
-        "operationId": "confirm_cluster_api_v1_clusters__key__confirm_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "key",
-            "required": true,
-            "schema": {
-              "title": "Key",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ClusterConfirmRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ClusterProposal"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Confirm Cluster"
       }
     },
     "/api/v1/contracts": {
@@ -5360,6 +5642,518 @@
         "summary": "Status"
       }
     },
+    "/api/v1/vocabulary": {
+      "get": {
+        "operationId": "list_vocabulary_api_v1_vocabulary_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VocabularyListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Vocabulary"
+      },
+      "post": {
+        "operationId": "create_vocabulary_entry_api_v1_vocabulary_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VocabularyEntryCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VocabularyEntryDetailResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Vocabulary Entry"
+      }
+    },
+    "/api/v1/vocabulary/candidates": {
+      "get": {
+        "operationId": "list_vocabulary_candidates_api_v1_vocabulary_candidates_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VocabularyCandidateListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Vocabulary Candidates"
+      }
+    },
+    "/api/v1/vocabulary/dismissals": {
+      "post": {
+        "operationId": "dismiss_vocabulary_task_api_v1_vocabulary_dismissals_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VocabularyDismissRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VocabularyMapping"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Dismiss Vocabulary Task"
+      }
+    },
+    "/api/v1/vocabulary/events": {
+      "get": {
+        "operationId": "list_vocabulary_events_api_v1_vocabulary_events_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VocabularyEventListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Vocabulary Events"
+      }
+    },
+    "/api/v1/vocabulary/events/{event_id}/undo": {
+      "post": {
+        "operationId": "undo_vocabulary_event_api_v1_vocabulary_events__event_id__undo_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "event_id",
+            "required": true,
+            "schema": {
+              "title": "Event Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VocabularyEventUndoResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Undo Vocabulary Event"
+      }
+    },
+    "/api/v1/vocabulary/mappings": {
+      "post": {
+        "operationId": "map_vocabulary_task_api_v1_vocabulary_mappings_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VocabularyMapRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VocabularyMapping"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Map Vocabulary Task"
+      }
+    },
+    "/api/v1/vocabulary/unmapped": {
+      "get": {
+        "operationId": "list_vocabulary_unmapped_api_v1_vocabulary_unmapped_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "after_episodes",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "After Episodes"
+            }
+          },
+          {
+            "in": "query",
+            "name": "after_task",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "After Task"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VocabularyUnmappedResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Vocabulary Unmapped"
+      }
+    },
+    "/api/v1/vocabulary/{entry_id}": {
+      "get": {
+        "operationId": "get_vocabulary_entry_api_v1_vocabulary__entry_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "entry_id",
+            "required": true,
+            "schema": {
+              "title": "Entry Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VocabularyEntryDetailResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Vocabulary Entry"
+      },
+      "patch": {
+        "operationId": "update_vocabulary_entry_api_v1_vocabulary__entry_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "entry_id",
+            "required": true,
+            "schema": {
+              "title": "Entry Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VocabularyEntryUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VocabularyEntry"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Vocabulary Entry"
+      }
+    },
+    "/api/v1/vocabulary/{entry_id}/merge": {
+      "post": {
+        "operationId": "merge_vocabulary_entry_api_v1_vocabulary__entry_id__merge_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "entry_id",
+            "required": true,
+            "schema": {
+              "title": "Entry Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VocabularyMergeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VocabularyMergeResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Merge Vocabulary Entry"
+      }
+    },
+    "/api/v1/vocabulary/{entry_id}/split": {
+      "post": {
+        "operationId": "split_vocabulary_entry_api_v1_vocabulary__entry_id__split_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "entry_id",
+            "required": true,
+            "schema": {
+              "title": "Entry Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VocabularySplitRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VocabularySplitResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Split Vocabulary Entry"
+      }
+    },
     "/ui": {
       "get": {
         "description": "Status/Overview. The X-Fragment header returns only the polling body.",
@@ -5698,297 +6492,6 @@
           }
         },
         "summary": "Ui Build Detail"
-      }
-    },
-    "/ui/clusters": {
-      "get": {
-        "operationId": "ui_clusters_ui_clusters_get",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "theme",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Theme"
-            }
-          },
-          {
-            "in": "query",
-            "name": "error",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Error"
-            }
-          },
-          {
-            "in": "header",
-            "name": "x-fragment",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Fragment"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "text/html": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Ui Clusters"
-      }
-    },
-    "/ui/clusters/rebuild": {
-      "post": {
-        "description": "Regroup from the form. 303 so a refresh does not rebuild again.",
-        "operationId": "ui_rebuild_clusters_ui_clusters_rebuild_post",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "summary": "Ui Rebuild Clusters"
-      }
-    },
-    "/ui/clusters/review": {
-      "post": {
-        "description": "Plain form workflow for assigning a human class or dismissing candidates.",
-        "operationId": "ui_decide_cluster_review_ui_clusters_review_post",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "summary": "Ui Decide Cluster Review"
-      }
-    },
-    "/ui/clusters/review/undo": {
-      "post": {
-        "description": "Reopen a reviewed task string so it can be reconsidered on the queue.",
-        "operationId": "ui_undo_cluster_review_ui_clusters_review_undo_post",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "summary": "Ui Undo Cluster Review"
-      }
-    },
-    "/ui/clusters/{key}": {
-      "get": {
-        "description": "Review one group without leaving it: the detail view behind the\n\"and N more\" links (ADR 0027).",
-        "operationId": "ui_cluster_detail_ui_clusters__key__get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "key",
-            "required": true,
-            "schema": {
-              "title": "Key",
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "theme",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Theme"
-            }
-          },
-          {
-            "in": "query",
-            "name": "error",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Error"
-            }
-          },
-          {
-            "in": "header",
-            "name": "x-fragment",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Fragment"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "text/html": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Ui Cluster Detail"
-      }
-    },
-    "/ui/clusters/{key}/confirm": {
-      "post": {
-        "operationId": "ui_confirm_cluster_ui_clusters__key__confirm_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "key",
-            "required": true,
-            "schema": {
-              "title": "Key",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Ui Confirm Cluster"
-      }
-    },
-    "/ui/clusters/{key}/release": {
-      "post": {
-        "operationId": "ui_release_cluster_ui_clusters__key__release_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "key",
-            "required": true,
-            "schema": {
-              "title": "Key",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Ui Release Cluster"
       }
     },
     "/ui/episodes": {
@@ -7082,6 +7585,404 @@
           }
         },
         "summary": "Ui Vendor Css"
+      }
+    },
+    "/ui/vocabulary": {
+      "get": {
+        "operationId": "ui_vocabulary_ui_vocabulary_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "theme",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Theme"
+            }
+          },
+          {
+            "in": "query",
+            "name": "error",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Error"
+            }
+          },
+          {
+            "in": "query",
+            "name": "from_cluster",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "From Cluster"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ui Vocabulary"
+      }
+    },
+    "/ui/vocabulary/accept": {
+      "post": {
+        "operationId": "ui_accept_vocabulary_candidate_ui_vocabulary_accept_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Ui Accept Vocabulary Candidate"
+      }
+    },
+    "/ui/vocabulary/dismiss": {
+      "post": {
+        "operationId": "ui_dismiss_vocabulary_task_ui_vocabulary_dismiss_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Ui Dismiss Vocabulary Task"
+      }
+    },
+    "/ui/vocabulary/entries": {
+      "post": {
+        "operationId": "ui_create_vocabulary_ui_vocabulary_entries_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Ui Create Vocabulary"
+      }
+    },
+    "/ui/vocabulary/entries/{entry_id}": {
+      "get": {
+        "operationId": "ui_vocabulary_entry_ui_vocabulary_entries__entry_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "entry_id",
+            "required": true,
+            "schema": {
+              "title": "Entry Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "theme",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Theme"
+            }
+          },
+          {
+            "in": "query",
+            "name": "error",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Error"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ui Vocabulary Entry"
+      }
+    },
+    "/ui/vocabulary/entries/{entry_id}/merge": {
+      "post": {
+        "operationId": "ui_merge_vocabulary_entry_ui_vocabulary_entries__entry_id__merge_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "entry_id",
+            "required": true,
+            "schema": {
+              "title": "Entry Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ui Merge Vocabulary Entry"
+      }
+    },
+    "/ui/vocabulary/entries/{entry_id}/notes": {
+      "post": {
+        "operationId": "ui_notes_vocabulary_entry_ui_vocabulary_entries__entry_id__notes_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "entry_id",
+            "required": true,
+            "schema": {
+              "title": "Entry Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ui Notes Vocabulary Entry"
+      }
+    },
+    "/ui/vocabulary/entries/{entry_id}/rename": {
+      "post": {
+        "operationId": "ui_rename_vocabulary_entry_ui_vocabulary_entries__entry_id__rename_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "entry_id",
+            "required": true,
+            "schema": {
+              "title": "Entry Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ui Rename Vocabulary Entry"
+      }
+    },
+    "/ui/vocabulary/entries/{entry_id}/split": {
+      "post": {
+        "operationId": "ui_split_vocabulary_entry_ui_vocabulary_entries__entry_id__split_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "entry_id",
+            "required": true,
+            "schema": {
+              "title": "Entry Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ui Split Vocabulary Entry"
+      }
+    },
+    "/ui/vocabulary/events/{event_id}/undo": {
+      "post": {
+        "operationId": "ui_undo_vocabulary_event_ui_vocabulary_events__event_id__undo_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "event_id",
+            "required": true,
+            "schema": {
+              "title": "Event Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ui Undo Vocabulary Event"
+      }
+    },
+    "/ui/vocabulary/map": {
+      "post": {
+        "operationId": "ui_map_vocabulary_task_ui_vocabulary_map_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Ui Map Vocabulary Task"
       }
     }
   }

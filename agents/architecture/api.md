@@ -144,6 +144,35 @@ Added for the Status / Jobs / Artifacts pages; all are read-only, cursor-paginat
 | GET | `/api/v1/episodes/{episode_id}/quality` | Motion-quality signals computed at ingest (ADR 0018): movement score, normalized jerk, stall ratio, per-dim activity, verdict, and a read-time length z-score. 404 for episodes ingested before quality existed. |
 | GET | `/api/v1/quality/summary` | Dataset-level curation view: episode-length histogram, speed distribution, cross-episode per-dim σ matrix, and top jerk / stall / length outliers with episode links. |
 
+## Task vocabulary ([ADR 0029](../decisions/0029-task-vocabulary-first.md))
+
+The vocabulary is the source of truth for what a task string means: entries with stable,
+content-derived ids and human-approved labels, and mappings from raw task strings onto
+them. Episode rows keep their raw strings, so every mapping is a view and no curation
+edit rewrites the audit trail.
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/api/v1/vocabulary` | Entries (largest first, with string and episode counts) plus `health`: both unmapped shares, orphaned mappings and pending candidates. |
+| POST | `/api/v1/vocabulary` | Create an entry. Id derives from the label, so a repeat is idempotent; a label whose id was renamed away is 409 `VOCABULARY_LABEL_CONFLICT`. 201. |
+| GET | `/api/v1/vocabulary/unmapped` | The bounded queue, ranked by episode count. Cursor is `after_episodes` + `after_task`, which must be sent together (422 otherwise); `next_after` echoes the pair for the next page. |
+| GET | `/api/v1/vocabulary/candidates` | Ranked synonym suggestions over the current queue (`attach` / `new_entry`). A suggestion is a queue item, never an action. |
+| POST | `/api/v1/vocabulary/mappings` | Map one task string onto an entry (`provenance: confirm`). 404 for an unknown entry. |
+| POST | `/api/v1/vocabulary/dismissals` | Mark a string as noise (`provenance: dismiss`, entry NULL) so it leaves the queue permanently. |
+| GET | `/api/v1/vocabulary/events` | Recent recorded operations, newest first, with `undone_at`. |
+| POST | `/api/v1/vocabulary/events/{event_id}/undo` | Compensating action for one event. 409 when it is already undone. |
+| GET | `/api/v1/vocabulary/{entry_id}` | One entry and its members with provenance and episode counts. |
+| PATCH | `/api/v1/vocabulary/{entry_id}` | Rename and/or set notes; at least one field required. A rename keeps the id and records a `label` event. |
+| POST | `/api/v1/vocabulary/{entry_id}/merge` | Merge into `target_entry_id`. The source is deleted, its restore lives in the event payload. 422 on a self-merge. |
+| POST | `/api/v1/vocabulary/{entry_id}/split` | Move 1-500 unique `task_strings` into a new entry named by `new_label`. |
+
+**The cluster surface is a frozen archive.** `/api/v1/clusters` and
+`/api/v1/clusters/{key}` keep answering reads from the old tables (additive-only v1
+contract), while every mutation - `rebuild`, `POST`/`DELETE review`, `confirm`,
+`release` - answers **410 Gone** and is no longer in the OpenAPI document. The UI
+routes `/ui/clusters*` redirect to `/ui/vocabulary`; the API's retired operations stay
+registered so a v1 client gets a 410 rather than a 404.
+
 ## Monitoring notifier ([ADR 0020](../decisions/0020-deterministic-monitoring-notifier.md))
 
 Deterministic. No trained model, no LLM call, and no network dependency in the detection path;

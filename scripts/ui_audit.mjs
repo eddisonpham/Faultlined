@@ -41,7 +41,7 @@ const PAGES = [
   "/ui/episodes",
   "/ui/failures",
   "/ui/slices",
-  "/ui/clusters",
+  "/ui/vocabulary",
   "/ui/insights",
   "/ui/metrics",
   "/ui/artifacts",
@@ -49,7 +49,6 @@ const PAGES = [
   "/ui/builds",
   "/ui/benchmarks",
   "/ui/experiments",
-  "/ui/clusters/preview",
 ];
 
 /*
@@ -328,23 +327,20 @@ async function main() {
     }
 
     /*
-     * The cluster detail pages are dynamic routes (/ui/clusters/{key}), so the
-     * audit discovers one from the live proposals table instead of hard-coding
-     * a key nobody can promise. With no clustering run (or no over-four-member
-     * cluster) there is no link and the audit proceeds without it - the route
-     * itself is covered by the contract and integration tests.
+     * Vocabulary entry detail pages are dynamic routes, so discover one from
+     * the rendered vocabulary index instead of hard-coding an entry id.
      */
-    let clusterDetail = null;
+    let vocabularyDetail = null;
     try {
-      const res = await fetch(BASE + "/ui/clusters");
+      const res = await fetch(BASE + "/ui/vocabulary");
       const html = await res.text();
-      const match = html.match(/href="\/ui\/clusters\/([0-9a-f]{8,})"/);
-      if (match) clusterDetail = "/ui/clusters/" + match[1];
+      const match = html.match(/href="\/ui\/vocabulary\/entries\/([^"]+)"/);
+      if (match) vocabularyDetail = "/ui/vocabulary/entries/" + match[1];
     } catch {
       /* preflight already proved the server is reachable; treat as none */
     }
-    if (clusterDetail) console.log("also visiting discovered " + clusterDetail);
-    const ALL_PAGES = clusterDetail ? [...PAGES, clusterDetail] : PAGES;
+    if (vocabularyDetail) console.log("also visiting discovered " + vocabularyDetail);
+    const ALL_PAGES = vocabularyDetail ? [...PAGES, vocabularyDetail] : PAGES;
 
     /*
      * Every page under every theme. The theme matters and is not redundant:
@@ -371,10 +367,7 @@ async function main() {
 
       for (const path of ALL_PAGES) {
         checks += 1;
-        const target = path === "/ui/clusters/preview"
-          ? BASE + "/ui/clusters"
-          : BASE + path;
-        const evaluated = await visit(target + "?theme=" + seed);
+        const evaluated = await visit(BASE + path + "?theme=" + seed);
         const result = evaluated.result.value;
         if (!result) {
           console.error("FAIL [" + theme + "] " + path + ": the page produced no result");

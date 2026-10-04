@@ -18,16 +18,12 @@ from pydantic import ValidationError
 from data_engine.api.cluster_schemas import (
     ClusterConfirmRequest,
     ClusterDetailResponse,
-    ClusterHealthResponse,
     ClusterListResponse,
-    ClusterProposal,
     ClusterRebuildRequest,
     ClusterReviewCandidate,
     ClusterReviewDecision,
-    ClusterReviewDecisionResponse,
     ClusterReviewListResponse,
     ClusterReviewRequest,
-    ClusterReviewUndoResponse,
 )
 from data_engine.api.download import (
     CURSOR_START,
@@ -79,6 +75,25 @@ from data_engine.api.schemas import (
     SyntheticEpisode,
     TickResponse,
 )
+from data_engine.api.vocabulary_schemas import (
+    VocabularyCandidateListResponse,
+    VocabularyDismissRequest,
+    VocabularyEntry,
+    VocabularyEntryCreateRequest,
+    VocabularyEntryDetailResponse,
+    VocabularyEntryUpdateRequest,
+    VocabularyEventListResponse,
+    VocabularyEventUndoResponse,
+    VocabularyListResponse,
+    VocabularyMapping,
+    VocabularyMapRequest,
+    VocabularyMergeRequest,
+    VocabularyMergeResponse,
+    VocabularySplitRequest,
+    VocabularySplitResponse,
+    VocabularyUnmappedResponse,
+)
+from data_engine.catalog import vocabulary as vocabulary_store
 from data_engine.catalog.database import initialize_schema
 from data_engine.catalog.introspect import describe
 from data_engine.catalog.repository import InvalidTransition, PostgresCatalog
@@ -109,10 +124,6 @@ from data_engine.web import (
     benchmarks_page,
     builds_fragment,
     builds_page,
-    cluster_detail_fragment,
-    cluster_detail_page,
-    clusters_fragment,
-    clusters_page,
     episode_detail_page,
     episodes_fragment,
     episodes_page,
@@ -141,6 +152,8 @@ from data_engine.web import (
     status_page,
     theme_or_default,
     vendor_css,
+    vocabulary_detail_page,
+    vocabulary_page,
 )
 from data_engine.web.pages import EPISODE_FLAGS, EPISODE_STATES
 from data_engine.web.records import benchmarks_model, experiments_model
@@ -1069,14 +1082,6 @@ def create_app(
 
     # ------------------------------------------------------------- clusters (ADR 0026)
 
-    def _first(raw: dict[str, list[str]]) -> dict[str, str]:
-        """A urlencoded body as one value per field; repeated fields join on a comma.
-
-        Checkboxes are the reason: three "ignore" boxes arrive as three keys of one name,
-        and the axes have to reach the store as one string.
-        """
-        return {key: ",".join(values) for key, values in raw.items()}
-
     def _run_payload(run: dict[str, Any] | None) -> dict[str, Any] | None:
         """A stored run as the API returns it, with a JSON-safe timestamp."""
         if run is None:
@@ -1182,26 +1187,14 @@ def create_app(
             },
         }
 
-    @app.post("/api/v1/clusters/rebuild", response_model=ClusterHealthResponse)
-    def rebuild_clusters(body: ClusterRebuildRequest) -> dict[str, Any]:
-        """Recompute proposals from the catalog's task strings.
-
-        Synchronous on purpose: at a few thousand task strings the whole rebuild is
-        milliseconds of pure Python, and a queued job would add a failure mode (a run
-        that never finishes) to a page an operator uses to check their work.
-        """
-        from data_engine.catalog import clusters as cluster_store
-
-        result = cluster_store.rebuild(
-            configured,
-            source=body.source,
-            ignored=body.ignored_argument(),
-            radius=body.radius,
-            rule=body.rule,
-            limit=body.limit,
+    @app.post("/api/v1/clusters/rebuild", deprecated=True, include_in_schema=False)
+    def rebuild_clusters(
+        body: ClusterRebuildRequest,
+    ) -> None:
+        raise HTTPException(
+            status_code=410,
+            detail=f"Cluster rebuild for {body.source} is archived; use the vocabulary.",
         )
-        model = cluster_store.model(configured)
-        return {"health": result["health"], "run": _run_payload(model["run"])}
 
     @app.get("/api/v1/clusters/review", response_model=ClusterReviewListResponse)
     def list_cluster_review() -> dict[str, Any]:
@@ -1219,37 +1212,21 @@ def create_app(
             ],
         }
 
-    @app.post("/api/v1/clusters/review", response_model=ClusterReviewDecisionResponse)
-    def decide_cluster_review(body: ClusterReviewRequest) -> dict[str, Any]:
-        """Create a named annotation or dismiss selected unresolved candidates."""
-        from data_engine.catalog import clusters as cluster_store
+    @app.post("/api/v1/clusters/review", deprecated=True, include_in_schema=False)
+    def decide_cluster_review(body: ClusterReviewRequest) -> None:
+        raise HTTPException(
+            status_code=410,
+            detail=f"Cluster review ({body.disposition}) is archived; use the vocabulary.",
+        )
 
-        try:
-            count = cluster_store.decide_review(
-                configured, body.tasks, disposition=body.disposition, label=body.label
-            )
-        except ValueError as error:
-            raise HTTPException(status_code=409, detail=str(error)) from error
-        return {
-            "reviewed": count,
-            "decisions": [
-                ClusterReviewDecision.model_validate(item)
-                for item in cluster_store.review_decisions(configured)
-            ],
-        }
-
-    @app.delete("/api/v1/clusters/review", response_model=ClusterReviewUndoResponse)
+    @app.delete("/api/v1/clusters/review", deprecated=True, include_in_schema=False)
     def reopen_cluster_review(
         tasks: Annotated[list[str], Query(min_length=1, max_length=25)],
-    ) -> dict[str, int]:
-        """Reopen up to 25 reviewed task strings by removing their disposition."""
-        from data_engine.catalog import clusters as cluster_store
-
-        try:
-            count = cluster_store.undo_review(configured, tasks)
-        except ValueError as error:
-            raise HTTPException(status_code=422, detail=str(error)) from error
-        return {"reopened": count}
+    ) -> None:
+        raise HTTPException(
+            status_code=410,
+            detail=f"Cluster review for {len(tasks)} task strings is archived; use the vocabulary.",
+        )
 
     @app.get("/api/v1/clusters/{key}", response_model=ClusterDetailResponse)
     def cluster_detail(key: str) -> dict[str, Any]:
@@ -1282,175 +1259,358 @@ def create_app(
             ],
         }
 
-    @app.post("/api/v1/clusters/{key}/confirm", response_model=ClusterProposal)
-    def confirm_cluster(key: str, body: ClusterConfirmRequest) -> dict[str, Any]:
-        """Confirm a proposal under a human label, which freezes it against rebuilds."""
-        from data_engine.catalog import clusters as cluster_store
+    @app.post("/api/v1/clusters/{key}/confirm", deprecated=True, include_in_schema=False)
+    def confirm_cluster(key: str, body: ClusterConfirmRequest) -> None:
+        raise HTTPException(
+            status_code=410,
+            detail=f"Cluster proposal {key} ({body.label}) is archived; use the vocabulary.",
+        )
 
-        if not cluster_store.confirm(configured, key, body.label):
-            raise HTTPException(status_code=404, detail=f"No cluster {key}.")
-        row = cluster_store.get_proposal(configured, key)
-        return {
-            "key": key,
-            "core": str(row["core"]) if row else "",
-            "label": body.label,
-            "frozen": True,
-            "episodes": int(row["episodes"]) if row else 0,
-            "task_count": int(row["task_count"]) if row else 0,
-        }
+    @app.delete("/api/v1/clusters/{key}/confirm", deprecated=True, include_in_schema=False)
+    def release_cluster(key: str) -> None:
+        raise HTTPException(
+            status_code=410,
+            detail=f"Cluster proposal {key} is archived; use the vocabulary.",
+        )
 
-    @app.delete("/api/v1/clusters/{key}/confirm", response_model=ClusterProposal)
-    def release_cluster(key: str) -> dict[str, Any]:
-        """Release a confirmation. The proposal remains; it is just a suggestion again."""
-        from data_engine.catalog import clusters as cluster_store
+    # The frozen cluster API remains available as a read-only archive; the vocabulary
+    # interface below is now the only active curation workflow (ADR 0029).
 
-        cluster_store.unconfirm(configured, key)
-        row = cluster_store.get_proposal(configured, key)
-        if row is None:
-            raise HTTPException(status_code=404, detail=f"No cluster {key}.")
-        return {
-            "key": key,
-            "core": str(row["core"]),
-            "label": "",
-            "frozen": False,
-            "episodes": int(row["episodes"]),
-            "task_count": int(row["task_count"]),
-        }
+    @app.get("/ui/clusters", include_in_schema=False)
+    def ui_clusters_redirect() -> RedirectResponse:
+        return RedirectResponse("/ui/vocabulary", status_code=307)
 
-    # The page and its controls. Plain form posts, so every control works with scripting
-    # off; each one calls the same repository method as its API twin rather than issuing
-    # an HTTP request to ourselves.
+    @app.get("/ui/clusters/{key}", include_in_schema=False)
+    def ui_cluster_detail_redirect(key: str) -> RedirectResponse:
+        return RedirectResponse(f"/ui/vocabulary?from_cluster={quote(key)}", status_code=307)
 
-    @app.get("/ui/clusters", response_class=HTMLResponse)
-    def ui_clusters(
-        theme: str | None = None,
-        error: str | None = None,
-        x_fragment: str | None = Header(default=None),
-    ) -> HTMLResponse:
-        model = _cluster_model()
-        if x_fragment:
-            return HTMLResponse(clusters_fragment(model))
-        return HTMLResponse(clusters_page(model, theme_or_default(theme), error=error or ""))
+    @app.post("/ui/clusters/rebuild", include_in_schema=False)
+    @app.post("/ui/clusters/review", include_in_schema=False)
+    @app.post("/ui/clusters/review/undo", include_in_schema=False)
+    def ui_cluster_action_redirect() -> RedirectResponse:
+        return RedirectResponse("/ui/vocabulary", status_code=303)
 
-    @app.post("/ui/clusters/rebuild")
-    async def ui_rebuild_clusters(request: Request) -> RedirectResponse:
-        """Regroup from the form. 303 so a refresh does not rebuild again."""
-        from urllib.parse import parse_qs
+    @app.post("/ui/clusters/{key}/confirm", include_in_schema=False)
+    @app.post("/ui/clusters/{key}/release", include_in_schema=False)
+    def ui_cluster_detail_action_redirect(key: str) -> RedirectResponse:
+        return RedirectResponse(f"/ui/vocabulary?from_cluster={quote(key)}", status_code=303)
 
-        from data_engine.catalog import clusters as cluster_store
+    # ---------------------------------------------------------- vocabulary (ADR 0029)
 
-        # `_first` already joined repeated fields on a comma, so the checkbox group
-        # arrives as one string. Joining again here would iterate its characters.
-        form = _first(parse_qs((await request.body()).decode("utf-8", "replace")))
-        ignored = form.get("ignore", "")
-        try:
-            radius = float(form.get("radius", "0.3"))
-        except ValueError:
-            radius = 0.3
-        source = form.get("source", "catalog")
-        if source not in ("catalog", "sample"):
-            source = "catalog"
-        rule = form.get("rule", "running_mean")
-        if rule not in ("running_mean", "sliding_8", "sliding_32", "ema_0.98"):
-            rule = "running_mean"
-        try:
-            cluster_store.rebuild(
-                configured,
-                source=source,
-                ignored=ignored,
-                radius=min(max(radius, 0.0), 2.0),
-                rule=rule,
+    @app.get("/api/v1/vocabulary", response_model=VocabularyListResponse)
+    def list_vocabulary() -> dict[str, Any]:
+        entries = vocabulary_store.list_entries(configured)
+        return {"entries": entries, "health": vocabulary_store.vocabulary_health(configured)}
+
+    @app.post("/api/v1/vocabulary", response_model=VocabularyEntryDetailResponse, status_code=201)
+    def create_vocabulary_entry(body: VocabularyEntryCreateRequest) -> dict[str, Any]:
+        entry = vocabulary_store.create_entry(
+            configured, preferred_label=body.preferred_label, notes=body.notes
+        )
+        return {"entry": entry, "members": []}
+
+    @app.get("/api/v1/vocabulary/unmapped", response_model=VocabularyUnmappedResponse)
+    def list_vocabulary_unmapped(
+        limit: Limit = 50,
+        after_episodes: int | None = Query(default=None, ge=0),
+        after_task: str | None = None,
+    ) -> dict[str, Any]:
+        if (after_episodes is None) != (after_task is None):
+            raise HTTPException(
+                status_code=422, detail="after_episodes and after_task must be paired"
             )
+        after = (
+            (after_episodes, after_task)
+            if after_episodes is not None and after_task is not None
+            else None
+        )
+        items = vocabulary_store.list_unmapped(configured, limit=limit, after=after)
+        next_after = None
+        if len(items) == limit:
+            next_after = {
+                "episodes": items[-1]["episodes"],
+                "task_string": items[-1]["task_string"],
+            }
+        return {"items": items, "next_after": next_after}
+
+    @app.get("/api/v1/vocabulary/candidates", response_model=VocabularyCandidateListResponse)
+    def list_vocabulary_candidates(limit: Limit = 50) -> dict[str, Any]:
+        from data_engine.clustering.ranker import candidates
+
+        entries = vocabulary_store.list_entries(configured)
+        queue = vocabulary_store.list_unmapped(configured, limit=limit)
+        return {"items": [candidate.as_dict() for candidate in candidates(queue, entries)]}
+
+    @app.post("/api/v1/vocabulary/mappings", response_model=VocabularyMapping)
+    def map_vocabulary_task(body: VocabularyMapRequest) -> dict[str, Any]:
+        if vocabulary_store.get_entry(configured, body.entry_id) is None:
+            raise HTTPException(status_code=404, detail=f"No vocabulary entry {body.entry_id}.")
+        return vocabulary_store.map_task(
+            configured, task_string=body.task_string, entry_id=body.entry_id
+        )
+
+    @app.post("/api/v1/vocabulary/dismissals", response_model=VocabularyMapping)
+    def dismiss_vocabulary_task(body: VocabularyDismissRequest) -> dict[str, Any]:
+        return vocabulary_store.dismiss_task(configured, task_string=body.task_string)
+
+    @app.get("/api/v1/vocabulary/events", response_model=VocabularyEventListResponse)
+    def list_vocabulary_events(limit: Limit = 50) -> dict[str, Any]:
+        return {"items": vocabulary_store.list_events(configured, limit=limit)}
+
+    @app.post(
+        "/api/v1/vocabulary/events/{event_id}/undo", response_model=VocabularyEventUndoResponse
+    )
+    def undo_vocabulary_event(event_id: int) -> dict[str, Any]:
+        try:
+            return vocabulary_store.undo_event(configured, event_id=event_id)
         except ValueError as error:
-            return RedirectResponse(f"/ui/clusters?error={quote(str(error))}", status_code=303)
-        return RedirectResponse("/ui/clusters", status_code=303)
+            raise HTTPException(status_code=409, detail=str(error)) from error
 
-    @app.post("/ui/clusters/{key}/confirm")
-    async def ui_confirm_cluster(key: str, request: Request) -> RedirectResponse:
-        from urllib.parse import parse_qs
+    @app.get("/api/v1/vocabulary/{entry_id}", response_model=VocabularyEntryDetailResponse)
+    def get_vocabulary_entry(entry_id: str) -> dict[str, Any]:
+        entry = vocabulary_store.get_entry(configured, entry_id)
+        if entry is None:
+            raise HTTPException(status_code=404, detail=f"No vocabulary entry {entry_id}.")
+        return {"entry": entry, "members": vocabulary_store.entry_members(configured, entry_id)}
 
-        from data_engine.catalog import clusters as cluster_store
+    @app.patch("/api/v1/vocabulary/{entry_id}", response_model=VocabularyEntry)
+    def update_vocabulary_entry(
+        entry_id: str, body: VocabularyEntryUpdateRequest
+    ) -> dict[str, Any]:
+        try:
+            entry = vocabulary_store.get_entry(configured, entry_id)
+            if entry is None:
+                raise KeyError(entry_id)
+            if body.preferred_label is not None:
+                entry = vocabulary_store.rename_entry(
+                    configured, entry_id=entry_id, preferred_label=body.preferred_label
+                )
+            if body.notes is not None:
+                entry = vocabulary_store.update_notes(
+                    configured, entry_id=entry_id, notes=body.notes
+                )
+            return entry
+        except KeyError as error:
+            raise HTTPException(
+                status_code=404, detail=f"No vocabulary entry {entry_id}."
+            ) from error
 
-        form = _first(parse_qs((await request.body()).decode("utf-8", "replace")))
-        label = (form.get("label") or "").strip()
-        if not label:
-            return RedirectResponse(
-                f"/ui/clusters/{key}?error={quote('a confirmation needs a label')}",
-                status_code=303,
+    @app.post("/api/v1/vocabulary/{entry_id}/merge", response_model=VocabularyMergeResponse)
+    def merge_vocabulary_entry(entry_id: str, body: VocabularyMergeRequest) -> dict[str, Any]:
+        try:
+            return vocabulary_store.merge_entries(
+                configured, source_id=entry_id, target_id=body.target_entry_id
             )
-        if not cluster_store.confirm(configured, key, label):
-            return RedirectResponse(
-                f"/ui/clusters/{key}?error={quote(f'no cluster {key}')}", status_code=303
+        except KeyError as error:
+            raise HTTPException(
+                status_code=404, detail="The source or target entry does not exist."
+            ) from error
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+
+    @app.post("/api/v1/vocabulary/{entry_id}/split", response_model=VocabularySplitResponse)
+    def split_vocabulary_entry(entry_id: str, body: VocabularySplitRequest) -> dict[str, Any]:
+        try:
+            return vocabulary_store.split_entry(
+                configured,
+                entry_id=entry_id,
+                task_strings=body.task_strings,
+                new_label=body.new_label,
             )
-        return RedirectResponse(f"/ui/clusters/{key}", status_code=303)
+        except KeyError as error:
+            raise HTTPException(
+                status_code=404, detail=f"No vocabulary entry {entry_id}."
+            ) from error
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
 
-    @app.post("/ui/clusters/{key}/release")
-    def ui_release_cluster(key: str) -> RedirectResponse:
-        from data_engine.catalog import clusters as cluster_store
-
-        cluster_store.unconfirm(configured, key)
-        return RedirectResponse(f"/ui/clusters/{key}", status_code=303)
-
-    @app.get("/ui/clusters/{key}", response_class=HTMLResponse)
-    def ui_cluster_detail(
-        key: str,
+    # The UI redirects legacy cluster bookmarks; the API remains a frozen archive.
+    @app.get("/ui/vocabulary", response_class=HTMLResponse)
+    def ui_vocabulary(
         theme: str | None = None,
         error: str | None = None,
-        x_fragment: str | None = Header(default=None),
+        from_cluster: str | None = None,
     ) -> HTMLResponse:
-        """Review one group without leaving it: the detail view behind the
-        "and N more" links (ADR 0027)."""
-        from data_engine.catalog import clusters as cluster_store
+        from data_engine.clustering.ranker import candidates
 
-        row = cluster_store.get_proposal(configured, key)
-        if row is None:
-            raise HTTPException(status_code=404, detail=f"No cluster {key}.")
-        members = cluster_store.proposal_members(configured, key)
-        run = cluster_store.latest_run(configured) or {}
-        read_only = str((run.get("health") or {}).get("source", "catalog")) == "sample"
-        if x_fragment:
-            return HTMLResponse(cluster_detail_fragment(row, members))
+        entries = vocabulary_store.list_entries(configured)
+        unmapped = vocabulary_store.list_unmapped(configured)
+        model = {
+            "entries": entries,
+            "unmapped": unmapped,
+            "candidates": [item.as_dict() for item in candidates(unmapped, entries)],
+            "health": vocabulary_store.vocabulary_health(configured),
+            "events": vocabulary_store.list_events(configured),
+            "error": error or "",
+            "legacy_cluster": from_cluster or "",
+        }
+        return HTMLResponse(vocabulary_page(model, theme_or_default(theme)))
+
+    @app.get("/ui/vocabulary/entries/{entry_id}", response_class=HTMLResponse)
+    def ui_vocabulary_entry(
+        entry_id: str, theme: str | None = None, error: str | None = None
+    ) -> HTMLResponse:
+        entry = vocabulary_store.get_entry(configured, entry_id)
+        if entry is None:
+            raise HTTPException(status_code=404, detail=f"No vocabulary entry {entry_id}.")
         return HTMLResponse(
-            cluster_detail_page(
-                row,
-                members,
+            vocabulary_detail_page(
+                entry,
+                vocabulary_store.entry_members(configured, entry_id),
+                vocabulary_store.list_entries(configured),
                 theme_or_default(theme),
-                read_only=read_only,
                 error=error or "",
             )
         )
 
-    @app.post("/ui/clusters/review")
-    async def ui_decide_cluster_review(request: Request) -> RedirectResponse:
-        """Plain form workflow for assigning a human class or dismissing candidates."""
+    async def _vocabulary_form(request: Request) -> dict[str, list[str]]:
         from urllib.parse import parse_qs
 
-        from data_engine.catalog import clusters as cluster_store
+        return parse_qs((await request.body()).decode("utf-8", "replace"))
 
-        raw = parse_qs((await request.body()).decode("utf-8", "replace"))
-        tasks = raw.get("task", [])
-        disposition = (raw.get("disposition") or [""])[0]
-        label = (raw.get("label") or [""])[0]
+    def _vocabulary_redirect(
+        error: Exception | None = None, entry_id: str | None = None
+    ) -> RedirectResponse:
+        destination = f"/ui/vocabulary/entries/{quote(entry_id)}" if entry_id else "/ui/vocabulary"
+        if error is not None:
+            destination += f"?error={quote(str(error))}"
+        return RedirectResponse(destination, status_code=303)
+
+    @app.post("/ui/vocabulary/entries")
+    async def ui_create_vocabulary(request: Request) -> RedirectResponse:
+        form = await _vocabulary_form(request)
         try:
-            cluster_store.decide_review(configured, tasks, disposition=disposition, label=label)
-        except ValueError as error:
-            return RedirectResponse(f"/ui/clusters?error={quote(str(error))}", status_code=303)
-        return RedirectResponse("/ui/clusters", status_code=303)
+            vocabulary_store.create_entry(
+                configured,
+                preferred_label=(form.get("preferred_label") or [""])[0],
+                notes=(form.get("notes") or [""])[0],
+            )
+        except (KeyError, ValueError) as error:
+            return _vocabulary_redirect(error)
+        return _vocabulary_redirect()
 
-    @app.post("/ui/clusters/review/undo")
-    async def ui_undo_cluster_review(request: Request) -> RedirectResponse:
-        """Reopen a reviewed task string so it can be reconsidered on the queue."""
-        from urllib.parse import parse_qs
+    @app.post("/ui/vocabulary/accept")
+    async def ui_accept_vocabulary_candidate(request: Request) -> RedirectResponse:
+        from data_engine.clustering.ranker import candidates
 
-        from data_engine.catalog import clusters as cluster_store
-
-        raw = parse_qs((await request.body()).decode("utf-8", "replace"))
-        tasks = raw.get("task", [])
+        form = await _vocabulary_form(request)
+        tasks = form.get("task", [])
+        kind = (form.get("kind") or [""])[0]
+        entry_id = (form.get("entry_id") or [""])[0]
+        current_entries = vocabulary_store.list_entries(configured)
+        current_queue = vocabulary_store.list_unmapped(configured)
+        suggestions = candidates(current_queue, current_entries)
+        submitted = tuple(sorted(set(tasks)))
+        accepted = next(
+            (
+                item
+                for item in suggestions
+                if item.task_strings == submitted
+                and item.kind == kind
+                and (kind != "attach" or item.entry_id == entry_id)
+            ),
+            None,
+        )
+        if accepted is None:
+            return _vocabulary_redirect(ValueError("candidate changed; reload and review it again"))
         try:
-            cluster_store.undo_review(configured, tasks)
-        except ValueError as error:
-            return RedirectResponse(f"/ui/clusters?error={quote(str(error))}", status_code=303)
-        return RedirectResponse("/ui/clusters", status_code=303)
+            if kind == "attach":
+                vocabulary_store.accept_candidate(
+                    configured,
+                    task_strings=accepted.task_strings,
+                    entry_id=entry_id,
+                    expected_core=accepted.core,
+                )
+            else:
+                label = (form.get("new_label") or [""])[0]
+                vocabulary_store.accept_candidate(
+                    configured,
+                    task_strings=accepted.task_strings,
+                    new_label=label,
+                    expected_core=accepted.core,
+                )
+        except (KeyError, ValueError) as error:
+            return _vocabulary_redirect(error)
+        return _vocabulary_redirect()
+
+    @app.post("/ui/vocabulary/map")
+    async def ui_map_vocabulary_task(request: Request) -> RedirectResponse:
+        form = await _vocabulary_form(request)
+        try:
+            task = (form.get("task_string") or [""])[0]
+            entry_id = (form.get("entry_id") or [""])[0]
+            if vocabulary_store.get_entry(configured, entry_id) is None:
+                raise ValueError("choose an existing vocabulary entry")
+            vocabulary_store.map_task(configured, task_string=task, entry_id=entry_id)
+        except (KeyError, ValueError) as error:
+            return _vocabulary_redirect(error)
+        return _vocabulary_redirect()
+
+    @app.post("/ui/vocabulary/dismiss")
+    async def ui_dismiss_vocabulary_task(request: Request) -> RedirectResponse:
+        form = await _vocabulary_form(request)
+        task = (form.get("task_string") or [""])[0]
+        if not task.strip():
+            return _vocabulary_redirect(ValueError("choose a task string to dismiss"))
+        vocabulary_store.dismiss_task(configured, task_string=task)
+        return _vocabulary_redirect()
+
+    @app.post("/ui/vocabulary/entries/{entry_id}/rename")
+    async def ui_rename_vocabulary_entry(entry_id: str, request: Request) -> RedirectResponse:
+        form = await _vocabulary_form(request)
+        try:
+            vocabulary_store.rename_entry(
+                configured,
+                entry_id=entry_id,
+                preferred_label=(form.get("preferred_label") or [""])[0],
+            )
+        except (KeyError, ValueError) as error:
+            return _vocabulary_redirect(error, entry_id)
+        return _vocabulary_redirect(entry_id=entry_id)
+
+    @app.post("/ui/vocabulary/entries/{entry_id}/notes")
+    async def ui_notes_vocabulary_entry(entry_id: str, request: Request) -> RedirectResponse:
+        form = await _vocabulary_form(request)
+        try:
+            vocabulary_store.update_notes(
+                configured, entry_id=entry_id, notes=(form.get("notes") or [""])[0]
+            )
+        except KeyError as error:
+            return _vocabulary_redirect(error)
+        return _vocabulary_redirect(entry_id=entry_id)
+
+    @app.post("/ui/vocabulary/entries/{entry_id}/merge")
+    async def ui_merge_vocabulary_entry(entry_id: str, request: Request) -> RedirectResponse:
+        form = await _vocabulary_form(request)
+        try:
+            vocabulary_store.merge_entries(
+                configured, source_id=entry_id, target_id=(form.get("target_entry_id") or [""])[0]
+            )
+        except (KeyError, ValueError) as error:
+            return _vocabulary_redirect(error, entry_id)
+        return _vocabulary_redirect()
+
+    @app.post("/ui/vocabulary/entries/{entry_id}/split")
+    async def ui_split_vocabulary_entry(entry_id: str, request: Request) -> RedirectResponse:
+        form = await _vocabulary_form(request)
+        try:
+            vocabulary_store.split_entry(
+                configured,
+                entry_id=entry_id,
+                task_strings=form.get("task", []),
+                new_label=(form.get("new_label") or [""])[0],
+            )
+        except (KeyError, ValueError) as error:
+            return _vocabulary_redirect(error, entry_id)
+        return _vocabulary_redirect(entry_id=entry_id)
+
+    @app.post("/ui/vocabulary/events/{event_id}/undo")
+    def ui_undo_vocabulary_event(event_id: int) -> RedirectResponse:
+        try:
+            vocabulary_store.undo_event(configured, event_id=event_id)
+        except (KeyError, ValueError) as error:
+            return _vocabulary_redirect(error)
+        return _vocabulary_redirect()
 
     @app.get("/api/v1/slices", response_model=SliceListResponse)
     def list_slices(

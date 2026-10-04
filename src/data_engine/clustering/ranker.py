@@ -24,7 +24,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, cast
 
 from data_engine.clustering.extract import extract
 
@@ -80,7 +80,7 @@ def candidates(
     ranked: list[Candidate] = []
     for core, rows in groups.items():
         tasks = tuple(sorted(str(row.get("task_string") or "") for row in rows))
-        episodes = sum(int(row.get("episodes") or 0) for row in rows)
+        episodes = sum(int(cast(int, row.get("episodes") or 0)) for row in rows)
         targets = by_core.get(core, [])
         if len(targets) == 1:
             target = targets[0]

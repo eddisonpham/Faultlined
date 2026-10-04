@@ -388,69 +388,63 @@ def _mug_proposal(settings: Settings) -> dict[str, Any]:
     return row
 
 
-def test_the_detail_page_serves_the_stored_proposal_and_its_members(settings: Settings) -> None:
+def test_a_legacy_cluster_detail_bookmark_redirects_to_vocabulary(settings: Settings) -> None:
     from fastapi.testclient import TestClient
 
     row = _mug_proposal(settings)
     client = _ui_client(settings)
     assert isinstance(client, TestClient)
-    response = client.get(f"/ui/clusters/{row['key']}")
+    response = client.get(f"/ui/clusters/{row['key']}", follow_redirects=False)
+    assert response.status_code == 307
+    assert response.headers["location"] == f"/ui/vocabulary?from_cluster={row['key']}"
+
+
+def test_the_vocabulary_page_replaces_the_cluster_detail_workflow(settings: Settings) -> None:
+    from fastapi.testclient import TestClient
+
+    client = _ui_client(settings)
+    assert isinstance(client, TestClient)
+    response = client.get("/ui/vocabulary")
     assert response.status_code == 200
-    body = response.text
-    assert "Cluster detail" in body
-    assert 'href="/ui/clusters"' in body
-    # The stored member task strings, with their extraction facts, are on the page.
-    assert "put the red mug on the plate" in body
-    assert "put" in body
-    assert "red" in body
-    # The tile counts agree with the catalog, and the confirm control is present.
-    assert f'<span class="de-stat-value">{row["episodes"]}</span>' in body
-    assert f'action="/ui/clusters/{row["key"]}/confirm"' in body
+    assert "Unmapped queue" in response.text
+    assert 'href="/ui/vocabulary"' in response.text
+    # No cluster control survives the cutover; the only triage action is the
+    # vocabulary's own candidate acceptance.
+    assert "/ui/clusters" not in response.text
+    assert "/confirm" not in response.text
+    assert "/ui/vocabulary/rebuild" not in response.text
+    assert 'action="/ui/vocabulary/accept"' in response.text
 
 
-def test_an_unknown_cluster_is_an_html_404_over_the_real_app(settings: Settings) -> None:
+def test_unknown_legacy_cluster_bookmark_still_redirects(settings: Settings) -> None:
     from fastapi.testclient import TestClient
 
     client = _ui_client(settings)
     assert isinstance(client, TestClient)
-    response = client.get("/ui/clusters/no-such-cluster")
-    assert response.status_code == 404
-    assert "text/html" in response.headers["content-type"]
+    response = client.get("/ui/clusters/no-such-cluster", follow_redirects=False)
+    assert response.status_code == 307
+    assert response.headers["location"] == "/ui/vocabulary?from_cluster=no-such-cluster"
 
 
-def test_confirm_and_release_round_trip_through_the_detail_page(
-    settings: Settings, cleanup: None
-) -> None:
-    from fastapi.testclient import TestClient
-
-    row = _mug_proposal(settings)
-    client = _ui_client(settings)
-    assert isinstance(client, TestClient)
-    label = _label()
-
-    confirm = client.post(
-        f"/ui/clusters/{row['key']}/confirm", data={"label": label}, follow_redirects=False
-    )
-    assert confirm.status_code == 303
-    assert confirm.headers["location"] == f"/ui/clusters/{row['key']}"
-
-    page = client.get(f"/ui/clusters/{row['key']}").text
-    assert f"confirmed: {label}" in page
-    assert "release confirmation" in page
-
-    release = client.post(f"/ui/clusters/{row['key']}/release", follow_redirects=False)
-    assert release.status_code == 303
-    assert release.headers["location"] == f"/ui/clusters/{row['key']}"
-
-    page = client.get(f"/ui/clusters/{row['key']}").text
-    assert "confirmed:" not in page
-    assert "/confirm" in page
-
-
-def test_the_detail_page_holds_the_extraction_facts_the_catalog_stores(
+def test_legacy_cluster_confirm_action_redirects_without_mutating_archive(
     settings: Settings,
 ) -> None:
-    """The member rows come from SQL, so the facts on the page must be the stored ones."""
+    from fastapi.testclient import TestClient
+
+    row = _mug_proposal(settings)
+    client = _ui_client(settings)
+    assert isinstance(client, TestClient)
+    response = client.post(
+        f"/ui/clusters/{row['key']}/confirm", data={"label": _label()}, follow_redirects=False
+    )
+    assert response.status_code == 303
+    assert response.headers["location"] == f"/ui/vocabulary?from_cluster={row['key']}"
+    assert not store.confirmations(settings)
+
+
+def test_the_archived_cluster_detail_still_exposes_stored_facts_through_api(
+    settings: Settings,
+) -> None:
     from fastapi.testclient import TestClient
 
     row = _mug_proposal(settings)
@@ -459,6 +453,7 @@ def test_the_detail_page_holds_the_extraction_facts_the_catalog_stores(
 
     client = _ui_client(settings)
     assert isinstance(client, TestClient)
-    body = client.get(f"/ui/clusters/{row['key']}").text
+    response = client.get(f"/api/v1/clusters/{row['key']}")
+    assert response.status_code == 200
     for member in stored:
-        assert str(member["task"]) in body
+        assert str(member["task"]) in {item["task"] for item in response.json()["members"]}

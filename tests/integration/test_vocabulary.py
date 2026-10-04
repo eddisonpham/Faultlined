@@ -152,6 +152,13 @@ class TestBackfill:
 
 
 class TestEntries:
+    def test_a_renamed_id_cannot_be_reused_by_a_new_label(self, settings: Settings) -> None:
+        original = vocabulary.create_entry(settings, preferred_label="Mug handling")
+        vocabulary.rename_entry(settings, entry_id=original["id"], preferred_label="Cup handling")
+
+        with pytest.raises(vocabulary.LabelConflict, match="already used by renamed entry"):
+            vocabulary.create_entry(settings, preferred_label="Mug handling")
+
     def test_create_is_idempotent_and_the_id_survives_a_rename(self, settings: Settings) -> None:
         created = vocabulary.create_entry(settings, preferred_label="Stack blocks")
         again = vocabulary.create_entry(settings, preferred_label="Stack blocks")
@@ -233,7 +240,222 @@ class TestMapOrResolve:
 # ------------------------------------------------------------- events and reversals
 
 
+class TestGuards:
+    """The refusals, because each one is a case the operator can actually hit."""
+
+    def test_a_label_is_required(self, settings: Settings) -> None:
+        with pytest.raises(ValueError, match="needs a preferred label"):
+            vocabulary.create_entry(settings, preferred_label="   ")
+        with pytest.raises(ValueError, match="needs a preferred label"):
+            vocabulary.rename_entry(settings, entry_id="voc_missing", preferred_label="")
+        with pytest.raises(ValueError, match="needs a preferred label"):
+            vocabulary.split_entry(
+                settings, entry_id="voc_missing", task_strings=["x"], new_label=" "
+            )
+
+    def test_an_unknown_entry_is_a_key_error_not_a_silent_no_op(self, settings: Settings) -> None:
+        for call in (
+            lambda: vocabulary.rename_entry(
+                settings, entry_id="voc_missing", preferred_label="anything"
+            ),
+            lambda: vocabulary.update_notes(settings, entry_id="voc_missing", notes="x"),
+            lambda: vocabulary.map_task(settings, task_string="a task", entry_id="voc_missing"),
+            lambda: vocabulary.split_entry(
+                settings, entry_id="voc_missing", task_strings=["a task"], new_label="x"
+            ),
+        ):
+            with pytest.raises(KeyError):
+                call()
+
+    def test_a_dismissal_cannot_be_written_as_a_mapping(self, settings: Settings) -> None:
+        entry = vocabulary.create_entry(settings, preferred_label="things")
+        with pytest.raises(ValueError, match="dismiss is not a mapping"):
+            vocabulary.map_task(
+                settings, task_string="t", entry_id=entry["id"], provenance="dismiss"
+            )
+
+    def test_merge_refuses_a_self_merge_and_a_missing_counterparty(
+        self, settings: Settings
+    ) -> None:
+        entry = vocabulary.create_entry(settings, preferred_label="cups")
+        with pytest.raises(ValueError, match="cannot merge into itself"):
+            vocabulary.merge_entries(settings, source_id=entry["id"], target_id=entry["id"])
+        with pytest.raises(KeyError):
+            vocabulary.merge_entries(settings, source_id=entry["id"], target_id="voc_missing")
+        with pytest.raises(KeyError):
+            vocabulary.merge_entries(settings, source_id="voc_missing", target_id=entry["id"])
+
+    def test_split_refuses_strings_it_does_not_own_and_a_taken_label(
+        self, settings: Settings
+    ) -> None:
+        parent = vocabulary.create_entry(settings, preferred_label="tools")
+        vocabulary.map_task(settings, task_string="the hammer", entry_id=parent["id"])
+        with pytest.raises(ValueError, match="not mapped to"):
+            vocabulary.split_entry(
+                settings,
+                entry_id=parent["id"],
+                task_strings=["the hammer", "the saw"],
+                new_label="hammers",
+            )
+        with pytest.raises(ValueError, match="at least one task string"):
+            vocabulary.split_entry(
+                settings, entry_id=parent["id"], task_strings=[], new_label="hammers"
+            )
+        with pytest.raises(ValueError, match="already is this entry"):
+            vocabulary.split_entry(
+                settings, entry_id=parent["id"], task_strings=["the hammer"], new_label="tools"
+            )
+        vocabulary.create_entry(settings, preferred_label="hammers")
+        with pytest.raises(vocabulary.LabelConflict, match="already taken"):
+            vocabulary.split_entry(
+                settings, entry_id=parent["id"], task_strings=["the hammer"], new_label="hammers"
+            )
+
+    def test_a_candidate_must_name_one_target_and_500_strings_at_most(
+        self, settings: Settings
+    ) -> None:
+        entry = vocabulary.create_entry(settings, preferred_label="mugs", core="mug")
+        with pytest.raises(ValueError, match="exactly one existing entry or new label"):
+            vocabulary.accept_candidate(settings, task_strings=["a"], expected_core="mug")
+        with pytest.raises(ValueError, match="exactly one existing entry or new label"):
+            vocabulary.accept_candidate(
+                settings,
+                task_strings=["a"],
+                expected_core="mug",
+                entry_id=entry["id"],
+                new_label="both",
+            )
+        with pytest.raises(ValueError, match="between 1 and 500"):
+            vocabulary.accept_candidate(
+                settings,
+                task_strings=[],
+                expected_core="mug",
+                entry_id=entry["id"],
+            )
+
+    def test_a_stale_attach_is_refused_in_the_store_too(
+        self, settings: Settings, catalog: PostgresCatalog
+    ) -> None:
+        """The UI re-checks the candidate; the store refuses the write regardless."""
+        _seed_episode(catalog, "open the drawer")
+        target = vocabulary.create_entry(settings, preferred_label="drawer work")
+        with pytest.raises(KeyError):
+            vocabulary.accept_candidate(
+                settings,
+                task_strings=["open the drawer"],
+                expected_core="drawer",
+                entry_id="voc_missing",
+            )
+        # An entry whose core is not the candidate's core cannot be its target.
+        with pytest.raises(ValueError, match="no longer the unique core match"):
+            vocabulary.accept_candidate(
+                settings,
+                task_strings=["open the drawer"],
+                expected_core="drawer",
+                entry_id=target["id"],
+            )
+        # A new entry is refused once an entry already owns the suggested core.
+        vocabulary.create_entry(settings, preferred_label="drawers", core="drawer")
+        with pytest.raises(ValueError, match="an entry now uses the suggested core"):
+            vocabulary.accept_candidate(
+                settings,
+                task_strings=["open the drawer"],
+                expected_core="drawer",
+                new_label="another drawer entry",
+            )
+        assert "drawer work" in {
+            entry["preferred_label"] for entry in vocabulary.list_entries(settings)
+        }
+        assert (
+            vocabulary.get_entry(settings, vocabulary.entry_id_for("another drawer entry")) is None
+        )
+
+    def test_a_string_that_stops_sharing_the_core_is_refused(
+        self, settings: Settings, catalog: PostgresCatalog
+    ) -> None:
+        entry = vocabulary.create_entry(settings, preferred_label="mugs", core="mug")
+        vocabulary.map_task(settings, task_string="already placed", entry_id=entry["id"])
+        _seed_episode(catalog, "open the drawer")
+        _seed_episode(catalog, "grab the blue mug")
+        with pytest.raises(ValueError, match="no longer share the suggested core"):
+            vocabulary.accept_candidate(
+                settings,
+                task_strings=["open the drawer", "grab the blue mug"],
+                expected_core="mug",
+                entry_id=entry["id"],
+            )
+        assert vocabulary.mapping_for(settings, "grab the blue mug") is None
+
+    def test_undo_keeps_a_created_entry_that_something_else_still_maps_to(
+        self, settings: Settings, catalog: PostgresCatalog
+    ) -> None:
+        _seed_episode(catalog, "polish the telescope")
+        created = vocabulary.accept_candidate(
+            settings,
+            task_strings=["polish the telescope"],
+            new_label="telescope polishing",
+            expected_core=vocabulary.core_of("polish the telescope"),
+        )
+        vocabulary.map_task(settings, task_string="later mapping", entry_id=created["id"])
+
+        vocabulary.undo_event(settings, event_id=_last_event(settings) - 1)
+        vocabulary.undo_event(settings, event_id=_last_event(settings))
+        assert vocabulary.mapping_for(settings, "polish the telescope") is None
+        assert vocabulary.get_entry(settings, created["id"]) is not None, (
+            "the later mapping still depends on this entry"
+        )
+
+    def test_the_event_log_refuses_a_kind_it_cannot_undo(self, settings: Settings) -> None:
+        """`undo_event` raises on an unknown kind, and the schema refuses to store one.
+
+        The guard in `undo_event` is therefore unreachable through the API, which
+        is the point: a future migration that adds a kind without an undo branch
+        cannot slip an uncompensable event into the log.
+        """
+        with connect(settings) as connection, pytest.raises(psycopg.errors.CheckViolation):
+            connection.execute(
+                "INSERT INTO task_vocabulary_events (kind, payload) VALUES ('teleport', %s)",
+                (Jsonb({}),),
+            )
+
+    def test_an_empty_task_string_is_treated_as_noise_at_ingest(self, settings: Settings) -> None:
+        assert vocabulary.map_or_resolve(settings, "   ") == "dismissed"
+
+
 class TestMergeSplitUndo:
+    def test_candidate_acceptance_is_atomic_and_reversible(
+        self, settings: Settings, catalog: PostgresCatalog
+    ) -> None:
+        _seed_episode(catalog, "polish the telescope")
+        entry = vocabulary.accept_candidate(
+            settings,
+            task_strings=["polish the telescope"],
+            new_label="telescope polishing",
+            expected_core=vocabulary.core_of("polish the telescope"),
+        )
+        mapping = vocabulary.mapping_for(settings, "polish the telescope")
+        assert mapping == {
+            "task_string": "polish the telescope",
+            "entry_id": entry["id"],
+            "provenance": "confirm",
+        }
+        event_id = _last_event(settings)
+        vocabulary.undo_event(settings, event_id=event_id)
+        assert vocabulary.mapping_for(settings, "polish the telescope") is None
+        assert vocabulary.get_entry(settings, entry["id"]) is None
+
+    def test_rejected_candidate_does_not_leave_a_half_created_entry(
+        self, settings: Settings
+    ) -> None:
+        with pytest.raises(ValueError, match="no longer exist"):
+            vocabulary.accept_candidate(
+                settings,
+                task_strings=["stale task"],
+                new_label="stale entry",
+                expected_core=vocabulary.core_of("stale task"),
+            )
+        assert vocabulary.get_entry(settings, vocabulary.entry_id_for("stale entry")) is None
+
     def test_merge_moves_strings_and_undo_restores_exactly(self, settings: Settings) -> None:
         source = vocabulary.create_entry(settings, preferred_label="cups")
         target = vocabulary.create_entry(settings, preferred_label="mugs", core="mug")

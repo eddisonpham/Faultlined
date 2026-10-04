@@ -18,6 +18,7 @@ from data_engine.catalog.repository import (
     InvalidTransition,
     SliceNameConflict,
 )
+from data_engine.catalog.vocabulary import LabelConflict
 from data_engine.observability.logging import correlation_id_var
 from data_engine.web import error_page, theme_or_default
 
@@ -84,6 +85,22 @@ def install_error_handling(app: FastAPI) -> None:
                 "status": 409,
                 "code": "SLICE_NAME_CONFLICT",
                 "detail": f"A curation slice already uses that name: {exc}",
+                "correlation_id": correlation_id_var.get(),
+            },
+        )
+
+    @app.exception_handler(LabelConflict)
+    async def vocabulary_label_conflict_handler(
+        _request: Request, exc: LabelConflict
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=409,
+            content={
+                "type": "about:blank",
+                "title": "Vocabulary label conflict",
+                "status": 409,
+                "code": "VOCABULARY_LABEL_CONFLICT",
+                "detail": f"The vocabulary already uses that preferred label: {exc}",
                 "correlation_id": correlation_id_var.get(),
             },
         )

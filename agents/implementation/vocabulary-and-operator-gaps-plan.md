@@ -1,6 +1,7 @@
 # Implementation Plan — vocabulary-first task curation + operator-convenience extensions
 
-**Status: planned 2026-10-04.** Implements the two research verdicts:
+**Status: in execution 2026-10-04** (B1, A1-A5 shipped; A6 and Track B remain).
+Implements the two research verdicts:
 [clustering-methods-verdict.md](../research/clustering-methods-verdict.md) (Option D) and
 [infrastructure-gaps.md](../research/infrastructure-gaps.md) (P1–P5). This is the *how*; the
 research docs own the *what and why*. Deviations from this plan get recorded here (§9-style) when
@@ -218,6 +219,51 @@ Running log as slices land; deviations from §1-§5 are stated, not hidden.
   table, so "map-or-enqueue" writes nothing for novel strings - the enqueue is implicit.
   Measured semantics: `extract()` cores keep object + site ("mug on plate"), so ingest
   auto-maps only on exact core equality with exactly one entry.
+- **A3 + A4 (ingest wiring + candidate ranker) — shipped 2026-10-04.** `ingest/service.py`
+  calls `map_or_resolve` for every registered episode task string; the episode row keeps
+  its raw string. `clustering/ranker.py` answers ADR 0029 §5 with the measured rule and
+  nothing more (exact extracted-core equality): one entry on the core -> `attach`, no
+  entry -> `new_entry` labelled by the core, **two or more -> silence**. The ranker is
+  pure and deterministic, so the candidate-precision measurement A4 asks for can reuse
+  it against labelled pairs; that measurement is still unrecorded (§4 gate).
+- **A5 (API + UI surface) — shipped 2026-10-04.** `api/vocabulary_schemas.py` plus
+  `GET/POST /api/v1/vocabulary`, `GET /unmapped` (ranked cursor: `after_episodes` +
+  `after_task`, which must be paired or 422), `GET /candidates`, `POST /mappings`,
+  `POST /dismissals`, `GET /events`, `POST /events/{id}/undo`, `GET/PATCH
+  /{entry_id}`, `POST /{entry_id}/merge|split`. `/ui/vocabulary` replaces the Clusters
+  page in the nav (`c`): readouts, candidates, the queue, the vocabulary, a new-entry
+  form and the undoable action log; `/ui/vocabulary/entries/{id}` carries rename,
+  notes, merge and split. The cluster surface is frozen per ADR 0029 §8: reads answer,
+  every mutation is **410 Gone** (`rebuild`, `POST/DELETE review`, `confirm`,
+  `release`), and `/ui/clusters*` redirects (307 GET, 303 POST) with the old key passed
+  along as `?from_cluster=`. A label collision is a `LabelConflict` -> 409
+  `VOCABULARY_LABEL_CONFLICT`.
+
+Three decisions worth stating rather than leaving in the code:
+
+1. **Candidate acceptance is one store transaction, not a loop.** `accept_candidate()`
+   re-validates inside the transaction (the strings still exist, are still unmapped,
+   still share the submitted core, and the target entry is still the *unique* core
+   match) and then writes the entry (if any) plus every mapping and its `map` event.
+   Half a candidate can no longer commit. The UI route still re-checks that the posted
+   form matches a *current* candidate, and refuses anything else.
+2. **A `new_entry` acceptance is reversible as a unit.** The created entry id rides on
+   each map event's payload; undoing the last one deletes the entry, and only while
+   nothing maps to it any more. `attach` creates nothing and records nothing to undo.
+3. **A renamed entry's id is not reusable.** Entry ids derive from the label at
+   creation, so `create_entry` with an old label whose entry has since been renamed
+   raises `LabelConflict` rather than silently returning the renamed entry. The rename
+   test in `tests/integration/test_vocabulary.py` pins it.
+
+Verification actually run for this slice: `just ci` green (1,388 passed, 89.76%
+coverage, strict mypy over 81 + 22 modules, hygiene, OpenAPI contract regenerated and
+matching); `just ui-audit` clean at 56 page loads across 4 themes against the dev
+catalog and 60 loads (with a discovered entry detail page) against a throwaway
+database holding real ingested episodes; and a live operator smoke over HTTP on that
+database - the rendered `new_entry` form created the entry and mapped both strings,
+the rendered `attach` form mapped the third, the undo button returned that string to
+the queue, and an attach that no longer matched a candidate was refused with
+"candidate changed" rather than applied.
 
 ## 7. Not built (both NOT-lists, condensed)
 

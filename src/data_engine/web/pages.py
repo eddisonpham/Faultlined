@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from html import escape
 from pathlib import Path
@@ -41,7 +42,7 @@ NAV_LINKS = (
     ("/ui", "Status", "1", "workspace"),
     ("/ui/episodes", "Episodes", "4", "curate"),
     ("/ui/failures", "Failures", "5", "curate"),
-    ("/ui/clusters", "Clusters", "c", "curate"),
+    ("/ui/vocabulary", "Vocabulary", "c", "curate"),
     ("/ui/slices", "Slices", "6", "curate"),
     ("/ui/builds", "Builds", "b", "curate"),
     ("/ui/experiments", "Experiments", "e", "curate"),
@@ -270,6 +271,7 @@ _SUBTITLES = {
     "/ui/episodes": "curation view // quality scored at ingest",
     "/ui/failures": "quarantine triage // read-only",
     "/ui/clusters": "task-string proposals // confirm to freeze // ADR 0026",
+    "/ui/vocabulary": "curated task vocabulary // unmapped is the queue // ADR 0029",
     "/ui/slices": "named curation filters // membership recomputed on read",
     "/ui/insights": "dataset distribution // outliers are removal candidates",
     "/ui/metrics": "runtime telemetry // where the time goes",
@@ -1800,6 +1802,324 @@ def cluster_detail_fragment(proposal: dict[str, Any], members: list[dict[str, An
     from data_engine.web.cluster_page import detail_body
 
     return detail_body(proposal, members)
+
+
+# ---------------------------------------------------------------- vocabulary (ADR 0029)
+
+
+def vocabulary_page(model: dict[str, Any], theme: str) -> str:
+    return _page("Vocabulary", "/ui/vocabulary", vocabulary_fragment(model), theme)
+
+
+def vocabulary_fragment(model: dict[str, Any]) -> str:
+    """The triage queue, ranked by how much it is costing: candidates first,
+    then the raw queue, then the vocabulary itself, then what was done to it.
+
+    Deliberately not a polled region: this is a work queue driven by operator
+    actions, every action reloads the page, and a queue that reorders itself
+    under the cursor is worse than one that waits for a refresh.
+    """
+    health = model.get("health") or {}
+    entries = model.get("entries") or []
+    unmapped = model.get("unmapped") or []
+    candidates = model.get("candidates") or []
+    events = model.get("events") or []
+    share = float(health.get("unmapped_episode_share") or 0.0)
+    error = str(model.get("error") or "")
+    legacy_cluster = str(model.get("legacy_cluster") or "")
+
+    readouts = _readouts(
+        [
+            ("unmapped share", _meter(share), "episodes"),
+            ("unmapped", str(int(health.get("unmapped_strings") or 0)), "strings"),
+            ("entries", str(int(health.get("entries") or 0)), "curated"),
+            ("orphaned", str(int(health.get("orphaned_mappings") or 0)), "mappings"),
+            ("candidates", str(int(health.get("pending_candidates") or 0)), "suggestions"),
+            ("mapped", str(int(health.get("mapped_episodes") or 0)), "episodes"),
+            ("dismissed", str(int(health.get("dismissed_strings") or 0)), "strings"),
+        ]
+    )
+    return (
+        (_section("Not applied", f'<p class="de-empty">{escape(error)}</p>') if error else "")
+        + (
+            _section(
+                "Legacy bookmark",
+                f"<p>This old proposal is archived: <code>{escape(legacy_cluster)}</code>. "
+                "Review the vocabulary entries and unmapped queue here.</p>",
+            )
+            if legacy_cluster
+            else ""
+        )
+        + readouts
+        + _section(
+            "Candidates",
+            _candidate_rows(candidates)
+            or _empty("no candidates", "the ranker suggests only what it can justify"),
+            "suggestions, never actions",
+        )
+        + _section(
+            "Unmapped queue",
+            _unmapped_rows(unmapped, entries)
+            or _empty("the queue is empty", "every task string has a home"),
+            "most fragmenting first",
+        )
+        + _section(
+            "Vocabulary",
+            _entry_rows(entries) or _empty("no vocabulary entries", "name the first one below"),
+            "what has been decided",
+        )
+        + _section("New entry", _new_entry_form(), "a label names a durable thing")
+        + _section(
+            "Recent actions",
+            _event_rows(events)
+            or _empty("no vocabulary actions yet", "merges, splits and renames are recorded here"),
+            "every action is reversible",
+        )
+    )
+
+
+def _task_inputs(task_strings: Sequence[str]) -> str:
+    return "".join(
+        f'<input type="hidden" name="task" value="{escape(task)}">' for task in task_strings
+    )
+
+
+def _candidate_rows(candidates: Sequence[dict[str, Any]]) -> str:
+    rows: list[str] = []
+    for candidate in candidates:
+        tasks = [str(t) for t in candidate.get("task_strings") or []]
+        core = escape(str(candidate.get("core") or ""))
+        episodes = int(candidate.get("episodes") or 0)
+        if candidate.get("kind") == "attach":
+            claim = (
+                f"{len(tasks)} strings ({episodes} episodes) share the core "
+                f"<code>{core}</code> with "
+                f"<strong>{escape(str(candidate.get('entry_label') or ''))}</strong>"
+            )
+            action = (
+                f'<form method="post" action="/ui/vocabulary/accept">'
+                f'<input type="hidden" name="kind" value="attach">'
+                f'<input type="hidden" name="entry_id" '
+                f'value="{escape(str(candidate.get("entry_id") or ""))}">'
+                f"{_task_inputs(tasks)}"
+                f'<button type="submit" class="fine-use-focusable">attach</button></form>'
+            )
+        else:
+            claim = (
+                f"{len(tasks)} strings ({episodes} episodes) look like one new entry "
+                f"<code>{core}</code>"
+            )
+            action = (
+                f'<form method="post" action="/ui/vocabulary/accept">'
+                f'<input type="hidden" name="kind" value="new_entry">'
+                f"{_task_inputs(tasks)}"
+                f'<label for="new-{core}">label</label> '
+                f'<input id="new-{core}" name="new_label" value="{core}" '
+                'class="fine-use-focusable"> '
+                f'<button type="submit" class="fine-use-focusable">create</button></form>'
+            )
+        rows.append(f"<tr><td>{claim}</td><td>{action}</td></tr>")
+    return _table(
+        "Synonym candidates",
+        "<th>Suggestion</th><th>Action</th>",
+        "".join(rows),
+    )
+
+
+def _unmapped_rows(unmapped: Sequence[dict[str, Any]], entries: Sequence[dict[str, Any]]) -> str:
+    options = "".join(
+        f'<option value="{escape(str(e.get("id") or ""))}">'
+        f"{escape(str(e.get('preferred_label') or ''))}</option>"
+        for e in entries
+    )
+    rows = "".join(
+        "<tr>"
+        f"<td>{escape(str(u.get('task_string') or ''))}</td>"
+        f'<td class="num">{int(u.get("episodes") or 0)}</td>'
+        f"<td>{_when(u.get('first_seen'))}</td>"
+        f'<td><form method="post" action="/ui/vocabulary/map">'
+        f'<input type="hidden" name="task_string" '
+        f'value="{escape(str(u.get("task_string") or ""))}">'
+        f'<select name="entry_id" class="fine-use-focusable">{options}</select> '
+        f'<button type="submit" class="fine-use-focusable">map</button></form></td>'
+        f'<td><form method="post" action="/ui/vocabulary/dismiss">'
+        f'<input type="hidden" name="task_string" '
+        f'value="{escape(str(u.get("task_string") or ""))}">'
+        f'<button type="submit" class="fine-use-focusable">dismiss</button></form></td>'
+        "</tr>"
+        for u in unmapped
+    )
+    return _table(
+        "Unmapped task strings",
+        '<th>Task string</th><th class="num">Episodes</th><th>First seen</th>'
+        "<th>Map to entry</th><th>Noise</th>",
+        rows,
+    )
+
+
+def _entry_rows(entries: Sequence[dict[str, Any]]) -> str:
+    rows = "".join(
+        "<tr>"
+        f'<td><a href="/ui/vocabulary/entries/{escape(str(e.get("id") or ""))}">'
+        f"{escape(str(e.get('preferred_label') or ''))}</a></td>"
+        f"<td><code>{escape(str(e.get('core') or ''))}</code></td>"
+        f'<td class="num">{int(e.get("task_count") or 0)}</td>'
+        f'<td class="num">{int(e.get("episodes") or 0)}</td>'
+        "</tr>"
+        for e in entries
+    )
+    return _table(
+        "Vocabulary entries",
+        '<th>Preferred label</th><th>Core</th><th class="num">Strings</th>'
+        '<th class="num">Episodes</th>',
+        rows,
+    )
+
+
+def _new_entry_form() -> str:
+    return (
+        '<form method="post" action="/ui/vocabulary/entries" class="de-filters">'
+        '<label for="preferred_label">label</label>'
+        '<input id="preferred_label" name="preferred_label" class="fine-use-focusable" required> '
+        '<label for="notes">notes</label>'
+        '<input id="notes" name="notes" class="fine-use-focusable"> '
+        '<button type="submit" class="fine-use-focusable">create entry</button>'
+        "</form>"
+    )
+
+
+def _event_rows(events: Sequence[dict[str, Any]]) -> str:
+    rows = "".join(
+        "<tr>"
+        f"<td>{escape(_event_claim(event))}</td>"
+        f"<td>{_when(event.get('created_at'))}</td>"
+        f"<td>{_undo_form(event) if not event.get('undone_at') else _undone_label()}</td>"
+        "</tr>"
+        for event in events
+    )
+    return _table(
+        "Recent vocabulary actions",
+        "<th>Action</th><th>When</th><th>Undo</th>",
+        rows,
+    )
+
+
+def _undone_label() -> str:
+    return '<span class="text-comment">undone</span>'
+
+
+def _event_claim(event: dict[str, Any]) -> str:
+    payload = event.get("payload") or {}
+    kind = str(event.get("kind") or "")
+    if kind == "merge":
+        source = (payload.get("source") or {}).get("preferred_label") or "?"
+        return f"merge {source} into {payload.get('target_id') or '?'}"
+    if kind == "split":
+        return f"split {payload.get('new_label') or '?'} from {payload.get('entry_id') or '?'}"
+    if kind == "label":
+        return f"rename {payload.get('old_label') or '?'} to {payload.get('new_label') or '?'}"
+    if kind == "dismiss":
+        return f"dismiss {payload.get('task_string') or '?'}"
+    return f"map {payload.get('task_string') or '?'}"
+
+
+def _undo_form(event: dict[str, Any]) -> str:
+    event_id = int(event.get("id") or 0)
+    return (
+        f'<form method="post" action="/ui/vocabulary/events/{event_id}/undo">'
+        f'<button type="submit" class="fine-use-focusable">undo</button></form>'
+    )
+
+
+def vocabulary_detail_page(
+    entry: dict[str, Any],
+    members: Sequence[dict[str, Any]],
+    entries: Sequence[dict[str, Any]],
+    theme: str,
+    *,
+    error: str = "",
+) -> str:
+    """One vocabulary entry: what it explains, and the two structural edits."""
+    entry_id = str(entry.get("id") or "")
+    preferred_label = escape(str(entry.get("preferred_label") or ""))
+    member_rows = "".join(
+        "<tr>"
+        f"<td>{escape(str(m.get('task_string') or ''))}</td>"
+        f"<td><code>{escape(str(m.get('provenance') or ''))}</code></td>"
+        f'<td class="num">{int(m.get("episodes") or 0)}</td>'
+        f"<td>{_when(m.get('mapped_at'))}</td>"
+        "</tr>"
+        for m in members
+    )
+    checkboxes = "".join(
+        "<tr>"
+        f'<td><input type="checkbox" name="task" '
+        f'value="{escape(str(m.get("task_string") or ""))}"></td>'
+        f"<td>{escape(str(m.get('task_string') or ''))}</td>"
+        "</tr>"
+        for m in members
+    )
+    others = "".join(
+        f'<option value="{escape(str(e.get("id") or ""))}">'
+        f"{escape(str(e.get('preferred_label') or ''))}</option>"
+        for e in entries
+        if str(e.get("id")) != entry_id
+    )
+    body = (
+        (_section("Not applied", f'<p class="de-empty">{escape(error)}</p>') if error else "")
+        + _section(
+            "Members",
+            _table(
+                "Task strings under this entry",
+                "<th>Task string</th><th>Provenance</th>"
+                '<th class="num">Episodes</th><th>Mapped</th>',
+                member_rows,
+                empty="nothing is mapped to this entry yet",
+            ),
+            f"{len(members)} strings",
+        )
+        + _section(
+            "Rename",
+            f'<form method="post" action="/ui/vocabulary/entries/{escape(entry_id)}/rename" '
+            'class="de-filters">'
+            '<label for="preferred_label">label</label>'
+            f'<input id="preferred_label" name="preferred_label" value="{preferred_label}" '
+            'class="fine-use-focusable" required> '
+            '<button type="submit" class="fine-use-focusable">rename</button></form>'
+            f'<form method="post" action="/ui/vocabulary/entries/{escape(entry_id)}/notes" '
+            'class="de-filters"><label for="notes">notes</label>'
+            f'<input id="notes" name="notes" value="{escape(str(entry.get("notes") or ""))}" '
+            'class="fine-use-focusable"> '
+            '<button type="submit" class="fine-use-focusable">save notes</button></form>',
+            "the id never moves",
+        )
+        + _section(
+            "Merge into another entry",
+            f'<form method="post" action="/ui/vocabulary/entries/{escape(entry_id)}/merge" '
+            'class="de-filters">'
+            '<label for="target_entry_id">target</label>'
+            f'<select id="target_entry_id" name="target_entry_id" '
+            f'class="fine-use-focusable">{others}</select> '
+            '<button type="submit" class="fine-use-focusable">merge (recorded, reversible)</button>'
+            "</form>",
+            "this entry goes away; undo restores it",
+        )
+        + _section(
+            "Split some strings out",
+            f'<form method="post" action="/ui/vocabulary/entries/{escape(entry_id)}/split">'
+            '<table class="de-table fine-use-data-table">'
+            '<caption class="de-sr">Strings to split out</caption>'
+            f"<tbody>{checkboxes}</tbody></table>"
+            '<label for="new_label">new label</label> '
+            '<input id="new_label" name="new_label" class="fine-use-focusable" required> '
+            '<button type="submit" class="fine-use-focusable">split (recorded, reversible)</button>'
+            "</form>",
+            "checked strings become a new entry",
+        )
+    )
+    return _page(
+        str(entry.get("preferred_label") or "Vocabulary entry"), "/ui/vocabulary", body, theme
+    )
 
 
 def episodes_page(
