@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any
 
 from data_engine.analysis.quality import analyze
+from data_engine.catalog import vocabulary
 from data_engine.catalog.repository import PostgresCatalog, canonical_json
 from data_engine.ingest.readers.base import EpisodeExtraction, ReaderError
 from data_engine.ingest.readers.registry import read_episode
@@ -17,6 +19,29 @@ from data_engine.storage.artifacts import FileArtifactStore
 # a malformed payload raise a bare `KeyError` would leak an implementation detail into
 # the job error and, worse, would make the failure look transient to the retry policy.
 _SYNTHETIC_FIELDS = ("task", "robot", "timestamps", "observations", "actions")
+
+logger = logging.getLogger(__name__)
+
+
+def _resolve_task(catalog: PostgresCatalog, task: str) -> str | None:
+    """Resolve a task string against the vocabulary (ADR 0029 §3), never failing ingest.
+
+    The episode row is the record and it keeps the raw task string; the mapping
+    is a derived view. If resolution cannot run, the string simply stays in the
+    unmapped queue and a human confirms it later - the designed path, not a
+    degraded one. A catalog without settings is a test double; a real failure is
+    logged with its event name, the way a host-sample failure is (ADR 0008:
+    enrichment never stops the pipeline).
+    """
+    settings = getattr(catalog, "settings", None)
+    if settings is None:
+        return None
+    try:
+        return vocabulary.map_or_resolve(settings, task)
+    except Exception as exc:  # enrichment must not fail the episode it describes
+        logger.warning("task resolution failed", extra={"event": "task_resolution_failed"})
+        logger.debug("task resolution error", exc_info=exc)
+        return None
 
 
 def _frames(episode: dict[str, Any]) -> list[float]:
@@ -126,6 +151,12 @@ class EpisodeIngestService:
             episode_key=episode_key,
             episode_format=episode_format,
         )
+        # A known string needs no work, one whose extracted core matches exactly
+        # one entry is mapped now, and a novel string is left for the unmapped
+        # queue - which is a query, so nothing is written and nothing can go stale.
+        task = str(metadata.get("task") or "").strip()
+        if task:
+            _resolve_task(self.catalog, task)
         if quality is not None:
             self.catalog.record_episode_quality(str(episode_row["id"]), quality)
         self.metrics.artifact_written(size_bytes)

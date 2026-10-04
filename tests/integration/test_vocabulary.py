@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Iterator
+from pathlib import Path
+from typing import Any
 
 import psycopg
 import pytest
@@ -26,6 +28,8 @@ from data_engine.catalog.database import connect, initialize_schema
 from data_engine.catalog.migrations.task_vocabulary import TaskVocabularyMigration
 from data_engine.catalog.repository import PostgresCatalog
 from data_engine.config import Settings
+from data_engine.ingest.service import EpisodeIngestService
+from data_engine.storage.artifacts import FileArtifactStore
 from tests.conftest import postgres_test_dsn
 
 pytestmark = pytest.mark.integration
@@ -321,6 +325,39 @@ class TestHealth:
         assert health["unmapped_strings"] == 1
         assert health["unmapped_string_share"] == pytest.approx(1 / 3)
         assert health["unmapped_episode_share"] == pytest.approx(1 / 4)
+
+
+class TestIngestWiring:
+    def test_ingest_resolves_the_task_against_the_vocabulary(
+        self, settings: Settings, catalog: PostgresCatalog, tmp_path: Path
+    ) -> None:
+        """ADR 0029 §3 on the real ingest path: map known cores, queue novel strings."""
+        entry = vocabulary.create_entry(settings, preferred_label="mug", core="mug")
+        service = EpisodeIngestService(catalog, FileArtifactStore(tmp_path))
+        job, _ = catalog.submit_job("ingest", {}, f"vocab-ingest-{uuid.uuid4().hex[:8]}", "corr")
+
+        service.ingest(_synthetic_episode("pick up the red mug"), job_id=str(job["id"]))
+        auto = vocabulary.mapping_for(settings, "pick up the red mug")
+        assert auto == {
+            "task_string": "pick up the red mug",
+            "entry_id": entry["id"],
+            "provenance": "ingest",
+        }
+
+        service.ingest(_synthetic_episode("polish the telescope"), job_id=str(job["id"]))
+        assert vocabulary.mapping_for(settings, "polish the telescope") is None
+        queue = {row["task_string"] for row in vocabulary.list_unmapped(settings, limit=50)}
+        assert "polish the telescope" in queue
+
+
+def _synthetic_episode(task: str) -> dict[str, Any]:
+    return {
+        "task": task,
+        "robot": "so101",
+        "timestamps": [0.0, 0.1, 0.2],
+        "observations": [[0.0], [0.1], [0.2]],
+        "actions": [[0.0], [0.1], [0.2]],
+    }
 
 
 def _apply_backfill(settings: Settings) -> None:
