@@ -14,13 +14,14 @@ as the change, so a crashed runner leaves no version behind unapplied work.
 both migrating at startup must not race). Forward-only: a rollback is the
 restore drill, which is already the procedure this project practices.
 
-The shipped registry contains exactly the baseline. The baseline is the
-existing idempotent DDL: `initialize_schema` keeps running on every start and
-records `0001` after it succeeds, so a database that has only ever been started
-by the code already reads as baseline-applied and `de migrate` runs only real
-pending work. Tests inject synthetic migrations through the `migrations=`
-parameter to prove once-only semantics without committing a fake migration to
-make the mechanism look used.
+The shipped registry holds the baseline and the real migrations added since
+(0002: the task-vocabulary backfill, ADR 0029). The baseline is the existing
+idempotent DDL: `initialize_schema` keeps running on every start and records
+`0001` after it succeeds, so a database that has only ever been started by the
+code already reads as baseline-applied and `de migrate` runs only real pending
+work. Tests inject synthetic migrations through the `migrations=` parameter to
+prove once-only semantics without committing a fake migration to make the
+mechanism look used.
 """
 
 from __future__ import annotations
@@ -31,6 +32,7 @@ from typing import Any, Protocol
 from psycopg import Connection
 
 from data_engine.catalog.database import run_schema_ddl
+from data_engine.catalog.migrations.task_vocabulary import TaskVocabularyMigration
 from data_engine.config import Settings
 
 #: Advisory lock key. A literal constant, not a hash: the value only has to be
@@ -73,7 +75,7 @@ class BaselineMigration:
 
 #: The shipped registry. Ordered by version; the runner refuses duplicates and
 #: gaps are allowed (a renumbered or withdrawn draft must not reorder history).
-REGISTRY: tuple[Migration, ...] = (BaselineMigration(),)
+REGISTRY: tuple[Migration, ...] = (BaselineMigration(), TaskVocabularyMigration())
 
 
 def applied_versions(connection: Connection[Any]) -> list[str]:

@@ -94,31 +94,37 @@ def test_a_fresh_database_starts_with_an_empty_ledger(fresh_settings: Settings) 
     ]
 
 
-def test_upgrade_on_a_fresh_database_applies_and_records_the_baseline(
+def test_upgrade_on_a_fresh_database_applies_and_records_every_version(
     fresh_settings: Settings,
 ) -> None:
     applied = migrations.upgrade(fresh_settings)
-    assert applied == ["0001"]
+    assert applied == ["0001", "0002"]
     # The real DDL ran: the catalog tables exist, not just the ledger row.
     assert _table_exists(fresh_settings, "jobs")
     assert _table_exists(fresh_settings, "schema_migrations")
+    assert _table_exists(fresh_settings, "task_vocabulary_entries")
     state = migrations.status(fresh_settings)
-    assert state["applied"] == ["0001"]
+    assert state["applied"] == ["0001", "0002"]
     assert state["pending"] == []
     assert state["unknown"] == []
 
 
 def test_upgrade_is_a_noop_when_everything_is_applied(fresh_settings: Settings) -> None:
-    initialize_schema(fresh_settings)
+    migrations.upgrade(fresh_settings)
     assert migrations.upgrade(fresh_settings) == []
 
 
 def test_initialize_schema_records_the_baseline_it_built(fresh_settings: Settings) -> None:
-    """The safety-net path and the migration ledger must agree."""
+    """The safety-net path and the migration ledger must agree.
+
+    The safety net builds idempotent DDL and records only the baseline; real
+    migrations stay pending until `de migrate` runs them (ADR 0028), so a
+    database is never silently restructured by a process start.
+    """
     initialize_schema(fresh_settings)
     state = migrations.status(fresh_settings)
     assert state["applied"] == ["0001"]
-    assert state["pending"] == []
+    assert state["pending"] == ["0002"]
 
 
 # ---------------------------------------------------------- once-only semantics

@@ -267,6 +267,51 @@ CREATE TABLE IF NOT EXISTS cluster_runs (
 
 CREATE INDEX IF NOT EXISTS cluster_runs_created_idx ON cluster_runs (created_at DESC);
 
+-- Task vocabulary (ADR 0029). The curated vocabulary is the source of truth for what a
+-- task string means - cluster proposals are one input to it, not the product.
+-- (No semicolons in these comments: the DDL splitter breaks statements on them.)
+--
+-- An entry's id is derived from its preferred label at creation (voc_<blake2b(label)>),
+-- which makes the migration-0002 backfill deterministic and collapses duplicate labels.
+-- The id names the *entry*, so a rename keeps it.
+--
+-- A mapping is where a task string lives: an entry, or deliberately nowhere
+-- (provenance 'dismiss', entry NULL - the reviewed noise that must not re-queue forever).
+-- Episode rows keep their raw task string. This table is a view over them, so a vocabulary
+-- edit never rewrites the audit trail.
+CREATE TABLE IF NOT EXISTS task_vocabulary_entries (
+    id text PRIMARY KEY,
+    preferred_label text NOT NULL UNIQUE,
+    core text NOT NULL DEFAULT '',
+    notes text NOT NULL DEFAULT '',
+    created_at timestamptz NOT NULL DEFAULT now(),
+    created_by text NOT NULL DEFAULT 'operator'
+);
+
+CREATE TABLE IF NOT EXISTS task_vocabulary_mappings (
+    task_string text PRIMARY KEY,
+    entry_id text REFERENCES task_vocabulary_entries(id) ON DELETE CASCADE,
+    provenance text NOT NULL
+        CHECK (provenance IN ('ingest', 'confirm', 'merge', 'split', 'dismiss')),
+    mapped_at timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT task_vocabulary_mappings_target
+        CHECK ((provenance = 'dismiss') = (entry_id IS NULL))
+);
+
+CREATE INDEX IF NOT EXISTS task_vocabulary_mappings_entry_idx
+    ON task_vocabulary_mappings (entry_id);
+
+-- Merge, split and rename events. The payload carries what the operation moved and what
+-- it replaced, so undo is a compensating action over recorded facts rather than a guess.
+CREATE TABLE IF NOT EXISTS task_vocabulary_events (
+    id bigserial PRIMARY KEY,
+    kind text NOT NULL CHECK (kind IN ('merge', 'split', 'label', 'map', 'dismiss')),
+    payload jsonb NOT NULL DEFAULT '{}',
+    created_at timestamptz NOT NULL DEFAULT now(),
+    created_by text NOT NULL DEFAULT 'operator',
+    undone_at timestamptz
+);
+
 -- The migration ledger (ADR 0028). initialize_schema writes the baseline row
 -- here, and `de migrate` appends one row per applied migration, so the schema
 -- state a database is in is recorded in the database itself.

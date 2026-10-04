@@ -65,11 +65,14 @@ def test_unknown_versions_names_what_the_registry_does_not_know() -> None:
     assert migrations.unknown_versions(["0001"], registry) == []
 
 
-def test_the_shipped_registry_is_baseline_only_and_ordered() -> None:
+def test_the_shipped_registry_is_ordered_and_carries_only_real_changes() -> None:
     versions = [m.version for m in migrations.REGISTRY]
     assert versions == sorted(versions)
-    assert versions[0] == "0001"
-    assert versions == ["0001"], "no migration ships without a real schema change behind it"
+    assert versions[0] == "0001", "the baseline is always first"
+    assert versions == ["0001", "0002"], (
+        "no migration ships without a real change behind it; 0002 is the "
+        "task-vocabulary backfill (ADR 0029)"
+    )
 
 
 def test_baseline_migration_runs_the_schema_ddl(monkeypatch: pytest.MonkeyPatch) -> None:

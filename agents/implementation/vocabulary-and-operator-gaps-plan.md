@@ -205,6 +205,19 @@ Running log as slices land; deviations from §1-§5 are stated, not hidden.
   through the cursor path — membership identical, order differs). ADR 0030. Bound at 50,000
   rows per download; the first row is pulled before streaming so catalog failures stay JSON
   errors. No ADR deviation beyond what ADR 0030 records.
+- **A1 + A2 (vocabulary schema + store) — shipped 2026-10-04.** ADR 0029; three tables
+  (`task_vocabulary_entries` / `_mappings` / `_events`) in the idempotent baseline *and*
+  self-contained in migration `0002`, whose real content is the one-time backfill from
+  `cluster_confirmations` + review dispositions (first-wins per string, dismissals honored,
+  unnamed `class` rows deliberately left unmapped). Entry ids are `voc_<blake2b(label)>`
+  (deterministic creation, stable across renames). `catalog/vocabulary.py` owns
+  create/map/dismiss/merge/split/rename + `undo_event` (payload-recorded, exactly
+  reversible) + the unmapped queue as a **query over episodes minus mappings** (no queue
+  rows to drift) + health with both string- and episode-weighted unmapped share.
+  One deviation from the sketch, stated: the queue is computed rather than a written
+  table, so "map-or-enqueue" writes nothing for novel strings - the enqueue is implicit.
+  Measured semantics: `extract()` cores keep object + site ("mug on plate"), so ingest
+  auto-maps only on exact core equality with exactly one entry.
 
 ## 7. Not built (both NOT-lists, condensed)
 

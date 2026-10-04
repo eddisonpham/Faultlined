@@ -36,4 +36,5 @@ supersede it with a new ADR and update the affected docs.
 | [0026](0026-cluster-proposals.md) | Cluster task strings into proposals a human confirms | accepted |
 | [0027](0027-cluster-review-and-ui-information-architecture.md) | Triage uncertain task strings and organize the operator surface around work | accepted |
 | [0028](0028-versioned-catalog-migrations.md) | Versioned forward-only catalog migrations behind `de migrate` | accepted |
+| [0029](0029-task-vocabulary-first.md) | The task vocabulary is the source of truth; clustering only proposes | accepted |
 | [0030](0030-streamed-downloads.md) | Streamed downloads are the same read with a different serializer | accepted |
