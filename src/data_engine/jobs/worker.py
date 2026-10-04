@@ -38,6 +38,18 @@ class _JobTimedOut(Exception):
     """Internal signal that a job exceeded its deadline before or during execution."""
 
 
+class _CancelRequested(Exception):
+    """Raised by the handler when the worker reports cancellation.
+
+    The handler returns normally when it has finished its current unit of work;
+    this exception is the interrupt a forced cancel needs inside a single call.
+    """
+
+    def __init__(self, job_id: str) -> None:
+        super().__init__(f"cancel requested for job {job_id}")
+        self.job_id = job_id
+
+
 #: Failures that retrying cannot fix. `architecture/failure-handling.md` F1/F3: a
 #: payload the handler cannot parse, a job type nobody handles, or a source the reader
 #: rejects will fail identically on every attempt, so burning the retry budget only
@@ -103,12 +115,14 @@ class IngestWorker:
         settings: Settings | None = None,
         *,
         metrics: RuntimeMetrics | None = None,
+        catalog: PostgresCatalog | None = None,
     ) -> None:
         self.settings = settings or Settings()
-        self.catalog = PostgresCatalog(self.settings, metrics=metrics)
+        self.catalog = catalog or PostgresCatalog(self.settings, metrics=metrics)
         self.artifacts = FileArtifactStore(self.settings.artifact_root)
         self.ingest = EpisodeIngestService(self.catalog, self.artifacts, metrics=metrics)
         self.validation = ValidationService(self.catalog, metrics=metrics)
+        self._cancel_requested = False
         self.metrics = metrics or RuntimeMetrics()
 
     def _run_handler(self, job: dict[str, Any], job_type: str) -> dict[str, Any]:
@@ -401,7 +415,11 @@ class IngestWorker:
         started = time.perf_counter()
         try:
             self._respect_deadline(job)
+            self._checkpoint(job, started)
             result = self._run_handler(job, job_type)
+            # A handler that started on time and overruns the wall-clock budget
+            # is time out here, before its late completion is accepted.
+            self._respect_running_deadline(job)
             # Not every job produces an episode: a validate job reports over a
             # selection and a build reports over a dataset. This used to index
             # `result["episode_id"]` unconditionally, so any job type whose result
@@ -428,12 +446,26 @@ class IngestWorker:
             )
             return completed
         except _JobTimedOut:
+            # The job was never handed to the handler; it only expired on the
+            # queue. No handler ran, so no failure is recorded - the deadline
+            # watchdog is the actor, not a handler exception.
+            return self.catalog.get_job(str(job["id"]))
+        except _CancelRequested:
+            # A coordinator cancel delivered at the checkpoint; settle it as
+            # canceled so the row reflects the interrupt, not the claim state.
+            self._settle_failure(
+                job,
+                {"type": "CancelRequested", "message": "cancel requested while job was running"},
+                terminal=False,
+            )
             return self.catalog.get_job(str(job["id"]))
         except Exception as exc:
             stage_seconds = time.perf_counter() - started
             reason_code = _failure_reason_code(exc)
             self.metrics.job_run_time(stage_seconds, job_type=job_type, state=JobState.FAILED.value)
-            self.metrics.stage_duration(stage_seconds, stage="ingest", status=JobState.FAILED.value)
+            self.metrics.stage_duration(
+                seconds=stage_seconds, stage="ingest", status=JobState.FAILED.value
+            )
             self.metrics.job_failure(job_type=job_type, reason_code=reason_code.value)
             logger.error(
                 "ingest job failed",
@@ -453,3 +485,38 @@ class IngestWorker:
             return self.catalog.get_job(str(job["id"]))
         finally:
             correlation_id_var.reset(token)
+
+    @property
+    def cancel_requested(self) -> bool:
+        """Cancellation status: local flag first, then the catalog.
+
+        The worker cannot page the API directly on a `de worker` process, so the
+        operator sets this flag (or the reaper flips the catalog) and the handler
+        checks it at every checkpoint. The database is the only copy of the truth
+        the worker is allowed to reason from; the local flag mirrors it cheaply.
+        """
+        return self._cancel_requested or self.catalog.is_cancel_requested(
+            str(getattr(self.catalog, "id", "")) or ""
+        )
+
+    def _checkpoint(self, job: dict[str, Any], _started: float) -> None:
+        """Cancel-check + the only interruption point the worker honors.
+
+        The handler is free to run as long as it likes; this is the single
+        place where a coordinated cancel can stop it.
+        """
+        if self.cancel_requested:
+            raise _CancelRequested(str(job["id"]))
+
+    def _respect_running_deadline(self, job: dict[str, Any]) -> None:
+        """Time an in-flight job out if its wall-clock budget expired mid-run.
+
+        `deadline_at` is set when a job is submitted with a `deadline_seconds`
+        budget; that budget is measured from submission, so a job that runs
+        longer than it was allowed is cleaned up here, not by the handler.
+        """
+        deadline = job.get("deadline_at")
+        if isinstance(deadline, datetime) and deadline < datetime.now(UTC):
+            self.catalog.mark_deadline_expired(str(job["id"]))
+            self.metrics.job_timeout(job_type=str(job["type"]))
+            raise _JobTimedOut(str(job["id"]))

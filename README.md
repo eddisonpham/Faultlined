@@ -17,7 +17,59 @@ The data engine is the product. Models are workloads it runs.
 | Fault monitor | Deterministic rules that raise incidents, no model involved |
 | Benchmarks | Reproducible timings with committed baselines |
 
-## Run it
+## Architecture
+
+```mermaid
+flowchart LR
+  subgraph Users
+    ME[ML engineer]
+    DE[Data engineer]
+    EE[Eval engineer]
+    PE[Platform engineer]
+  end
+
+  subgraph Engine["Robot episode data engine"]
+    UI[Operator UI]
+    CLI[CLI]
+    API[HTTP API]
+    CORE[Stages: ingest / validate / index / build / workloads]
+    JOBS[Job queue + worker]
+    OBS[Observability]
+  end
+
+  subgraph State
+    PG[(PostgreSQL)]
+    AR[(Artifact store)]
+    MT[(Parquet metadata)]
+  end
+
+  EXT1[(MCAP / LeRobot)]
+  EXT2[(HF Hub / OXE)]
+  GPU((Optional GPU))
+
+  ME --> UI
+  DE --> UI
+  EE --> CLI
+  PE --> CLI
+  UI --> API
+  CLI --> API
+  API --> CORE
+  API --> JOBS
+  JOBS --> CORE
+  CORE --> PG
+  CORE --> AR
+  CORE --> MT
+  CORE --> OBS
+  EXT1 --> CORE
+  EXT2 --> CORE
+  CORE --> GPU
+```
+
+- API submit -> Postgres queue -> worker -> content-addressed artifact -> episode/lineage catalog -> API read.
+- The API never runs pipeline stages in-process; the worker does all the heavy lifting.
+- Content addressing makes every blob immutable and queriable by its own SHA-256; a file is stored once and many episodes point at it.
+
+## Quickstart
 
 Requirements: Python 3.14, [uv](https://docs.astral.sh/uv/), [just](https://just.systems/), PostgreSQL 17+. On Windows, install [Git for Windows](https://gitforwindows.org/) so `just` has a shell.
 
@@ -51,6 +103,16 @@ To stop a server you left running:
 just stop
 ```
 
+### One-shot smoke (no server)
+
+```bash
+just pg-up
+just reset --yes
+just test
+```
+
+This destroys all local catalog/artifact/metrics data, so run it on a clean box only.
+
 ## Use it
 
 Open <http://127.0.0.1:8000/ui>.
@@ -71,6 +133,44 @@ On an empty system the Status page has an **Ingest data** form. Give it a task n
 | Artifacts | Every stored blob |
 
 Prefer the terminal? The full API contract is at <http://127.0.0.1:8000/openapi.json>.
+
+## Demo script
+
+Copy this into a terminal. It assumes `just pg-up` and a clean `just reset --yes` have already been run.
+
+```bash
+# 1. Start the platform
+just run
+
+# 2. Verify the surface the demo talks to
+curl -s localhost:8000/api/v1/status | python -m json.tool
+
+# 3. Submit a synthetic ingest job
+curl -s -X POST localhost:8000/api/v1/jobs \
+  -H "Content-Type: application/json" \
+  -d '{"type":"ingest","payload":{"source":"python -c \\"print(b\\\"x\\\"*10000)\\"","task":"demo","robot":"demo-arm"}}' \
+  | python -m json.tool
+
+# 4. Watch it leave queued and land in the catalog
+sleep 3
+curl -s localhost:8000/api/v1/jobs?limit=10 | python -m json.tool
+curl -s localhost:8000/api/v1/status | python -m json.tool
+
+# 5. Pull the artifact back, re-hash it, and compare with the catalog entry
+curl -s localhost:8000/api/v1/episodes?limit=10 | python -c "
+import json,sys,hashlib
+eps=json.load(sys.stdin)
+for e in eps:
+    b=e.get('artifact_hash')
+    if b:
+        import urllib.request
+        raw=urllib.request.urlopen('http://127.0.0.1:8000/api/v1/artifacts/'+b).read()
+        print(e['id'], b, hashlib.sha256(raw).hexdigest()[:12])
+"
+
+# 6. Tear down
+just stop
+```
 
 ## Common commands
 
