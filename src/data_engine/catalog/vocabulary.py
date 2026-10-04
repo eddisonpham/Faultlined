@@ -30,6 +30,7 @@ from datetime import UTC, datetime
 from typing import Any, cast
 
 from psycopg import Connection
+from psycopg.errors import UniqueViolation
 from psycopg.types.json import Jsonb
 
 from data_engine.catalog.database import connect
@@ -213,10 +214,31 @@ def map_task(
     """Put a task string under an entry. Re-mapping is allowed: a human can fix a mistake."""
     if provenance == "dismiss":
         raise ValueError("dismiss is not a mapping onto an entry; use dismiss_task")
-    if get_entry(settings, entry_id) is None:
-        raise KeyError(entry_id)
-    previous = mapping_for(settings, task_string)
     with connect(settings) as connection:
+        _lock_strings(connection, [task_string])
+        exists = connection.execute(
+            "SELECT 1 FROM task_vocabulary_entries WHERE id = %s FOR UPDATE", (entry_id,)
+        ).fetchone()
+        if exists is None:
+            raise KeyError(entry_id)
+        # Read inside the same transaction as the write (and under the lock), or
+        # the recorded `previous` describes a state nobody is in.
+        previous_row = connection.execute(
+            "SELECT entry_id, provenance FROM task_vocabulary_mappings "
+            "WHERE task_string = %s FOR UPDATE",
+            (task_string,),
+        ).fetchone()
+        previous = (
+            None
+            if previous_row is None
+            else {
+                "task_string": task_string,
+                "entry_id": str(previous_row["entry_id"])
+                if previous_row["entry_id"] is not None
+                else None,
+                "provenance": str(previous_row["provenance"]),
+            }
+        )
         connection.execute(
             """INSERT INTO task_vocabulary_mappings (task_string, entry_id, provenance)
                VALUES (%s, %s, %s)
@@ -273,6 +295,10 @@ def accept_candidate(
         raise ValueError("choose exactly one existing entry or new label")
 
     with connect(settings) as connection:
+        # Serialize against a concurrent map of the same strings before reading
+        # their state, so "still unmapped" is a fact about this transaction and
+        # not a snapshot taken before the other writer committed.
+        _lock_strings(connection, selected)
         core_entries = connection.execute(
             "SELECT id FROM task_vocabulary_entries WHERE core = %s ORDER BY id FOR UPDATE",
             (expected_core,),
@@ -381,8 +407,24 @@ def dismiss_task(
     settings: Settings, *, task_string: str, actor: str = "operator"
 ) -> dict[str, Any]:
     """Mark a string as noise that must never re-queue (the old `dismissed` disposition)."""
-    previous = mapping_for(settings, task_string)
     with connect(settings) as connection:
+        _lock_strings(connection, [task_string])
+        previous_row = connection.execute(
+            "SELECT entry_id, provenance FROM task_vocabulary_mappings "
+            "WHERE task_string = %s FOR UPDATE",
+            (task_string,),
+        ).fetchone()
+        previous = (
+            None
+            if previous_row is None
+            else {
+                "task_string": task_string,
+                "entry_id": str(previous_row["entry_id"])
+                if previous_row["entry_id"] is not None
+                else None,
+                "provenance": str(previous_row["provenance"]),
+            }
+        )
         connection.execute(
             """INSERT INTO task_vocabulary_mappings (task_string, entry_id, provenance)
                VALUES (%s, NULL, 'dismiss')
@@ -393,7 +435,19 @@ def dismiss_task(
         connection.execute(
             """INSERT INTO task_vocabulary_events (kind, payload, created_by)
                VALUES ('dismiss', %s, %s)""",
-            (Jsonb({"task_string": task_string, "previous": previous}), actor),
+            (
+                Jsonb(
+                    {
+                        "task_string": task_string,
+                        # The state this event wrote, so undo can tell whether the
+                        # string is still where it put it before compensating.
+                        "entry_id": None,
+                        "provenance": "dismiss",
+                        "previous": previous,
+                    }
+                ),
+                actor,
+            ),
         )
         connection.commit()
     return {"task_string": task_string, "entry_id": None, "provenance": "dismiss"}
@@ -596,10 +650,16 @@ def rename_entry(
         if entry_row is None:
             raise KeyError(entry_id)
         old_label = str(entry_row["preferred_label"])
-        connection.execute(
-            "UPDATE task_vocabulary_entries SET preferred_label = %s WHERE id = %s",
-            (label, entry_id),
-        )
+        try:
+            connection.execute(
+                "UPDATE task_vocabulary_entries SET preferred_label = %s WHERE id = %s",
+                (label, entry_id),
+            )
+        except UniqueViolation as error:
+            # Two operators renamed two entries to the same label at once: the
+            # clash check above cannot see the other transaction, so the unique
+            # index is the real arbiter. Answered as a conflict, not a 500.
+            raise LabelConflict(f"preferred label already taken: {label}") from error
         connection.execute(
             """INSERT INTO task_vocabulary_events (kind, payload, created_by)
                VALUES ('label', %s, %s)""",
@@ -788,8 +848,80 @@ def _drop_unreferenced_entry(connection: Connection[Any], entry_id: str) -> None
         connection.execute("DELETE FROM task_vocabulary_entries WHERE id = %s", (entry_id,))
 
 
+def _lock_strings(connection: Connection[Any], task_strings: Sequence[str]) -> None:
+    """Serialize every writer that touches these task strings, inside one transaction.
+
+    Read-then-write on a mapping is a lost update without this: two writers both
+    read "nothing mapped here", both write, and the second event's recorded
+    `previous` is a lie - so undoing it *deletes* the mapping instead of
+    restoring the placement the other writer just made. An advisory lock keyed on
+    the string itself makes the read and the write one atomic unit, and the keys
+    are taken in sorted order so two multi-string candidates cannot deadlock
+    against each other.
+
+    Transaction-scoped, so it is released by commit or rollback with no cleanup
+    path of its own to get wrong.
+    """
+    keys = sorted(
+        {
+            int.from_bytes(
+                hashlib.blake2b(task.encode("utf-8"), digest_size=8).digest(),
+                "big",
+                signed=True,
+            )
+            for task in task_strings
+        }
+    )
+    for key in keys:
+        connection.execute("SELECT pg_advisory_xact_lock(%s)", (key,))
+
+
+def _entry_exists(connection: Connection[Any], entry_id: str) -> bool:
+    return (
+        connection.execute(
+            "SELECT 1 FROM task_vocabulary_entries WHERE id = %s FOR UPDATE", (entry_id,)
+        ).fetchone()
+        is not None
+    )
+
+
+def _mapping_state(connection: Connection[Any], task_string: str) -> tuple[str | None, str] | None:
+    """`(entry_id, provenance)` as it stands now, locked, or None when unmapped.
+
+    `FOR UPDATE` so the check and the compensating write cannot interleave with
+    another writer that is moving the same string at the same moment.
+    """
+    row = connection.execute(
+        "SELECT entry_id, provenance FROM task_vocabulary_mappings "
+        "WHERE task_string = %s FOR UPDATE",
+        (task_string,),
+    ).fetchone()
+    if row is None:
+        return None
+    entry_id = str(row["entry_id"]) if row.get("entry_id") is not None else None
+    return (entry_id, str(row["provenance"]))
+
+
+def _require_applicable(condition: bool, because: str) -> None:
+    """Refuse to compensate an event whose effect has since changed.
+
+    Undo restores the state the event recorded. If that state has moved on - the
+    string was re-mapped, the entry was renamed again, the merged-away entry was
+    recreated - replaying the old payload would silently destroy a newer
+    decision. Refusing (a 409 at the API) makes the conflict the operator's to
+    resolve, rather than a surprise that only shows up in the catalog later.
+    """
+    if not condition:
+        raise ValueError(f"event no longer applies ({because}); reload and review")
+
+
 def undo_event(settings: Settings, *, event_id: int, actor: str = "operator") -> dict[str, Any]:
-    """Compensating action for one recorded event, restoring exactly what it changed."""
+    """Compensating action for one recorded event, restoring exactly what it changed.
+
+    Exact, but only while the state it compensates is still the state it left:
+    an event whose effect has since been superseded is refused rather than
+    replayed over a newer decision.
+    """
     with connect(settings) as connection:
         event_row = connection.execute(
             """SELECT id, kind, payload, undone_at FROM task_vocabulary_events
@@ -804,6 +936,22 @@ def undo_event(settings: Settings, *, event_id: int, actor: str = "operator") ->
         payload = cast(dict[str, Any], event_row["payload"] or {})
         if kind == "merge":
             source = cast(dict[str, Any], payload["source"])
+            source_id = str(source["id"])
+            target_id = str(payload["target_id"])
+            moved = cast(list[dict[str, Any]], payload.get("moved") or [])
+            _require_applicable(
+                not _entry_exists(connection, source_id),
+                f"{source['preferred_label']} exists again",
+            )
+            _require_applicable(
+                _entry_exists(connection, target_id), "the merge target no longer exists"
+            )
+            for row in moved:
+                task_string = str(row["task_string"])
+                _require_applicable(
+                    _mapping_state(connection, task_string) == (target_id, "merge"),
+                    f"{task_string} was mapped again since the merge",
+                )
             connection.execute(
                 """INSERT INTO task_vocabulary_entries
                        (id, preferred_label, core, notes, created_at, created_by)
@@ -818,7 +966,7 @@ def undo_event(settings: Settings, *, event_id: int, actor: str = "operator") ->
                     source.get("created_by") or actor,
                 ),
             )
-            for moved in cast(list[dict[str, Any]], payload.get("moved") or []):
+            for row in moved:
                 connection.execute(
                     """INSERT INTO task_vocabulary_mappings
                            (task_string, entry_id, provenance)
@@ -828,13 +976,27 @@ def undo_event(settings: Settings, *, event_id: int, actor: str = "operator") ->
                                provenance = EXCLUDED.provenance,
                                mapped_at = now()""",
                     (
-                        moved["task_string"],
-                        source["id"],
-                        moved.get("provenance") or "confirm",
+                        row["task_string"],
+                        source_id,
+                        row.get("provenance") or "confirm",
                     ),
                 )
         elif kind == "split":
-            for moved in cast(list[dict[str, Any]], payload.get("moved") or []):
+            new_entry_id = str(payload["new_entry_id"])
+            moved = cast(list[dict[str, Any]], payload.get("moved") or [])
+            _require_applicable(
+                _entry_exists(connection, new_entry_id), "the split entry is already gone"
+            )
+            _require_applicable(
+                _entry_exists(connection, str(payload["entry_id"])),
+                "the entry it was split from no longer exists",
+            )
+            for row in moved:
+                _require_applicable(
+                    _mapping_state(connection, str(row["task_string"])) == (new_entry_id, "split"),
+                    f"{row['task_string']} was mapped again since the split",
+                )
+            for row in moved:
                 connection.execute(
                     """INSERT INTO task_vocabulary_mappings
                            (task_string, entry_id, provenance)
@@ -844,16 +1006,24 @@ def undo_event(settings: Settings, *, event_id: int, actor: str = "operator") ->
                                provenance = EXCLUDED.provenance,
                                mapped_at = now()""",
                     (
-                        moved["task_string"],
+                        row["task_string"],
                         payload["entry_id"],
-                        moved.get("provenance") or "confirm",
+                        row.get("provenance") or "confirm",
                     ),
                 )
             connection.execute(
                 "DELETE FROM task_vocabulary_entries WHERE id = %s",
-                (payload["new_entry_id"],),
+                (new_entry_id,),
             )
         elif kind == "label":
+            current = connection.execute(
+                "SELECT preferred_label FROM task_vocabulary_entries WHERE id = %s FOR UPDATE",
+                (payload["entry_id"],),
+            ).fetchone()
+            _require_applicable(
+                current is not None and current["preferred_label"] == payload["new_label"],
+                "the entry was renamed again",
+            )
             connection.execute(
                 "UPDATE task_vocabulary_entries SET preferred_label = %s WHERE id = %s",
                 (payload["old_label"], payload["entry_id"]),
@@ -861,6 +1031,20 @@ def undo_event(settings: Settings, *, event_id: int, actor: str = "operator") ->
         elif kind in ("map", "dismiss"):
             task = str(payload["task_string"])
             previous = cast(dict[str, Any] | None, payload.get("previous"))
+            written_provenance = payload.get("provenance")
+            if written_provenance is not None:
+                # Events recorded before this check existed carry no written
+                # state; they are compensated as before rather than refused for
+                # a field that was never there.
+                written_entry = payload.get("entry_id")
+                _require_applicable(
+                    _mapping_state(connection, task)
+                    == (
+                        str(written_entry) if written_entry is not None else None,
+                        str(written_provenance),
+                    ),
+                    f"{task} was mapped again since",
+                )
             if previous is None:
                 connection.execute(
                     "DELETE FROM task_vocabulary_mappings WHERE task_string = %s", (task,)

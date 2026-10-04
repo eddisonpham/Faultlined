@@ -160,9 +160,9 @@ edit rewrites the audit trail.
 | POST | `/api/v1/vocabulary/mappings` | Map one task string onto an entry (`provenance: confirm`). 404 for an unknown entry. |
 | POST | `/api/v1/vocabulary/dismissals` | Mark a string as noise (`provenance: dismiss`, entry NULL) so it leaves the queue permanently. |
 | GET | `/api/v1/vocabulary/events` | Recent recorded operations, newest first, with `undone_at`. |
-| POST | `/api/v1/vocabulary/events/{event_id}/undo` | Compensating action for one event. 409 when it is already undone. |
+| POST | `/api/v1/vocabulary/events/{event_id}/undo` | Compensating action for one event, refused with 409 when the event is already undone **or when the state it would compensate has since changed** (the string was re-mapped, the entry renamed again, the merged-away entry recreated) - replaying an old payload over a newer decision would destroy it silently. |
 | GET | `/api/v1/vocabulary/{entry_id}` | One entry and its members with provenance and episode counts. |
-| PATCH | `/api/v1/vocabulary/{entry_id}` | Rename and/or set notes; at least one field required. A rename keeps the id and records a `label` event. |
+| PATCH | `/api/v1/vocabulary/{entry_id}` | Rename and/or set notes; at least one field required. A rename keeps the id and records a `label` event. A label already taken is 409 `VOCABULARY_LABEL_CONFLICT`, including when two renames race for it. |
 | POST | `/api/v1/vocabulary/{entry_id}/merge` | Merge into `target_entry_id`. The source is deleted, its restore lives in the event payload. 422 on a self-merge. |
 | POST | `/api/v1/vocabulary/{entry_id}/split` | Move 1-500 unique `task_strings` into a new entry named by `new_label`. |
 

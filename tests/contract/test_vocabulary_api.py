@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import unquote
 
 import pytest
 from fastapi.testclient import TestClient
@@ -131,6 +132,27 @@ def test_queue_and_candidate_routes_use_the_current_unmapped_rows(client: TestCl
     candidates = client.get("/api/v1/vocabulary/candidates")
     assert candidates.status_code == 200
     assert candidates.json()["items"][0]["kind"] == "attach"
+
+
+def test_a_refused_undo_is_a_conflict_not_a_silent_no_op(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An undo whose effect has been superseded must not look like it worked."""
+    monkeypatch.setattr(
+        store,
+        "undo_event",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            ValueError("event no longer applies (mapped again since); reload and review")
+        ),
+    )
+    response = client.post("/api/v1/vocabulary/events/7/undo")
+    assert response.status_code == 409
+    assert response.json()["code"] == "REQUEST_FAILED"
+    assert "no longer applies" in response.json()["detail"]
+
+    form = client.post("/ui/vocabulary/events/7/undo", follow_redirects=False)
+    assert form.status_code == 303
+    assert "no longer applies" in unquote(form.headers["location"])
 
 
 def test_candidate_acceptance_uses_one_atomic_store_operation(client: TestClient) -> None:

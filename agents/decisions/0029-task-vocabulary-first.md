@@ -117,6 +117,35 @@ queue.
 - The plan's A4 "EXP-2.5-style measurement" and the §4 falsifier checks land as experiment
   records, not as code paths.
 
+## Amendment 2026-10-04 — undo refuses to replay over a newer decision
+
+Decision 7 says undo is "a compensating action over that payload". Read literally that
+lets an old undo clobber a newer one: merge A→B, re-map one of A's strings to C, undo the
+merge, and A's string silently jumps back to A. That is the confident-and-wrong failure
+this ADR exists to avoid, wearing a UI.
+
+`undo_event` now checks, in the same transaction that compensates, that the state the
+event recorded is still the state it left (the mapping is still where and what the event
+wrote; the merged-away entry is still absent; the entry still carries the new label). If
+it is not, the undo is refused — 409 at the API, the reason shown in the UI — rather than
+replayed. Legitimate later work is unaffected: merging A→B, mapping a *new* string to B,
+then undoing the merge restores A and leaves the new string on B.
+
+Two supporting fixes the same work exposed, both consequences of read-then-write across
+transactions:
+
+- `map_task`/`dismiss_task` read the previous mapping outside the writing transaction, so
+  under a race both writers recorded `previous: None` and the loser's undo deleted the
+  string. Writers now serialize per task string on a transaction-scoped
+  `pg_advisory_xact_lock` (keys taken in sorted order, so multi-string candidates cannot
+  deadlock) and read the previous mapping under that lock, inside the write.
+- Two concurrent renames onto one label could both pass the clash check and have the
+  unique index raise `UniqueViolation`, which surfaced as a 500. That is now caught and
+  answered as `LabelConflict` → 409.
+
+Pinned by `TestConcurrentWriters` and `TestStaleUndo` in
+`tests/integration/test_vocabulary.py` (real threads, real connections, real PostgreSQL).
+
 ## Docs updated
 
 - [decisions README](README.md), [api.md](../architecture/api.md),

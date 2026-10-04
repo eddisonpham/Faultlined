@@ -255,7 +255,36 @@ Three decisions worth stating rather than leaving in the code:
    raises `LabelConflict` rather than silently returning the renamed entry. The rename
    test in `tests/integration/test_vocabulary.py` pins it.
 
-Verification actually run for this slice: `just ci` green (1,388 passed, 89.76%
+Follow-up slice — **concurrency and stale undo, 2026-10-04.** ADR 0029's amendment (same
+date) records the semantics change; the tests are `TestConcurrentWriters` and
+`TestStaleUndo` in `tests/integration/test_vocabulary.py`, using real threads over real
+connections against real PostgreSQL, repeated to check they are not timing-dependent.
+Two defects were found by writing those tests rather than by reading the code, and both
+are fixed in the store rather than asserted around:
+
+1. **A lost update in the event history.** `map_task`/`dismiss_task` read the previous
+   mapping in their own transaction, before the write. Two writers moving the same string
+   both read "nothing mapped here", both wrote, and the second event recorded
+   `previous: None` - so undoing it *deleted* the string rather than restoring the other
+   writer's placement. Writers now serialize per task string on a transaction-scoped
+   `pg_advisory_xact_lock` (sorted key order, so multi-string candidates cannot deadlock)
+   and read the previous mapping under that lock inside the writing transaction. Same
+   lock in `accept_candidate`, so a concurrent acceptance is refused as "no longer
+   unmapped" instead of hitting the unique index.
+2. **A 500 where a conflict belongs.** Two operators renaming two entries to the same
+   label at once could both pass the clash check, with the unique index raising
+   `UniqueViolation`. It is caught and answered as `LabelConflict` → 409.
+
+And one deliberate semantics change, recorded as an amendment to ADR 0029: **an undo
+whose effect has since been superseded is refused (409) rather than replayed.** Undo now
+verifies, in the same transaction that compensates, that the state the event recorded is
+still the state it left — the mapping is still where that event put it, the merged-away
+entry is still absent, the entry still carries that event's new label. Later, unrelated
+work is untouched: merging A→B, mapping a new string to B, then undoing the merge restores
+A and leaves the new string on B. Events recorded before this check carry no written-state
+fields and are still compensated rather than refused for a field they never had.
+
+Verification actually run for this slice: `just ci` green (1,399 passed, 89.99%
 coverage, strict mypy over 81 + 22 modules, hygiene, OpenAPI contract regenerated and
 matching); `just ui-audit` clean at 56 page loads across 4 themes against the dev
 catalog and 60 loads (with a discovered entry detail page) against a throwaway

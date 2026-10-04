@@ -13,8 +13,9 @@ merge, split, map and dismiss are all exactly reversible.
 
 from __future__ import annotations
 
+import threading
 import uuid
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
@@ -420,6 +421,224 @@ class TestGuards:
 
     def test_an_empty_task_string_is_treated_as_noise_at_ingest(self, settings: Settings) -> None:
         assert vocabulary.map_or_resolve(settings, "   ") == "dismissed"
+
+
+class TestConcurrentWriters:
+    """Two writers at once, over real connections on real PostgreSQL.
+
+    Every case here is a race the store has to survive on its own: nothing above
+    it serialises requests, and the vocabulary is edited by people working in
+    parallel. Threads are used rather than mocks so the locks, the unique index
+    and the transaction boundaries are the ones production runs on.
+    """
+
+    @staticmethod
+    def _race(*calls: Callable[[], Any]) -> list[Any]:
+        """Run the calls at once and return each one's outcome.
+
+        Every outcome is captured rather than raised: a test that only sees the
+        first exception cannot tell "one writer won" from "both crashed".
+        """
+        start = threading.Barrier(len(calls))
+        results: list[Any] = [None] * len(calls)
+
+        def run(index: int, call: Callable[[], Any]) -> None:
+            start.wait(timeout=10)
+            try:
+                results[index] = ("ok", call())
+            except Exception as error:
+                results[index] = ("raised", error)
+
+        threads = [
+            threading.Thread(target=run, args=(index, call), daemon=True)
+            for index, call in enumerate(calls)
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=30)
+        assert not any(thread.is_alive() for thread in threads), "a writer did not finish"
+        return results
+
+    def test_two_acceptances_of_one_candidate_produce_one_commit(
+        self, settings: Settings, catalog: PostgresCatalog
+    ) -> None:
+        """The loser of the race must refuse, not write half a second copy."""
+        for task in ("pick up the red telescope", "grab the blue telescope"):
+            _seed_episode(catalog, task)
+        tasks = ["pick up the red telescope", "grab the blue telescope"]
+        core = vocabulary.core_of("pick up the red telescope")
+        assert all(vocabulary.core_of(task) == core for task in tasks)
+
+        outcomes = self._race(
+            lambda: vocabulary.accept_candidate(
+                settings, task_strings=tasks, new_label="telescope care", expected_core=core
+            ),
+            lambda: vocabulary.accept_candidate(
+                settings, task_strings=tasks, new_label="telescope care", expected_core=core
+            ),
+        )
+        assert [kind for kind, _ in outcomes].count("ok") == 1, outcomes
+        refused = next(value for kind, value in outcomes if kind == "raised")
+        assert isinstance(refused, ValueError)
+        assert "no longer unmapped" in str(refused), refused
+
+        labels = [entry["preferred_label"] for entry in vocabulary.list_entries(settings)]
+        assert labels == ["telescope care"], labels
+        entry_id = vocabulary.get_entry(settings, vocabulary.entry_id_for("telescope care"))["id"]
+        for task in tasks:
+            assert vocabulary.mapping_for(settings, task) == {
+                "task_string": task,
+                "entry_id": entry_id,
+                "provenance": "confirm",
+            }
+        # Two events, not four: the refused writer wrote nothing at all.
+        assert (
+            len([e for e in vocabulary.list_events(settings, limit=50) if e["kind"] == "map"]) == 2
+        )
+
+    def test_concurrent_creates_of_one_label_agree_on_one_entry(self, settings: Settings) -> None:
+        outcomes = self._race(
+            lambda: vocabulary.create_entry(settings, preferred_label="mug handling"),
+            lambda: vocabulary.create_entry(settings, preferred_label="mug handling"),
+        )
+        assert [kind for kind, _ in outcomes] == ["ok", "ok"], outcomes
+        ids = {value["id"] for _kind, value in outcomes}
+        assert len(ids) == 1, ids
+        assert len(vocabulary.list_entries(settings)) == 1
+
+    def test_two_renames_onto_one_label_produce_one_winner_and_one_conflict(
+        self, settings: Settings
+    ) -> None:
+        first = vocabulary.create_entry(settings, preferred_label="first")
+        second = vocabulary.create_entry(settings, preferred_label="second")
+
+        outcomes = self._race(
+            lambda: vocabulary.rename_entry(
+                settings, entry_id=first["id"], preferred_label="shared name"
+            ),
+            lambda: vocabulary.rename_entry(
+                settings, entry_id=second["id"], preferred_label="shared name"
+            ),
+        )
+        kinds = [kind for kind, _ in outcomes]
+        assert kinds.count("ok") == 1, outcomes
+        refused = next(value for kind, value in outcomes if kind == "raised")
+        assert isinstance(refused, vocabulary.LabelConflict), refused
+        labels = sorted(entry["preferred_label"] for entry in vocabulary.list_entries(settings))
+        assert labels.count("shared name") == 1, labels
+
+    def test_two_writers_moving_one_string_leave_a_reversible_history(
+        self, settings: Settings
+    ) -> None:
+        """Last writer wins by design, and the winner's undo restores the loser."""
+        first = vocabulary.create_entry(settings, preferred_label="mugs")
+        second = vocabulary.create_entry(settings, preferred_label="goblets")
+        task = "the red cup"
+
+        outcomes = self._race(
+            lambda: vocabulary.map_task(settings, task_string=task, entry_id=first["id"]),
+            lambda: vocabulary.map_task(settings, task_string=task, entry_id=second["id"]),
+        )
+        assert [kind for kind, _ in outcomes] == ["ok", "ok"], outcomes
+        final = vocabulary.mapping_for(settings, task)
+        assert final["entry_id"] in {first["id"], second["id"]}
+
+        winner = second if final["entry_id"] == second["id"] else first
+        events = [e for e in vocabulary.list_events(settings, limit=10) if e["kind"] == "map"]
+        assert len(events) == 2
+        latest = max(events, key=lambda event: event["id"])
+        assert latest["payload"]["entry_id"] == winner["id"]
+        assert latest["payload"]["previous"]["entry_id"] in {first["id"], second["id"]}
+
+        vocabulary.undo_event(settings, event_id=latest["id"])
+        restored = vocabulary.mapping_for(settings, task)
+        assert restored["entry_id"] != winner["id"]
+        assert restored["entry_id"] in {first["id"], second["id"]}
+
+
+class TestStaleUndo:
+    """An undo that would replay over a newer decision is refused, not forced."""
+
+    def test_a_map_that_was_mapped_again_cannot_be_undone(self, settings: Settings) -> None:
+        first = vocabulary.create_entry(settings, preferred_label="mugs")
+        second = vocabulary.create_entry(settings, preferred_label="goblets")
+        vocabulary.map_task(settings, task_string="the red cup", entry_id=first["id"])
+        stale_event = _last_event(settings)
+        vocabulary.map_task(settings, task_string="the red cup", entry_id=second["id"])
+
+        with pytest.raises(ValueError, match="no longer applies"):
+            vocabulary.undo_event(settings, event_id=stale_event)
+        assert vocabulary.mapping_for(settings, "the red cup") == {
+            "task_string": "the red cup",
+            "entry_id": second["id"],
+            "provenance": "confirm",
+        }
+
+    def test_a_merge_whose_strings_moved_on_cannot_be_undone(self, settings: Settings) -> None:
+        source = vocabulary.create_entry(settings, preferred_label="cups")
+        target = vocabulary.create_entry(settings, preferred_label="mugs")
+        elsewhere = vocabulary.create_entry(settings, preferred_label="goblets")
+        vocabulary.map_task(settings, task_string="the red cup", entry_id=source["id"])
+        merge = vocabulary.merge_entries(settings, source_id=source["id"], target_id=target["id"])
+        vocabulary.map_task(settings, task_string="the red cup", entry_id=elsewhere["id"])
+
+        with pytest.raises(ValueError, match="no longer applies"):
+            vocabulary.undo_event(settings, event_id=merge["event_id"])
+        assert vocabulary.get_entry(settings, source["id"]) is None
+        assert vocabulary.mapping_for(settings, "the red cup")["entry_id"] == elsewhere["id"]
+
+    def test_a_merge_undo_keeps_edits_made_after_the_merge(self, settings: Settings) -> None:
+        """The legitimate case: undoing the merge must not disturb later work."""
+        source = vocabulary.create_entry(settings, preferred_label="cups")
+        target = vocabulary.create_entry(settings, preferred_label="mugs")
+        vocabulary.map_task(settings, task_string="the red cup", entry_id=source["id"])
+        merge = vocabulary.merge_entries(settings, source_id=source["id"], target_id=target["id"])
+        vocabulary.map_task(settings, task_string="a blue one", entry_id=target["id"])
+
+        vocabulary.undo_event(settings, event_id=merge["event_id"])
+        assert vocabulary.mapping_for(settings, "the red cup")["entry_id"] == source["id"]
+        assert vocabulary.mapping_for(settings, "a blue one")["entry_id"] == target["id"]
+
+    def test_a_split_whose_strings_moved_on_cannot_be_undone(self, settings: Settings) -> None:
+        parent = vocabulary.create_entry(settings, preferred_label="tools")
+        elsewhere = vocabulary.create_entry(settings, preferred_label="hammers, rehomed")
+        vocabulary.map_task(settings, task_string="the hammer", entry_id=parent["id"])
+        split = vocabulary.split_entry(
+            settings, entry_id=parent["id"], task_strings=["the hammer"], new_label="hammers"
+        )
+        vocabulary.map_task(settings, task_string="the hammer", entry_id=elsewhere["id"])
+
+        with pytest.raises(ValueError, match="no longer applies"):
+            vocabulary.undo_event(settings, event_id=split["event_id"])
+        assert vocabulary.get_entry(settings, split["new_entry"]["id"]) is not None
+        assert vocabulary.mapping_for(settings, "the hammer")["entry_id"] == elsewhere["id"]
+
+    def test_a_rename_that_was_renamed_again_cannot_be_undone(self, settings: Settings) -> None:
+        entry = vocabulary.create_entry(settings, preferred_label="mug handling")
+        vocabulary.rename_entry(
+            settings, entry_id=entry["id"], preferred_label="mug and cup handling"
+        )
+        stale_event = _last_event(settings)
+        vocabulary.rename_entry(
+            settings, entry_id=entry["id"], preferred_label="drinkware handling"
+        )
+
+        with pytest.raises(ValueError, match="no longer applies"):
+            vocabulary.undo_event(settings, event_id=stale_event)
+        assert vocabulary.get_entry(settings, entry["id"])["preferred_label"] == (
+            "drinkware handling"
+        )
+
+    def test_a_dismiss_that_was_mapped_again_cannot_be_undone(self, settings: Settings) -> None:
+        entry = vocabulary.create_entry(settings, preferred_label="mugs")
+        vocabulary.dismiss_task(settings, task_string="noise")
+        stale_event = _last_event(settings)
+        vocabulary.map_task(settings, task_string="noise", entry_id=entry["id"])
+
+        with pytest.raises(ValueError, match="no longer applies"):
+            vocabulary.undo_event(settings, event_id=stale_event)
+        assert vocabulary.mapping_for(settings, "noise")["entry_id"] == entry["id"]
 
 
 class TestMergeSplitUndo:
