@@ -17,6 +17,13 @@ The data engine is the product. Models are workloads it runs.
 | Fault monitor | Deterministic rules that raise incidents, no model involved |
 | Benchmarks | Reproducible timings with committed baselines |
 
+**What the browser can and cannot do today.** Ingesting a dataset and curating its task strings work from the UI.
+Validating, building a content-addressed dataset, exporting a build as a LeRobot v3 dataset, and saving a curation
+slice are implemented in the API but have **no UI route** — they need `curl`. The fault monitor is implemented but
+not yet scheduled, so the Incidents page stays empty. Both are tracked as release blockers in
+[the 2026-10-04 assessment](agents/reviews/2026-10-04-engineer-assessment-verdict.md), which also records the
+measured format coverage, per-feature latency, concurrency behaviour, and the operator click budget.
+
 ## Architecture
 
 ```mermaid
@@ -216,9 +223,9 @@ Everything under `var/` is generated. Delete it any time.
 | Area | State |
 |---|---|
 | Ingest, validate, build | Working end to end |
-| Formats read | LeRobot v2.1 and v3.0, MCAP with JSON channels |
+| Formats read | LeRobot v2.1/v3.0, MCAP with JSON channels. No reader for the default `ros2 bag record` sqlite3 bag, HDF5, RLDS, zarr, or a zipped bag ([EXP-0014](agents/experiments/0014-foreign-data-ingest-corpus.md)) |
 | Formats written | LeRobot v3 dataset directories |
-| Tests | 1,357 passing, 91.46% coverage |
+| Tests | 1,399 passing, 89.99% coverage |
 | MCAP ingest speed | 10.8-18.3 MiB/s, target not met |
 
 ## Layout

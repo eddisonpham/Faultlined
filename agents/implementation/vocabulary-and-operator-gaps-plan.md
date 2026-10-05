@@ -296,6 +296,21 @@ the rendered `attach` form mapped the third, the undo button returned that strin
 the queue, and an attach that no longer matched a candidate was refused with
 "candidate changed" rather than applied.
 
+- **Assessment 2026-10-04 — two release blockers found outside this plan.** A whole-program review run from the
+  point of view of an incoming robotics-ML engineer ([review](../reviews/2026-10-04-engineer-assessment-verdict.md),
+  evidence [EXP-0014](../experiments/0014-foreign-data-ingest-corpus.md)–[EXP-0017](../experiments/0017-operator-click-and-attention-budget.md))
+  found two things this plan does not cover and that outrank every remaining slice:
+  1. **The browser cannot validate, build, export or save a slice.** `POST /ui/jobs` emits only `ingest` and
+     `ingest_source`, so the product's stated output — a reproducible LeRobot v3 build — is reachable only through
+     the JSON API. An operator gets data in and then has to leave the tool to finish their job.
+  2. **The monitor never runs.** `MonitorService.tick()` has exactly two callers in the codebase: its own HTTP
+     route and the test suite. Neither the worker loop nor the FastAPI lifespan calls it, so the incident queue is
+     empty in a running deployment and `/ui/incidents` renders zero rows permanently.
+  Both are P1 in the review and neither needs anything from Track B. **Track B should not start until they are
+  closed.** Three smaller ingest defects from the same review (a topic named `...grip...` silently voiding the
+  quality verdict, a non-finite channel statistic failing the episode after three retries, and the persisted failure
+  message being the literal string `"job handler failed"`) are P0 and are independent of both tracks.
+
 ## 7. Not built (both NOT-lists, condensed)
 
 No BERTopic/embedding cluster stack; no LLM in the grouping or decision path; no auto-labeling;

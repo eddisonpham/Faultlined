@@ -543,9 +543,15 @@ def _seed_catalog(dsn: str, count: int = 10_000) -> tuple[float, list[str]]:
                 0.0,
                 "ok",
                 "smooth",
-                None,
+                "action[0]",
                 12,
-                Jsonb([((i + d) % 13) / 50.0 for d in range(12)]),
+                # `motion_trace` is a list of *runs*, each run a list of
+                # (seconds, score) pairs - the shape `EpisodeQuality.to_dict()` writes
+                # and `web/pages._motion_trace` iterates. Seeding a flat list of floats
+                # instead produced rows the episode-detail page could not render, so
+                # every seeded episode was a 500 on `/ui/episodes/{id}`; the campaign
+                # never noticed because it only ever measured repository queries.
+                Jsonb([[((i + d) / 50.0, ((i + d) % 13) / 500.0) for d in range(12)]]),
             )
         )
         lineage_rows.append(("episode", episode_id, "job", job_id, "produced_by"))
