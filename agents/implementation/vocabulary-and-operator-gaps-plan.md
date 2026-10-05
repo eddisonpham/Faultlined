@@ -267,8 +267,10 @@ are fixed in the store rather than asserted around:
    both read "nothing mapped here", both wrote, and the second event recorded
    `previous: None` - so undoing it *deleted* the string rather than restoring the other
    writer's placement. Writers now serialize per task string on a transaction-scoped
-   `pg_advisory_xact_lock` (sorted key order, so multi-string candidates cannot deadlock)
-   and read the previous mapping under that lock inside the writing transaction. Same
+   `pg_advisory_xact_lock` - acquired in one global sorted order, so two transactions
+   taking multi-string locks cannot deadlock *on those locks*; the ordering between that
+   phase and the row locks merge/split take is untested - and read the previous mapping
+   under that lock inside the writing transaction. Same
    lock in `accept_candidate`, so a concurrent acceptance is refused as "no longer
    unmapped" instead of hitting the unique index.
 2. **A 500 where a conflict belongs.** Two operators renaming two entries to the same

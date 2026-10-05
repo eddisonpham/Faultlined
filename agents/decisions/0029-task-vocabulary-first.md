@@ -137,8 +137,10 @@ transactions:
 - `map_task`/`dismiss_task` read the previous mapping outside the writing transaction, so
   under a race both writers recorded `previous: None` and the loser's undo deleted the
   string. Writers now serialize per task string on a transaction-scoped
-  `pg_advisory_xact_lock` (keys taken in sorted order, so multi-string candidates cannot
-  deadlock) and read the previous mapping under that lock, inside the write.
+  `pg_advisory_xact_lock`, acquired in one global (sorted) order so two transactions
+  taking multi-string locks cannot deadlock *on those locks*, and read the previous
+  mapping under that lock, inside the write. The ordering between that phase and the row
+  locks merge/split take is a separate question and has not been stress-tested.
 - Two concurrent renames onto one label could both pass the clash check and have the
   unique index raise `UniqueViolation`, which surfaced as a 500. That is now caught and
   answered as `LabelConflict` → 409.

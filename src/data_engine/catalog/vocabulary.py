@@ -855,9 +855,11 @@ def _lock_strings(connection: Connection[Any], task_strings: Sequence[str]) -> N
     read "nothing mapped here", both write, and the second event's recorded
     `previous` is a lie - so undoing it *deletes* the mapping instead of
     restoring the placement the other writer just made. An advisory lock keyed on
-    the string itself makes the read and the write one atomic unit, and the keys
-    are taken in sorted order so two multi-string candidates cannot deadlock
-    against each other.
+    the string itself makes the read and the write one atomic unit. Keys are
+    acquired in one global (sorted) order, so two transactions taking
+    multi-string locks cannot deadlock *on these locks*; the ordering between
+    this phase and the row locks merge/split take is a separate question, and has
+    not been stress-tested.
 
     Transaction-scoped, so it is released by commit or rollback with no cleanup
     path of its own to get wrong.
