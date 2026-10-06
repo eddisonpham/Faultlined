@@ -48,3 +48,21 @@ sees.
   bands become profile-driven in a superseding ADR (tying into ADR 0016 profiles).
 - Episodes ingested before this ADR have no quality row; the endpoints 404/empty rather than re-reading
   bytes. A backfill would need a byte re-read and is deferred until an operator asks.
+
+## Amendment (2026-10-06): the gripper exclusion reads the dimension's field, not its address
+
+The "non-gripper" clause above excluded any dimension whose *name* matched `grip`. The MCAP reader
+names dimensions `<topic>.<path>`, so a bimanual rig whose busiest joint topic is
+`/left/gripper/joint_states` had **every** joint dimension excluded at once: `judged_dims` fell to
+zero and the episode's motion verdict was reported `unknown` even though nothing was wrong with the
+data. Byte-identical payloads came out `smooth` under `/joint_states` and `unknown` under
+`/left/gripper/joint_states` — a quality verdict that is a function of a topic-naming convention
+(EXP-0014 D1).
+
+The exclusion now applies to the dimension's own field name only: the last dotted segment of the
+name (`analysis/quality.py::_field`). `...joint_states.position[0]` is classified by `position[0]`;
+a payload that literally names a field `gripper` still is one. Nothing about the *bands*, the median
+rule or the reported fields changed, and the binary gripper the clause exists for is still caught by
+the discrete-dimension rule (ADR 0023). Regression tests:
+`tests/unit/test_quality.py::test_topic_name_does_not_decide_the_verdict` and
+`::test_a_field_named_gripper_is_still_a_gripper`.

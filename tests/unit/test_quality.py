@@ -125,6 +125,35 @@ def test_one_bad_dimension_does_not_condemn_the_episode_but_is_still_reported() 
 
 
 @pytest.mark.unit
+def test_topic_name_does_not_decide_the_verdict() -> None:
+    """The gripper exclusion reads a dimension's field, never its address.
+
+    EXP-0014 D1: byte-identical payloads came out `smooth` under `/joint_states`
+    and `unknown` under `/left/gripper/joint_states`, because every dimension's
+    address contained `grip`. The verdict was a function of a topic-naming
+    convention.
+    """
+    positions = [round(i * 0.01, 4) for i in range(20)]
+    plain = analyze({"/joint_states.position[0]": positions})
+    gripper_topic = analyze({"/left/gripper/joint_states.position[0]": positions})
+
+    assert plain.verdict == "smooth"
+    assert gripper_topic.verdict == plain.verdict
+    assert gripper_topic.judged_dims == plain.judged_dims == 1
+    assert plain.dims[0].gripper is False
+    assert gripper_topic.dims[0].gripper is False
+
+
+@pytest.mark.unit
+def test_a_field_named_gripper_is_still_a_gripper() -> None:
+    """Removing the topic from the decision must not remove the role itself."""
+    quality = analyze({"hand.gripper": _ramp(20)})
+    assert quality.dims[0].gripper is True
+    assert quality.judged_dims == 0
+    assert quality.verdict == "unknown"
+
+
+@pytest.mark.unit
 def test_verdict_ignores_inactive_dims() -> None:
     inactive = DimQuality(
         name="frozen",

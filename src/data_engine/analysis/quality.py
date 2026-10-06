@@ -61,7 +61,8 @@ from typing import Any
 ACTIVITY_THRESHOLD = 0.001
 #: A dim with at most this many unique values is discrete (gripper, button, mode).
 DISCRETE_MAX_UNIQUE = 4
-#: Verdict bands on normalized delta-sigma (sigma of frame deltas / dim range).
+#: A dimension is a gripper when its *own field name* says so. The address prefix
+#: (an MCAP topic, a LeRobot collection) is deliberately excluded - see `_field`.
 _GRIPPER = re.compile("grip", re.IGNORECASE)
 
 MIN_FRAMES = 2
@@ -325,6 +326,29 @@ def _clock(
     return max(intervals), gapped / len(intervals), gapped > 0, threshold
 
 
+def _field(name: str) -> str:
+    """The dimension's own field name, with its address prefix removed.
+
+    Dimension names are *addresses*: the MCAP reader names them `<topic>.<path>`
+    and the LeRobot reader `<feature>[<index>]`. A topic is where a signal came
+    from, not what it is, so nothing that classifies a dimension may look at it.
+    The first version matched the gripper exclusion against the whole address,
+    and a bimanual rig whose busiest joint topic was `/left/gripper/joint_states`
+    had every one of its joint dimensions excluded at once: `judged_dims` fell to
+    zero and the episode's motion verdict was reported as `unknown` even though
+    nothing was wrong with the data. Byte-identical payloads came out `smooth` as
+    `/joint_states` and `unknown` as `/left/gripper/joint_states` (EXP-0014 D1).
+
+    Only the last dotted segment participates, so `...joint_states.position[0]`
+    is classified by `position[0]`, while a payload that literally names a field
+    `gripper` still is one. `observation.state[3]` has no dot and is classified
+    whole. A continuous gripper channel is a real motion signal once the topic
+    stops vetoing it; the binary gripper the exclusion exists for is still caught
+    by the discrete-dimension rule (`<= DISCRETE_MAX_UNIQUE` values).
+    """
+    return name.rsplit(".", 1)[-1]
+
+
 def _deltas(values: Sequence[float]) -> list[float]:
     return [right - left for left, right in pairwise(values)]
 
@@ -356,7 +380,7 @@ def _dim_quality(
         name=name,
         active=active,
         discrete=discrete,
-        gripper=bool(_GRIPPER.search(name)),
+        gripper=bool(_GRIPPER.search(_field(name))),
         norm_delta_std=math.sqrt(variance),
         mean_abs_delta_norm=sum(norm) / len(norm),
     )
