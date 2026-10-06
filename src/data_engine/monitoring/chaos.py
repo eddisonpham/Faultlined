@@ -8,9 +8,10 @@ feature space is invented, and no accuracy figure exists before a chaos run.
 
 Two components:
 
-- :class:`ChaosMonitor` - the production `MonitorService` with two narrow,
-  explicitly-documented seams for replay: injected telemetry records and an
-  injected queue snapshot. Everything downstream of those seams is untouched.
+- :class:`ChaosMonitor` - the production `MonitorService` with three narrow,
+  explicitly-documented seams for replay: injected telemetry records, an
+  injected queue snapshot, and an injected host sample. Everything downstream
+  of those seams is untouched.
 - :func:`evaluate_window` - one labeled window: feed records, run one tick,
   return whether the expected label fired (and what fired wrongly).
 
@@ -36,11 +37,28 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any
 
+from data_engine.monitoring.features import ResourceSample
 from data_engine.monitoring.service import MonitorService
 from data_engine.monitoring.signals import Label
 
 #: The heartbeat cadence a healthy single-worker deployment emits.
 HEARTBEAT_INTERVAL_SECONDS = 5.0
+
+#: The host a replayed window is scored against.
+#:
+#: Replay injects telemetry and catalog state, so it has to inject host
+#: resources as well: the real sample is *this machine's* memory and disk, and a
+#: busy box sits within a percentage point of the `RESOURCE_DEGRADED` floor
+#: (`memory_used_ratio > 0.92`). Left unpinned, every window - the null windows
+#: included - carried a phantom host fault, so "clean windows stay silent" held
+#: or not depending on what else was running, and a campaign's precision would
+#: have described the laptop rather than the detectors.
+REPLAY_HOST = ResourceSample(
+    cpu_percent=11.0,
+    memory_used_bytes=8 * 1024**3,
+    memory_available_bytes=24 * 1024**3,
+    disk_free_bytes=500 * 1024**3,
+)
 
 
 def _metric_record(
@@ -175,13 +193,15 @@ def clean_window(*, onset: datetime, window_seconds: float, warm: bool = True) -
 
 
 class ChaosMonitor(MonitorService):
-    """The production monitor with two replay seams and no other overrides.
+    """The production monitor with three replay seams and no other overrides.
 
     `_records` is overridden to return the injected telemetry (the real service
     reads a JSONL sink; replay hands the records over directly - the sink path
     itself is exercised by its own tests). `_probe` is overridden only when a
     window injects a snapshot; otherwise the real probe runs against whatever
-    catalog the service was built with.
+    catalog the service was built with. `_resources` always returns
+    :data:`REPLAY_HOST`, because the host is an input like any other and a
+    replayed window must not be scored against the machine running the replay.
     """
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
@@ -203,6 +223,9 @@ class ChaosMonitor(MonitorService):
         if self._chaos_snapshot is not None:
             return dict(self._chaos_snapshot), True
         return super()._probe(reference, catalog)
+
+    def _resources(self) -> ResourceSample | None:
+        return REPLAY_HOST
 
 
 @dataclass(frozen=True, slots=True)
@@ -278,6 +301,7 @@ def evaluate_sequence(monitor: ChaosMonitor, windows: list[FaultWindow]) -> list
 
 
 __all__ = [
+    "REPLAY_HOST",
     "ChaosMonitor",
     "FaultWindow",
     "WindowOutcome",

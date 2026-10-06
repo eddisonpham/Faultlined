@@ -17,6 +17,7 @@ import pytest
 from data_engine.monitoring.baselines import Baseline
 from data_engine.monitoring.chaos import (
     HEARTBEAT_INTERVAL_SECONDS,
+    REPLAY_HOST,
     ChaosMonitor,
     FaultWindow,
     clean_window,
@@ -219,11 +220,18 @@ class TestEvaluateWindow:
         assert outcome.incidents_touched == 0
         assert outcome.latency_seconds is None
 
-    def test_the_only_overrides_are_the_two_documented_seams(self) -> None:
-        # Anything beyond `_records`/`_probe` (plus construction and injection)
-        # would make "chaos result" mean "a different implementation ran".
+    def test_the_only_overrides_are_the_three_documented_seams(self) -> None:
+        # Anything beyond `_records`/`_probe`/`_resources` (plus construction and
+        # injection) would make "chaos result" mean "a different implementation ran".
         authored = {name for name in ChaosMonitor.__dict__ if not name.startswith("__")}
-        assert authored == {"inject", "_records", "_probe"}
+        assert authored == {"inject", "_records", "_probe", "_resources"}
+
+    def test_the_host_is_replayed_rather_than_sampled(self) -> None:
+        # The host is an input like the telemetry and the snapshot, so replay
+        # pins it. Unpinned, the campaign scores the machine it ran on: a loaded
+        # box opens RESOURCE_DEGRADED in every window, null ones included.
+        monitor, _ = _monitor()
+        assert monitor._resources() == REPLAY_HOST
 
     def test_uninjected_snapshot_falls_through_to_the_real_probe(self) -> None:
         # A window with snapshot=None must exercise the service's own probe;

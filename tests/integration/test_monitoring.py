@@ -32,7 +32,7 @@ from data_engine.monitoring.queue import TriagePolicy, fingerprint
 from data_engine.monitoring.service import MonitorConfig, MonitorService
 from data_engine.monitoring.signals import Label, Severity, Signal
 from data_engine.monitoring.summary import render_summary
-from tests.conftest import postgres_test_dsn
+from tests.conftest import pin_a_healthy_host, postgres_test_dsn
 
 NOW = datetime(2026, 9, 29, 12, 0, tzinfo=UTC)
 
@@ -360,11 +360,16 @@ class TestFullTick:
         assert Label.METRIC_SHIFT.value not in health["notify_labels"]
         assert "metric_shift" in health["detectors"]
 
-    def test_a_tick_survives_an_unreachable_catalog(self, catalog: PostgresCatalog) -> None:
+    def test_a_tick_survives_an_unreachable_catalog(
+        self, catalog: PostgresCatalog, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         class Broken:
             def monitoring_snapshot(self, **_: Any) -> dict[str, Any]:
                 raise RuntimeError("connection refused")
 
+        # The exact signal count is the assertion, so the host must not supply a
+        # second one: an unpinned sample reports this machine's memory pressure.
+        pin_a_healthy_host(monkeypatch)
         service = self._monitor(catalog)
         report = service.tick(Broken())
         assert report.catalog_reachable is False

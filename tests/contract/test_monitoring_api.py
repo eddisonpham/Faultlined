@@ -19,6 +19,7 @@ from fastapi.testclient import TestClient
 from data_engine.api.app import create_app
 from data_engine.config import Settings
 from data_engine.monitoring.contracts import InvalidExpectation
+from tests.conftest import pin_a_healthy_host
 
 NOW = datetime(2026, 9, 29, 12, 0, tzinfo=UTC)
 
@@ -224,7 +225,10 @@ def test_monitor_health_reports_its_own_state() -> None:
 
 
 @pytest.mark.contract
-def test_a_tick_runs_on_demand() -> None:
+def test_a_tick_runs_on_demand(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A tick reads the host, so pin it: the signal count below is a claim about
+    # the endpoint, and an unpinned sample makes it a claim about the laptop.
+    pin_a_healthy_host(monkeypatch)
     response = _client().post("/api/v1/monitoring/tick")
     assert response.status_code == 200
     body = response.json()

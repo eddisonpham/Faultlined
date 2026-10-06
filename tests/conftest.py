@@ -29,6 +29,8 @@ import psycopg
 import pytest
 from psycopg.conninfo import conninfo_to_dict, make_conninfo
 
+from data_engine.observability.telemetry import TelemetrySample
+
 TEST_DB_SUFFIX = "_test"
 REAL_DATA_ROOT = Path("var") / "real-data"
 HUB = "https://huggingface.co/datasets/{repo}/resolve/main/{path}"
@@ -98,6 +100,37 @@ def postgres_test_dsn() -> str:
     test_dbname = f"{dbname}{TEST_DB_SUFFIX}"
     _ensure_database(info, test_dbname)
     return make_conninfo(**{**info, "dbname": test_dbname})
+
+
+def pin_a_healthy_host(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pin the host sample the monitor reads, for tests that assert on signals.
+
+    The resource detector reads *this machine*: `memory_used_ratio > 0.92` opens
+    a real `RESOURCE_DEGRADED` signal, and a development box running the suite
+    sits within a percentage point of that floor. A test that asserts a signal
+    set then passes or fails with whatever else is open, which is a test of the
+    laptop rather than of the software. Pin the input and the assertion means
+    what it says.
+
+    Only for tests where the host is an input rather than the subject: the
+    detector test that exercises `RESOURCE_DEGRADED` on purpose builds its own
+    feature vector and does not come through here.
+    """
+    monkeypatch.setattr(
+        "data_engine.monitoring.service.sample_resources",
+        lambda **_kwargs: TelemetrySample(
+            timestamp="2026-09-29T12:00:00+00:00",
+            cpu_percent=11.0,
+            process_rss_bytes=1024**3,
+            memory_used_bytes=8 * 1024**3,
+            memory_available_bytes=24 * 1024**3,
+            disk_used_bytes=200 * 1024**3,
+            disk_free_bytes=500 * 1024**3,
+            network_bytes_sent_total=0,
+            network_bytes_recv_total=0,
+            gpu_present=False,
+        ),
+    )
 
 
 class FixtureUnavailable(RuntimeError):

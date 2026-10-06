@@ -25,3 +25,30 @@
   express (plan §6.8).
 - **Provenance:** clean tree at commit time; host (Windows, Python 3.14);
   875 unit/contract/integration tests passing; coverage 92.11%.
+
+## Amendment (2026-10-06): the host is replayed too
+
+`ChaosMonitor` now overrides a **third** seam, `_resources` (the file is 17 tests
+now; the "14" above was already stale when it was written, at 16 before this
+change). The harness injected telemetry and catalog state but left host resources
+to the real `sample_resources()`, so every window was partly scored against
+whatever machine ran the replay. `memory_used_ratio > 0.92` opens a real
+`RESOURCE_DEGRADED` and a development box sits within a percentage point of that
+floor. On a loaded machine:
+
+- a null window was not silent - it fired `RESOURCE_DEGRADED`;
+- a `WORKER_LOST` window touched two incidents instead of one;
+- a warm-backlog window reported `[METRIC_SHIFT, RESOURCE_DEGRADED]`.
+
+So the two properties EXP-0006 claims ("clean windows stay silent", "sustained
+faults bump one incident") held or not depending on what else was open, and a
+campaign's precision would have described the laptop rather than the detectors.
+Replay now pins a healthy host (`REPLAY_HOST`). A resource *fault* is still not
+expressible as a `FaultWindow` - recorded here rather than papered over; it needs
+a real host fault in the full campaign, like the real-kill `WORKER_LOST` variant
+in plan §6.8.
+
+The same leak was found in two tests that drive a real `MonitorService` and
+assert an exact signal set (`tests/integration/test_monitoring.py`,
+`tests/contract/test_monitoring_api.py`); both now pin the sample through
+`tests/conftest.py::pin_a_healthy_host`, which is the shared form of this fix.
