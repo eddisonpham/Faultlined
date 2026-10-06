@@ -103,3 +103,44 @@ design proper remains deferred to phase 12.
 - [../architecture/frontend.md](../architecture/frontend.md) (mechanism now decided; visual design still deferred)
 - [../architecture/api.md](../architecture/api.md) (read endpoints the UI consumes)
 - [../implementation/status.md](../implementation/status.md) (what the MVP UI does and does not cover)
+
+## Amendment (2026-10-06): the browser can finish the loop
+
+The decision above covers ingest, and until now that was the product's whole browser story:
+`POST /ui/jobs` built `ingest` and `ingest_source` payloads,
+and `POST /api/v1/slices` was JSON-only, so an operator could get data *in* and could not
+validate it, build from it, export it, or save the filter they had just curated. EXP-0017
+measured the cost of that as the only remaining release blocker: the last three steps of
+the stated loop existed behind curl.
+
+Four forms close it, on the pages that already list what they act on:
+
+- **Validate episodes** on `/ui/episodes` - profile name plus optional frame/fps limits, and
+  an optional episode selection (empty is the API's own "everything").
+- **Build a dataset** on `/ui/builds` - a name and an optional selection (empty is the API's
+  "every episode that passed validation").
+- **Export this build** on `/ui/builds/{hash}` - the build's own canonical hash, carried
+  hidden, so the export cannot be pointed at another build by a typo.
+- **New slice** on `/ui/slices` -> `POST /ui/slices` - the only new route, hand-parsed and
+  `include_in_schema=False` like every other `/ui` route.
+
+The properties the ingest form had are the properties these have, because they post to the
+same router and are built through the same Pydantic models the JSON API uses: a form cannot
+queue a job the API would refuse, a rejected submission re-renders *the page that owns the
+form* with the typed values still in it (never a redirect, which loses them), and success is
+a 303 to the created object so a refresh does not duplicate it. The theme travels in the body
+so the page an operator lands on is the theme they were using.
+
+Two deliberate omissions, both to avoid a silently weaker check:
+
+- The validate form does not offer `enabled_rules`. The API accepts a subset, but `rules_for`
+  intersects it with the rule registry, so one typo in a rule name would switch a check off
+  without saying so. Absent means every registered rule runs.
+- The slice form offers only `state` and `flag`, because those are the only keys
+  `episode_predicates` honours. A filter field the catalog ignores would look like it worked.
+
+No dependency was added: the forms are urlencoded bodies parsed with `urllib.parse`, exactly
+as the ingest form is, which is what keeps `python-multipart` out of the stack.
+
+Docs updated: [../implementation/status.md](../implementation/status.md) (component 13),
+[../HANDOFF.md](../HANDOFF.md) (release blocker 1 closed).

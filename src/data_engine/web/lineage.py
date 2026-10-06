@@ -247,15 +247,33 @@ def builds_fragment(model: dict[str, Any]) -> str:
     return _index_body(model)
 
 
-def builds_page(model: dict[str, Any], theme: str) -> str:
-    from data_engine.web.pages import _page
-
-    return _page("Builds", "/ui/builds", _index_body(model), theme)
-
-
-def lineage_page(build: dict[str, Any], theme: str) -> str:
-    from data_engine.web.pages import _page
+def builds_page(
+    model: dict[str, Any],
+    theme: str,
+    *,
+    error: str = "",
+    values: dict[str, str] | None = None,
+) -> str:
+    """Builds, newest first, and the form that makes one (FR-006)."""
+    from data_engine.web.pages import _page, build_form
 
     return _page(
-        f"Build {str(build.get('name') or '')[:24]}", "/ui/builds", _detail_body(build), theme
+        "Builds", "/ui/builds", _index_body(model) + build_form(error, values, theme), theme
     )
+
+
+def lineage_page(
+    build: dict[str, Any],
+    theme: str,
+    *,
+    error: str = "",
+    values: dict[str, str] | None = None,
+) -> str:
+    from data_engine.web.pages import _page, export_form
+
+    body = _detail_body(build)
+    if build:
+        # The export form is only offered for a build that exists: an export is a
+        # projection of an immutable manifest, and this page is the manifest.
+        body += export_form(str(build.get("hash") or ""), error, values, theme)
+    return _page(f"Build {str(build.get('name') or '')[:24]}", "/ui/builds", body, theme)

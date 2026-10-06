@@ -5,8 +5,14 @@ import pytest
 from fastapi.testclient import TestClient
 
 from data_engine.api.app import create_app
+from data_engine.catalog.repository import SliceNameConflict
 from data_engine.config import Settings
 from data_engine.jobs.state import JobState
+
+#: A build identity in the shape `builds/service.py::build_hash` produces, so a test
+#: cannot assert against a hash the API would refuse (that is how the 64-character cap
+#: survived: every fixture here was a short fake).
+BUILD_HASH = "bld_" + "ab" * 32
 
 
 class CatalogStub:
@@ -311,12 +317,48 @@ class ListingCatalogStub(CatalogStub):
 
 
 class IngestCatalogStub(ListingCatalogStub):
-    """Records what the form queued, and reports a system with nothing in it."""
+    """Records what a form queued, and reports a system with nothing in it."""
 
     def __init__(self) -> None:
         super().__init__()
         self.submitted: list[tuple[str, dict[str, Any]]] = []
-        self.states = []
+        self.slices: list[dict[str, Any]] = []
+        self.slice_conflict = False
+        self.build = {
+            "hash": BUILD_HASH,
+            "name": "pick-set",
+            "episode_count": 0,
+            "profile_hash": None,
+            "code_commit": "abc1234",
+            "job_id": "job-1",
+            "created_at": "2026-10-06T00:00:00Z",
+            "manifest": {},
+        }
+
+    def list_builds(self, *, limit: int = 50) -> list[dict[str, Any]]:
+        return [self.build]
+
+    def get_build(self, build_hash: str) -> dict[str, Any] | None:
+        return self.build if build_hash == BUILD_HASH else None
+
+    def build_episodes(self, build_hash: str) -> list[dict[str, Any]]:
+        return []
+
+    def list_slices(self, *, limit: int = 50) -> list[dict[str, Any]]:
+        return []
+
+    def register_slice(
+        self,
+        *,
+        name: str,
+        notes: str = "",
+        filter_config: dict[str, Any] | None = None,
+        slice_id: str | None = None,
+    ) -> dict[str, Any]:
+        if self.slice_conflict:
+            raise SliceNameConflict(f"slice name {name!r} already exists")
+        self.slices.append({"name": name, "notes": notes, "filter_config": filter_config or {}})
+        return {"id": "slice-1", "name": name, "notes": notes}
 
     def count_jobs(self, state: Any) -> int:
         return 0
@@ -432,6 +474,194 @@ def test_the_ingest_form_does_not_pull_in_a_dependency() -> None:
     assert "from fastapi import" in source and "Form" not in source.split("\n")[12]
     assert "parse_qs" in source
     assert "multipart" not in Path("pyproject.toml").read_text(encoding="utf-8").lower()
+
+
+@pytest.mark.contract
+def test_the_validate_form_queues_a_job_from_the_browser() -> None:
+    """Release blocker 1, first step: validation used to be curl-only (EXP-0017)."""
+    client, catalog = _ingest_client()
+
+    response = client.post(
+        "/ui/jobs",
+        data={
+            "kind": "validate",
+            "profile_name": "strict",
+            "min_frames": "5",
+            "episode_ids": "ep-1, ep-2",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303, response.text
+    kind, payload = catalog.submitted[-1]
+    assert kind == "validate"
+    # The document the *API's own model* accepts, built from the form's fields: the
+    # limits are typed, the selection is a list, and `enabled_rules` is absent so every
+    # registered rule runs rather than whichever names a person happened to spell right.
+    assert payload == {
+        "episode_ids": ["ep-1", "ep-2"],
+        "profile": {"name": "strict", "version": "1", "min_frames": 5},
+    }
+
+
+@pytest.mark.contract
+def test_an_empty_validate_selection_means_everything() -> None:
+    """The form inherits the API's meaning for an empty list, not a third convention."""
+    client, catalog = _ingest_client()
+
+    response = client.post(
+        "/ui/jobs", data={"kind": "validate", "profile_name": "a"}, follow_redirects=False
+    )
+
+    assert response.status_code == 303
+    assert catalog.submitted[-1][1]["episode_ids"] == []
+
+
+@pytest.mark.contract
+def test_the_validate_form_reports_a_typed_limit_in_place() -> None:
+    for bad in ("abc", "0", "-4"):
+        client, catalog = _ingest_client()
+        response = client.post(
+            "/ui/jobs",
+            data={
+                "kind": "validate",
+                "profile_name": "strict",
+                "min_frames": bad,
+                "episode_ids": "ep-1",
+            },
+            follow_redirects=False,
+        )
+
+        assert response.status_code == 200, bad
+        assert "minimum frames" in response.text, bad
+        assert 'name="min_frames"' in response.text and f'value="{bad}"' in response.text, bad
+        assert catalog.submitted == [], bad
+
+
+@pytest.mark.contract
+def test_the_build_form_queues_a_job_from_the_browser() -> None:
+    client, catalog = _ingest_client()
+
+    response = client.post(
+        "/ui/jobs",
+        data={"kind": "build", "build_name": "pick-set", "episode_ids": "ep-1"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303, response.text
+    assert catalog.submitted[-1] == (
+        "build",
+        {"name": "pick-set", "episode_ids": ["ep-1"], "profile": {}},
+    )
+
+
+@pytest.mark.contract
+def test_a_build_without_a_name_is_reported_in_place() -> None:
+    client, catalog = _ingest_client()
+
+    response = client.post(
+        "/ui/jobs", data={"kind": "build", "episode_ids": "ep-1"}, follow_redirects=False
+    )
+
+    assert response.status_code == 200
+    assert "build_name" in response.text, "the error must name the field"
+    assert 'name="episode_ids"' in response.text and 'value="ep-1"' in response.text
+    assert catalog.submitted == []
+
+
+@pytest.mark.contract
+def test_the_export_form_queues_the_builds_own_hash() -> None:
+    """The hash the page posts is the canonical one, and the form cannot mistype it."""
+    client, catalog = _ingest_client()
+
+    response = client.post(
+        "/ui/jobs", data={"kind": "export", "build_hash": BUILD_HASH}, follow_redirects=False
+    )
+
+    assert response.status_code == 303, response.text
+    assert catalog.submitted[-1] == ("export", {"build_hash": BUILD_HASH})
+
+
+@pytest.mark.contract
+def test_the_export_form_refuses_a_hash_that_is_not_a_build_identity() -> None:
+    """A bare digest is refused in the browser too, with a sentence, not a regex."""
+    client, catalog = _ingest_client()
+
+    response = client.post(
+        "/ui/jobs", data={"kind": "export", "build_hash": "ab" * 32}, follow_redirects=False
+    )
+
+    assert response.status_code == 200
+    assert "bld_" in response.text and "64 hex" in response.text
+    assert catalog.submitted == []
+
+
+@pytest.mark.contract
+def test_the_slice_form_saves_a_slice_from_the_browser() -> None:
+    """`POST /api/v1/slices` was JSON-only; this is the same write, from the page."""
+    client, catalog = _ingest_client()
+
+    response = client.post(
+        "/ui/slices",
+        data={"name": "good-picks", "notes": "for the next run", "state": "valid", "flag": "jerky"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303, response.text
+    # The theme travels in the body, so the page the operator lands on is the one they
+    # were using rather than the default.
+    assert response.headers["location"].startswith("/ui/slices/slice-1")
+    assert "theme=" in response.headers["location"]
+    assert catalog.slices == [
+        {
+            "name": "good-picks",
+            "notes": "for the next run",
+            "filter_config": {"state": "valid", "flag": "jerky"},
+        }
+    ]
+
+
+@pytest.mark.contract
+def test_a_slice_without_a_name_is_reported_in_place() -> None:
+    client, catalog = _ingest_client()
+
+    response = client.post(
+        "/ui/slices", data={"name": "   ", "state": "valid"}, follow_redirects=False
+    )
+
+    assert response.status_code == 200
+    assert "name" in response.text and "save slice" in response.text
+    assert catalog.slices == []
+
+
+@pytest.mark.contract
+def test_a_duplicate_slice_name_is_reported_in_place() -> None:
+    """The JSON API answers 409 here; a browser gets the form back with the name in it."""
+    client, catalog = _ingest_client()
+    catalog.slice_conflict = True
+
+    response = client.post("/ui/slices", data={"name": "taken"}, follow_redirects=False)
+
+    assert response.status_code == 200
+    assert "already exists" in response.text
+    assert 'value="taken"' in response.text
+    assert catalog.slices == []
+
+
+@pytest.mark.contract
+def test_the_whole_loop_is_reachable_without_a_json_call() -> None:
+    """The audit's acceptance criterion, as a test: every stage has a form."""
+    client, _catalog = _ingest_client()
+
+    episodes = client.get("/ui/episodes").text
+    builds = client.get("/ui/builds").text
+    detail = client.get(f"/ui/builds/{BUILD_HASH}").text
+    slices = client.get("/ui/slices").text
+
+    assert 'action="/ui/jobs"' in episodes and 'value="validate"' in episodes
+    assert 'action="/ui/jobs"' in builds and 'value="build"' in builds
+    assert 'value="export"' in detail and BUILD_HASH in detail
+    assert 'action="/ui/slices"' in slices and 'name="name"' in slices
 
 
 @pytest.mark.contract

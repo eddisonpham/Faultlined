@@ -558,6 +558,56 @@ _INGEST_STEPS = (
 )
 
 
+# --------------------------------------------------------------- form pieces
+
+
+def form_notice(error: str = "") -> str:
+    """The inline failure a re-rendered form shows for a rejected submission."""
+    return f'<p class="de-notice de-notice-error">{escape(error)}</p>' if error else ""
+
+
+def form_field(
+    name: str,
+    label: str,
+    placeholder: str = "",
+    *,
+    value: str = "",
+    wide: bool = False,
+    prefix: str = "f",
+) -> str:
+    """One labelled text input, in the markup every form on this surface uses."""
+    cls = "de-field de-field-wide" if wide else "de-field"
+    return (
+        f'<label class="{cls}" for="{prefix}-{name}">'
+        f'<span class="de-field-label">{escape(label)}</span>'
+        f'<input id="{prefix}-{name}" name="{name}" type="text" value="{escape(value)}" '
+        f'placeholder="{escape(placeholder)}" autocomplete="off" spellcheck="false">'
+        "</label>"
+    )
+
+
+def form_select(
+    name: str, label: str, choices: tuple[str, ...], selected: str, *, empty: str = "any"
+) -> str:
+    """One labelled select; `_pick` owns the option markup."""
+    return (
+        f'<label class="de-field" for="f-{name}">'
+        f'<span class="de-field-label">{escape(label)}</span>'
+        f'<select id="f-{name}" name="{name}">{_pick(choices, selected, empty=empty)}</select>'
+        "</label>"
+    )
+
+
+def hidden_field(name: str, value: str) -> str:
+    """A value the form carries without asking the operator for it."""
+    return f'<input type="hidden" name="{escape(name)}" value="{escape(value)}">'
+
+
+def _form_values(values: dict[str, str] | None) -> dict[str, str]:
+    """A form's typed values, as `dict[str, str]` whatever was posted."""
+    return {key: str(value) for key, value in (values or {}).items()}
+
+
 def _ingest_form(
     error: str = "",
     values: dict[str, str] | None = None,
@@ -571,20 +621,14 @@ def _ingest_form(
     as a page-level failure. A form that discards what you typed and shows a
     stack trace somewhere else is indistinguishable from the form being broken.
     """
-    vals = values or {}
+    vals = _form_values(values)
     kind = vals.get("kind", "episode")
     if kind not in dict(_INGEST_KINDS):
         kind = "episode"
 
     def field(name: str, label: str, placeholder: str, *, wide: bool = False) -> str:
-        value = escape(vals.get(name, ""))
-        cls = "de-field de-field-wide" if wide else "de-field"
-        return (
-            f'<label class="{cls}" for="ing-{name}">'
-            f'<span class="de-field-label">{escape(label)}</span>'
-            f'<input id="ing-{name}" name="{name}" type="text" value="{value}" '
-            f'placeholder="{escape(placeholder)}" autocomplete="off" spellcheck="false">'
-            "</label>"
+        return form_field(
+            name, label, placeholder, value=vals.get(name, ""), wide=wide, prefix="ing"
         )
 
     options = "".join(
@@ -630,6 +674,147 @@ def _ingest_form(
             "</form>"
         ),
         "no javascript required",
+    )
+
+
+# -------------------------------------------------- the rest of the loop
+#
+# The loop the product exists to close is ingest, validate, build, export, slice. Each
+# of these forms posts to the same `/ui/jobs` (or `/ui/slices`) router as the JSON API,
+# through the same Pydantic models, so the browser cannot queue a job the API would
+# refuse - and a refusal re-renders the page that owns the form with the values intact.
+
+
+def validate_form(error: str = "", values: dict[str, str] | None = None, theme: str = "") -> str:
+    """Check episodes already in the catalog against a policy (FR-002).
+
+    `enabled_rules` is deliberately not a field. The API accepts a rule subset, but
+    `rules_for` intersects it with the rule registry, so one typo would silently switch
+    a check off. Omitting it means every registered rule runs, which is what an operator
+    asking "is this data any good" is asking for.
+
+    The theme travels in the body so the redirect after a successful submit lands on the
+    job page in the theme the operator was using.
+    """
+    vals = _form_values(values)
+    return _section(
+        "Validate episodes",
+        form_notice(error)
+        + '<form class="de-ingest" method="post" action="/ui/jobs">'
+        + hidden_field("kind", "validate")
+        + hidden_field("theme", theme_or_default(theme))
+        + '<div class="de-field-row">'
+        + form_field(
+            "profile_name",
+            "profile name",
+            "operator",
+            value=vals.get("profile_name", "operator"),
+        )
+        + form_field("min_frames", "minimum frames", "2", value=vals.get("min_frames", ""))
+        + form_field("min_fps", "minimum fps", "", value=vals.get("min_fps", ""))
+        + form_field("max_fps", "maximum fps", "", value=vals.get("max_fps", ""))
+        + "</div>"
+        + '<div class="de-field-row">'
+        + form_field(
+            "episode_ids",
+            "which episodes (optional)",
+            "leave empty for every episode in the catalog",
+            value=vals.get("episode_ids", ""),
+            wide=True,
+        )
+        + "</div>"
+        + '<button type="submit" class="de-submit">queue validate job</button>'
+        + '<p class="de-sub-note">Every registered rule runs. An episode that fails is'
+        " quarantined, and the job report names which rule did it.</p>"
+        "</form>",
+        "failures quarantine the episode",
+    )
+
+
+def build_form(error: str = "", values: dict[str, str] | None = None, theme: str = "") -> str:
+    """Assemble a named, content-addressed build (FR-006).
+
+    An empty selection is the API's own documented default - every episode that passed
+    validation - so the common case is one field.
+    """
+    vals = _form_values(values)
+    return _section(
+        "Build a dataset",
+        form_notice(error)
+        + '<form class="de-ingest" method="post" action="/ui/jobs">'
+        + hidden_field("kind", "build")
+        + hidden_field("theme", theme_or_default(theme))
+        + '<div class="de-field-row">'
+        + form_field("build_name", "build name", "pick-place-v1", value=vals.get("build_name", ""))
+        + "</div>"
+        + '<div class="de-field-row">'
+        + form_field(
+            "episode_ids",
+            "which episodes (optional)",
+            "leave empty for every validated episode",
+            value=vals.get("episode_ids", ""),
+            wide=True,
+        )
+        + "</div>"
+        + '<button type="submit" class="de-submit">queue build job</button>'
+        + '<p class="de-sub-note">A build is its manifest hashed, so building twice'
+        " over the same episodes gives the same address. A failing episode is excluded, "
+        "not silently included.</p>"
+        "</form>",
+        "the manifest is the identity",
+    )
+
+
+def export_form(
+    build_hash: str, error: str = "", values: dict[str, str] | None = None, theme: str = ""
+) -> str:
+    """Write this build out as a LeRobot v3 dataset on disk (ADR 0025).
+
+    The hash is carried hidden rather than typed: it is the address of the page this
+    form is on, so the export cannot be pointed at the wrong build by a typo.
+    """
+    vals = _form_values(values)
+    return _section(
+        "Export this build",
+        form_notice(error)
+        + '<form class="de-ingest" method="post" action="/ui/jobs">'
+        + hidden_field("kind", "export")
+        + hidden_field("theme", theme_or_default(theme))
+        + hidden_field("build_hash", vals.get("build_hash") or build_hash)
+        + '<button type="submit" class="de-submit">queue export job</button>'
+        + '<p class="de-sub-note">Writes <code>meta/info.json</code>, per-episode index'
+        " shards and <code>data/chunk-*/file-*.parquet</code> under the export root, so a"
+        " training script reads files rather than a manifest.</p>"
+        "</form>",
+        "a real dataset directory",
+    )
+
+
+def slice_form(error: str = "", values: dict[str, str] | None = None, theme: str = "") -> str:
+    """Save a named curation filter (the manifest is recomputed on every read)."""
+    vals = _form_values(values)
+    state = vals.get("state", "")
+    flag = vals.get("flag", "")
+    return _section(
+        "New slice",
+        form_notice(error)
+        + '<form class="de-ingest" method="post" action="/ui/slices">'
+        + hidden_field("theme", theme_or_default(theme))
+        + '<div class="de-field-row">'
+        + form_field("name", "slice name", "good-picks", value=vals.get("name", ""))
+        + form_select("state", "episode state", EPISODE_STATES, state)
+        + form_select("flag", "curation flag", EPISODE_FLAGS, flag)
+        + "</div>"
+        + '<div class="de-field-row">'
+        + form_field(
+            "notes", "notes", "what this slice is for", value=vals.get("notes", ""), wide=True
+        )
+        + "</div>"
+        + '<button type="submit" class="de-submit">save slice</button>'
+        + '<p class="de-sub-note">Membership is a query over the catalog, recomputed on'
+        " every read, so a slice never goes stale as episodes change.</p>"
+        "</form>",
+        "membership recomputed on read",
     )
 
 
@@ -1531,8 +1716,14 @@ def _health_strip(health: dict[str, Any]) -> str:
     # ---------------------------------------------------------------- slices
 
 
-def slices_page(model: dict[str, Any], theme: str) -> str:
-    """Named curation filters and a link to each slice's manifest."""
+def slices_page(
+    model: dict[str, Any],
+    theme: str,
+    *,
+    error: str = "",
+    values: dict[str, str] | None = None,
+) -> str:
+    """Named curation filters, a link to each manifest, and the form that adds one."""
     return _page(
         "Slices",
         "/ui/slices",
@@ -1540,7 +1731,8 @@ def slices_page(model: dict[str, Any], theme: str) -> str:
             "Saved slices",
             _live("/ui/slices", 10000, _slices_body(model)),
             "membership recomputed on read",
-        ),
+        )
+        + slice_form(error, values, theme),
         theme,
     )
 
@@ -2132,7 +2324,13 @@ def vocabulary_detail_page(
 
 
 def episodes_page(
-    model: dict[str, Any], state_filter: str | None, flag: str | None, theme: str
+    model: dict[str, Any],
+    state_filter: str | None,
+    flag: str | None,
+    theme: str,
+    *,
+    error: str = "",
+    values: dict[str, str] | None = None,
 ) -> str:
     query = ""
     if state_filter or flag:
@@ -2156,6 +2354,7 @@ def episodes_page(
             "quality scored at ingest",
         )
         + filters
+        + validate_form(error, values, theme)
         + download_links("/ui/episodes", query)
     )
     return _page("Episodes", "/ui/episodes", body, theme)

@@ -39,6 +39,7 @@ from data_engine.api.schemas import (
     ArtifactSummary,
     BuildDetailResponse,
     BuildListResponse,
+    BuildPayload,
     ContractListResponse,
     ContractPayload,
     ContractRequest,
@@ -48,6 +49,7 @@ from data_engine.api.schemas import (
     EpisodeResponse,
     EpisodeSummary,
     EpisodeValidationResponse,
+    ExportPayload,
     FailingEpisodeRow,
     FailingEpisodesResponse,
     FailureSummaryResponse,
@@ -70,10 +72,14 @@ from data_engine.api.schemas import (
     SliceUpdateRequest,
     SourceIngestPayload,
     StatusResponse,
+    SubmitBuildJobRequest,
+    SubmitExportJobRequest,
     SubmitJobRequest,
     SubmitSourceJobRequest,
+    SubmitValidateJobRequest,
     SyntheticEpisode,
     TickResponse,
+    ValidatePayload,
 )
 from data_engine.api.vocabulary_schemas import (
     VocabularyCandidateListResponse,
@@ -96,7 +102,11 @@ from data_engine.api.vocabulary_schemas import (
 from data_engine.catalog import vocabulary as vocabulary_store
 from data_engine.catalog.database import initialize_schema
 from data_engine.catalog.introspect import describe
-from data_engine.catalog.repository import InvalidTransition, PostgresCatalog
+from data_engine.catalog.repository import (
+    InvalidTransition,
+    PostgresCatalog,
+    SliceNameConflict,
+)
 from data_engine.config import Settings, load_settings
 from data_engine.curation import REASON_CODES
 from data_engine.jobs.state import DEFAULT_MAX_ATTEMPTS, JobState
@@ -180,6 +190,49 @@ def _first_message(exc: ValidationError) -> str:
                 message = message[len(prefix) :]
         return f"{location}: {message}" if location else message
     return "That submission was not valid."
+
+
+def _ids(text: str) -> list[str]:
+    """Episode ids a form typed as a comma- or space-separated list.
+
+    Empty means the selection is the handler's own default (every episode for a
+    validate, every validated episode for a build), which is the same meaning the JSON
+    API gives an empty list rather than a third convention invented by the form.
+    """
+    return [part for part in (chunk.strip() for chunk in text.replace(",", " ").split()) if part]
+
+
+def _profile_document(values: dict[str, str]) -> dict[str, Any]:
+    """The validation profile a form's fields describe (ADR 0016).
+
+    `enabled_rules` is omitted on purpose: the API accepts a rule subset, but `rules_for`
+    intersects it with the rule registry, so a misspelled rule name would silently switch
+    a check off. Omitting the key means every registered rule runs.
+
+    The numeric limits are parsed here rather than left to the worker, so a typo is an
+    inline form error instead of a queued job that fails. Raises `ValueError` with the
+    sentence the form should show.
+    """
+    document: dict[str, Any] = {"name": values.get("profile_name") or "operator", "version": "1"}
+    limits: tuple[tuple[str, type, str], ...] = (
+        ("min_frames", int, "minimum frames"),
+        ("min_fps", float, "minimum fps"),
+        ("max_fps", float, "maximum fps"),
+    )
+    for key, caster, label in limits:
+        text = (values.get(key) or "").strip()
+        if not text:
+            continue
+        try:
+            number = caster(text)
+        except ValueError as exc:
+            raise ValueError(f"{label} must be a number") from exc
+        if key == "min_frames" and number < 1:
+            raise ValueError("minimum frames must be at least 1")
+        if key != "min_frames" and number < 0:
+            raise ValueError(f"{label} cannot be negative")
+        document[key] = number
+    return document
 
 
 #: Page bound shared by every list endpoint. Declared in the signature rather than
@@ -617,48 +670,109 @@ def create_app(
 
     @app.post("/ui/jobs")
     async def ui_submit_job(request: Request) -> Response:
-        """Queue an ingest job from the browser form.
+        """Queue a job from the browser form.
+
+        One front door, five kinds: `episode` and `path` are ingest, and `validate`,
+        `build` and `export` complete the loop those three form pages host (the audit's
+        release blocker 1 - EXP-0017 measured the last three steps as curl-only).
 
         The form is parsed by hand rather than with ``Form(...)`` because that
         would pull in ``python-multipart`` for a single urlencoded body - a new
         dependency, on the dependency-free path ADR 0014 is built around, to save
         three lines of ``urllib.parse``.
 
-        The payload is built and then validated through the *same* Pydantic
-        models the JSON endpoint uses. A form is a second front door to the same
-        door, and a second front door with its own weaker validation is how a
-        UI ends up able to create jobs the API would refuse.
+        Every kind is built and then validated through the *same* Pydantic models
+        the JSON endpoint uses. A form is a second front door to the same door, and
+        a second front door with its own weaker validation is how a UI ends up able
+        to create jobs the API would refuse.
 
-        On a bad submission this re-renders the page with the error inline and
-        the typed values preserved, rather than redirecting: losing what someone
-        typed because of one bad field is the fastest way to make a form feel
-        hostile. The redirect on success is 303, so a refresh does not queue the
+        On a bad submission this re-renders the page that owns the form with the
+        error inline and the typed values preserved, rather than redirecting: losing
+        what someone typed because of one bad field is the fastest way to make a form
+        feel hostile. The redirect on success is 303, so a refresh does not queue the
         same job twice.
         """
         from urllib.parse import parse_qs
 
         raw = parse_qs((await request.body()).decode("utf-8", "replace"))
-        kind = (raw.get("kind") or ["episode"])[0].strip() or "episode"
-        source = (raw.get("source") or [""])[0].strip()
+
+        def posted(name: str) -> str:
+            return (raw.get(name) or [""])[0].strip()
+
+        kind = posted("kind") or "episode"
+        source = posted("source")
         values = {
             "kind": kind,
-            "task": (raw.get("task") or [""])[0].strip(),
-            "robot": (raw.get("robot") or [""])[0].strip(),
-            "frames": (raw.get("frames") or [""])[0].strip(),
+            "task": posted("task"),
+            "robot": posted("robot"),
+            "frames": posted("frames"),
             "source": source,
-            "episode_key": (raw.get("episode_key") or [""])[0].strip(),
+            "episode_key": posted("episode_key"),
+            "profile_name": posted("profile_name"),
+            "min_frames": posted("min_frames"),
+            "min_fps": posted("min_fps"),
+            "max_fps": posted("max_fps"),
+            "build_name": posted("build_name"),
+            "episode_ids": posted("episode_ids"),
+            "build_hash": posted("build_hash"),
         }
-        theme = theme_or_default((raw.get("theme") or [""])[0] or None)
+        theme = theme_or_default(posted("theme") or None)
+        catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
 
         def fail(message: str) -> HTMLResponse:
-            model = _status_model(cast(PostgresCatalog, request.app.state.catalog))
-            model["ingest_error"] = message
-            model["ingest_values"] = values
-            return HTMLResponse(status_page(model, theme))
+            """Re-render the page that owns this kind of form, error and values intact."""
+            if kind == "validate":
+                episodes = {"items": catalog_for_request.list_episodes(limit=50)}
+                return HTMLResponse(
+                    episodes_page(episodes, None, None, theme, error=message, values=values)
+                )
+            if kind == "build":
+                builds = {"items": catalog_for_request.list_builds(limit=50)}
+                return HTMLResponse(builds_page(builds, theme, error=message, values=values))
+            if kind == "export":
+                hash_ = values["build_hash"]
+                build = catalog_for_request.get_build(hash_) if hash_ else None
+                if build is not None:
+                    return HTMLResponse(
+                        lineage_page(
+                            {**build, "episodes": catalog_for_request.build_episodes(hash_)},
+                            theme,
+                            error=message,
+                            values=values,
+                        )
+                    )
+            # Ingest, and an export naming a build this catalog does not have: the
+            # status page is the page with nowhere else to put a general refusal.
+            status = _status_model(catalog_for_request)
+            status["ingest_error"] = message
+            status["ingest_values"] = values
+            return HTMLResponse(status_page(status, theme))
 
         try:
             body: AnyJobRequest
-            if kind == "path" or (not values["task"] and source):
+            if kind == "validate":
+                try:
+                    profile = _profile_document(values)
+                except ValueError as exc:
+                    return fail(str(exc))
+                body = SubmitValidateJobRequest(
+                    type="validate",
+                    payload=ValidatePayload(
+                        episode_ids=_ids(values["episode_ids"]), profile=profile
+                    ),
+                )
+            elif kind == "build":
+                body = SubmitBuildJobRequest(
+                    type="build",
+                    payload=BuildPayload(
+                        name=values["build_name"], episode_ids=_ids(values["episode_ids"])
+                    ),
+                )
+            elif kind == "export":
+                body = SubmitExportJobRequest(
+                    type="export", payload=ExportPayload(build_hash=values["build_hash"])
+                )
+            elif kind == "path" or (not values["task"] and source):
                 if not source:
                     return fail("A dataset path is required when loading from disk.")
                 body = SubmitSourceJobRequest(
@@ -695,12 +809,13 @@ def create_app(
         except ValidationError as exc:
             return fail(_first_message(exc))
 
+        # Ingest-from-a-body carries its episode under a key; every other kind's payload
+        # is the model's own flat document, which is exactly what the JSON API accepts.
         payload = (
-            body.payload.model_dump(mode="json")
-            if isinstance(body, SubmitSourceJobRequest)
-            else {"episode": body.payload.episode.model_dump(mode="json")}
+            {"episode": body.payload.episode.model_dump(mode="json")}
+            if isinstance(body, SubmitJobRequest)
+            else body.payload.model_dump(mode="json")
         )
-        catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
         row, _created = catalog_for_request.submit_job(
             body.type,
             payload,
@@ -868,6 +983,60 @@ def create_app(
         if impact is None:
             raise HTTPException(status_code=404, detail=f"No slice {slice_id}.")
         return HTMLResponse(slice_impact_page(impact, theme_or_default(theme)))
+
+    @app.post("/ui/slices", include_in_schema=False)
+    async def ui_create_slice(request: Request) -> Response:
+        """Save a slice from the browser, through the same model the JSON API uses.
+
+        Hand-parsed for the same reason `/ui/jobs` is (ADR 0014: no `python-multipart`
+        for one urlencoded body). Only the two keys the predicate layer honours are read
+        out of the submitted filter - `state` and `flag` - because a filter field the
+        catalog ignores would look like it did something. A duplicate name is a slice
+        conflict, which the JSON API answers 409 and this form answers in place, with the
+        name still in the field.
+
+        POST rather than the JSON route with a redirect: the redirect is 303, so
+        refreshing the page does not create the slice twice.
+        """
+        from urllib.parse import parse_qs
+
+        raw = parse_qs((await request.body()).decode("utf-8", "replace"))
+
+        def posted(name: str) -> str:
+            return (raw.get(name) or [""])[0].strip()
+
+        values = {"name": posted("name"), "notes": posted("notes")}
+        state = posted("state")
+        flag = posted("flag")
+        theme = theme_or_default(posted("theme") or None)
+        catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
+
+        def fail(message: str) -> HTMLResponse:
+            model = {"items": catalog_for_request.list_slices(limit=50)}
+            typed = {**values, "state": state, "flag": flag}
+            return HTMLResponse(slices_page(model, theme, error=message, values=typed))
+
+        try:
+            body = SliceCreateRequest(
+                name=values["name"],
+                notes=values["notes"],
+                filter_config={
+                    key: value for key, value in (("state", state), ("flag", flag)) if value
+                },
+            )
+        except ValidationError as exc:
+            return fail(_first_message(exc))
+
+        try:
+            row = catalog_for_request.register_slice(
+                name=body.name, notes=body.notes, filter_config=body.filter_config
+            )
+        except SliceNameConflict as exc:
+            return fail(str(exc))
+        return RedirectResponse(
+            f"/ui/slices/{row['id']}" + (f"?theme={theme}" if theme in THEMES else ""),
+            status_code=303,
+        )
 
     @app.get("/ui/metrics", response_class=HTMLResponse)
     def ui_metrics(
