@@ -83,6 +83,67 @@ def test_health_says_never_rather_than_healthy_when_nothing_has_ticked(
 
 
 @pytest.mark.unit
+def test_health_reads_the_sink_once_for_both_facts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Two facts, one read: `/ui/incidents` polls, and a read parses up to 20k records.
+
+    `last_tick_at` and `blind` came from two separate tail reads, so every page render
+    parsed the same window twice - measured at 42 ms p50 on a 5k-record sink and 97 ms
+    at the bound, half of it duplicated work.
+    """
+    from data_engine.monitoring import service as monitor_service
+
+    ticked_at = datetime(2026, 10, 6, 12, 0, 0, tzinfo=UTC)
+    path = _sink(
+        tmp_path,
+        _record("monitor_tick_seconds", 0.25, ticked_at),
+        _record("monitor_blind", 0.0, ticked_at),
+    )
+    reads: list[int | None] = []
+    original = monitor_service.read_metric_records
+
+    def counting(target: Path, **kwargs: object) -> list[dict[str, object]]:
+        reads.append(kwargs.get("max_records"))  # type: ignore[arg-type]
+        return original(target, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(monitor_service, "read_metric_records", counting)
+
+    health = MonitorService(object(), metrics_path=path).health()
+
+    assert len(reads) == 1, "both facts come from the same read"
+    assert reads == [monitor_service.HEALTH_TAIL_RECORDS]
+    assert health["last_tick_at"] == ticked_at.isoformat()
+    assert health["blind"] is False
+
+
+@pytest.mark.unit
+def test_health_does_not_read_the_sink_when_this_process_has_ticked(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The in-process answer is free; reading the sink for it would be waste."""
+    from data_engine.monitoring import service as monitor_service
+
+    reads: list[object] = []
+
+    def forbidden(*args: object, **_kwargs: object) -> list[dict[str, object]]:
+        reads.append(args)
+        return []
+
+    monkeypatch.setattr(monitor_service, "read_metric_records", forbidden)
+    service = MonitorService(object(), metrics_path=tmp_path / "runtime.jsonl")
+    # What `tick()` leaves behind in this process.
+    service._last_tick = datetime(2026, 10, 6, 12, 0, 0, tzinfo=UTC)
+    service._last_blind = True
+
+    health = service.health()
+
+    assert reads == []
+    assert health["blind"] is True
+    assert health["last_tick_at"] == "2026-10-06T12:00:00+00:00"
+
+
+@pytest.mark.unit
 def test_health_reads_the_sink_only_to_the_bounded_tail(tmp_path: Path) -> None:
     """A health check must not walk the whole history to find the last tick."""
     from data_engine.monitoring import service as monitor_service

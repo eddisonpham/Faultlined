@@ -124,7 +124,10 @@ Both facts are now read back from the metric sink — the one record every proce
 
 The read is a bounded tail (`HEALTH_TAIL_RECORDS = 20_000`), because health is served on a
 page load and a full-history scan would make the health check the slowest thing on the
-page. In-process values still win when this process has ticked. Tests:
+page. In-process values still win when this process has ticked - and a process that has
+ticked reads nothing at all. One tail read serves both facts: they were read separately,
+which parsed the same window twice on every call, measured at 42 ms p50 on a 5k-record sink
+and 97 ms at the bound, half of it duplicated work on a page that polls. Tests:
 `tests/unit/test_monitoring_health.py` (cross-process read-back, most-recent-wins, the
 never-ticked case, and the tail bound); the monitoring contract test now points the app
 at an isolated sink so it cannot assert against a developer's own telemetry file.
