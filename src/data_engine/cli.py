@@ -16,6 +16,8 @@ from data_engine.catalog.database import initialize_schema
 from data_engine.config import load_settings
 from data_engine.jobs.state import REAP_INTERVAL_SECONDS
 from data_engine.jobs.worker import IngestWorker
+from data_engine.monitoring.features import DEFAULT_WINDOW_SECONDS
+from data_engine.monitoring.service import MonitorService
 from data_engine.observability.logging import configure_logging
 from data_engine.observability.metrics import JsonlMetricSink, RuntimeMetrics
 
@@ -26,6 +28,14 @@ DB_ERROR_BACKOFF_SECONDS = 5.0
 #: Once a minute is often enough to notice a filling disk or a growing RSS, and
 #: rare enough that eight gauges a minute do not bury the job metrics in the JSONL.
 HOST_SAMPLE_INTERVAL_SECONDS = 60.0
+
+#: How often the worker loop evaluates a monitoring window. It matches the notifier's
+#: own window (`DEFAULT_WINDOW_SECONDS`): a shorter cadence re-evaluates records the
+#: previous tick already saw, and a longer one lets a sustained fault sit unobserved
+#: between ticks. The monitor was fully implemented, tested, and inert - nothing in
+#: any running deployment called `MonitorService.tick` (EXP-0016), so `/ui/incidents`
+#: rendered zero rows forever. See ADR 0031.
+MONITOR_INTERVAL_SECONDS = DEFAULT_WINDOW_SECONDS
 
 
 def build_metrics(settings: Any) -> RuntimeMetrics:
@@ -58,8 +68,10 @@ def _worker_loop(stop: Any, poll_seconds: float = 0.25) -> None:
     log = logging.getLogger(__name__)
     # The reapers used to exist but nothing called them, so F6 deadlines were never
     # enforced on a job that was already running and a dead worker's job was stranded.
+    monitor = MonitorService(worker.catalog, metrics=metrics, metrics_path=settings.metrics_path)
     next_reap = time.monotonic()
     next_sample = time.monotonic()
+    next_monitor = time.monotonic()
     while not stop.is_set():
         if not _parent_alive():
             log.warning("parent process gone; worker exiting")
@@ -70,6 +82,9 @@ def _worker_loop(stop: Any, poll_seconds: float = 0.25) -> None:
         if time.monotonic() >= next_sample:
             _sample_host(metrics, log)
             next_sample = time.monotonic() + HOST_SAMPLE_INTERVAL_SECONDS
+        if time.monotonic() >= next_monitor:
+            _monitor_tick(monitor, worker.catalog, log)
+            next_monitor = time.monotonic() + MONITOR_INTERVAL_SECONDS
         try:
             result = worker.process_one()
         except Exception:
@@ -90,6 +105,29 @@ def _sample_host(metrics: Any, log: Any) -> None:
         metrics.sample_host()
     except Exception:
         log.exception("host sample failed; continuing")
+
+
+def _monitor_tick(monitor: MonitorService, catalog: Any, log: Any) -> None:
+    """Evaluate one monitoring window, if this worker holds the tick lease.
+
+    Out of band by construction (ADR 0020): a tick that raises is a lost observation,
+    never a lost job, so every failure is logged and swallowed the way a host sample
+    is. The lease is the catalog's, not this process's, so a pool of workers produces
+    one tick per interval rather than one per worker.
+    """
+    try:
+        with catalog.monitor_lease() as acquired:
+            if not acquired:
+                return
+            report = monitor.tick(catalog)
+    except Exception:
+        log.exception("monitor tick failed; continuing")
+        return
+    if report.written:
+        log.warning(
+            "monitoring opened incidents",
+            extra={"event": "incidents_opened", "count": len(report.written)},
+        )
 
 
 def _reap(worker: IngestWorker, log: Any) -> None:

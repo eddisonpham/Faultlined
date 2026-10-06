@@ -1,6 +1,11 @@
+import contextlib
+import logging
+from collections.abc import Iterator
+from typing import Any
+
 import pytest
 
-from data_engine.cli import _parent_alive, _worker_loop, main
+from data_engine.cli import _monitor_tick, _parent_alive, _worker_loop, main
 
 
 @pytest.mark.unit
@@ -71,9 +76,11 @@ class _Stop:
 
 
 class _Catalog:
-    def __init__(self) -> None:
+    def __init__(self, *, lease: bool = True) -> None:
         self.reaped_deadlines = 0
         self.reaped_orphans = 0
+        self.lease_available = lease
+        self.monitor_leases = 0
 
     def reap_expired_deadlines(self) -> int:
         self.reaped_deadlines += 1
@@ -83,6 +90,15 @@ class _Catalog:
         self.reaped_orphans += 1
         return 0
 
+    @contextlib.contextmanager
+    def monitor_lease(self) -> Iterator[bool]:
+        self.monitor_leases += 1
+        yield self.lease_available
+
+
+class _Settings:
+    metrics_path: Any = None
+
 
 def _loop_with(
     monkeypatch: pytest.MonkeyPatch,
@@ -91,7 +107,7 @@ def _loop_with(
     metrics: _Metrics | None = None,
 ) -> _Metrics:
     recorder = metrics if metrics is not None else _Metrics()
-    monkeypatch.setattr("data_engine.cli.load_settings", lambda: object())
+    monkeypatch.setattr("data_engine.cli.load_settings", lambda: _Settings())
     monkeypatch.setattr("data_engine.cli.build_metrics", lambda _settings: recorder)
     monkeypatch.setattr("data_engine.cli.IngestWorker", lambda *_args, **_kwargs: worker)
     monkeypatch.setattr("data_engine.cli._parent_alive", lambda: True)
@@ -100,7 +116,11 @@ def _loop_with(
 
 
 class _Metrics:
-    """Counts host samples, and can be told to fail one."""
+    """Counts host samples, and can be told to fail one.
+
+    The monitor emits its own metric family through the same recorder; those calls
+    are not what these tests are about, so every other method is a no-op.
+    """
 
     def __init__(self, *, broken: bool = False) -> None:
         self.host_samples = 0
@@ -110,6 +130,12 @@ class _Metrics:
         self.host_samples += 1
         if self.broken:
             raise RuntimeError("psutil exploded")
+
+    def __getattr__(self, _name: str) -> Any:
+        def _noop(*_args: Any, **_kwargs: Any) -> None:
+            return None
+
+        return _noop
 
 
 class _Outage:
@@ -164,6 +190,55 @@ def test_a_failing_reaper_does_not_end_the_loop(monkeypatch: pytest.MonkeyPatch)
         raise RuntimeError("connection refused")
 
     worker.catalog.reap_expired_deadlines = _boom  # type: ignore[method-assign]
+
+    _loop_with(monkeypatch, worker, iterations=2)
+
+    assert worker.calls == 1
+
+
+@pytest.mark.unit
+def test_worker_loop_ticks_the_monitor(monkeypatch: pytest.MonkeyPatch) -> None:
+    """EXP-0016: `MonitorService.tick` had no production caller, so incidents never
+    existed. The worker loop is the scheduler now, under a catalog-held lease."""
+    worker = _Outage(failures=0)
+
+    _loop_with(monkeypatch, worker, iterations=2)
+
+    assert worker.catalog.monitor_leases >= 1
+
+
+@pytest.mark.unit
+def test_the_monitor_tick_yields_to_a_lease_held_elsewhere() -> None:
+    """With N workers, one tick per interval - not one per worker (ADR 0031)."""
+    catalog = _Catalog(lease=False)
+
+    class _Spy:
+        ticks = 0
+
+        def tick(self, _catalog: Any) -> Any:
+            type(self).ticks += 1
+            raise AssertionError("tick must not run without the lease")
+
+    _monitor_tick(_Spy(), catalog, logging.getLogger("test"))
+    assert catalog.monitor_leases == 1
+    assert _Spy.ticks == 0
+
+
+@pytest.mark.unit
+def test_a_failing_monitor_tick_does_not_end_the_loop(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ADR 0020: a tick that raises is a lost observation, never a lost job."""
+
+    class _Broken:
+        def __init__(self, *_args: Any, **_kwargs: Any) -> None:
+            pass
+
+        def tick(self, _catalog: Any) -> Any:
+            raise RuntimeError("monitor exploded")
+
+    worker = _Outage(failures=0)
+    monkeypatch.setattr("data_engine.cli.MonitorService", _Broken)
 
     _loop_with(monkeypatch, worker, iterations=2)
 

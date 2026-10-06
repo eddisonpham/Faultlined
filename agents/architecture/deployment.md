@@ -26,6 +26,12 @@ container runtime exists (ADR [0012](../decisions/0012-host-based-development.md
 | GC / maintenance | `just gc` (`de gc`) | **Stub**: prints that no GC work is implemented. Orphan blobs, stale tmp, and metric retention are stage-5 work |
 | Doctor | `just doctor` (`de doctor`) | Postgres reachable and catalog schema initializes. Disk headroom, GPU visibility, and lockfile-hash checks are **not** implemented |
 
+**Monitoring is the worker's job, not a timer of its own.** `_worker_loop` evaluates one monitoring
+window every 60 s under a catalog-held advisory lease, so a pool of N workers produces one tick per
+interval rather than one each (ADR [0031](../decisions/0031-monitor-scheduling.md)). A deployment with
+no worker therefore has no monitor: `de api` alone never opens an incident. `POST
+/api/v1/monitoring/tick` remains an on-demand probe, not the schedule.
+
 ## Configuration
 
 Application settings read process environment variables only (per project secrets policy); the `just` task runner loads a

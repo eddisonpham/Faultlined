@@ -6,7 +6,8 @@ import functools
 import hashlib
 import time
 import uuid
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
+from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from itertools import pairwise
 from typing import Any, cast
@@ -31,6 +32,11 @@ from data_engine.jobs.state import (
 )
 from data_engine.observability.metrics import RuntimeMetrics
 from data_engine.validation.profile import ValidationProfile, profile_hash
+
+#: Advisory-lock key for the one monitor tick. Arbitrary but fixed: any process that
+#: wants to be the monitor must use this exact number, and no other lease in the
+#: system may reuse it (see ADR 0031).
+MONITOR_TICK_LOCK_KEY = 4610555735
 
 
 def _timed_operation[Method: Callable[..., Any]](method: Method) -> Method:
@@ -1599,6 +1605,29 @@ class PostgresCatalog:
             snapshot["timestamp_gap_source"] = gap["source_hash"]
             snapshot["timestamp_gap_scope"] = gap["episode_id"]
         return snapshot
+
+    @contextmanager
+    def monitor_lease(self) -> Iterator[bool]:
+        """Become this catalog's monitor ticker for the duration of the block.
+
+        Yields ``True`` when this process holds the lease and ``False`` when another
+        worker is already ticking. The monitor's tick is not idempotent - it bumps an
+        incident's occurrence count and observes the baseline book - and running N
+        workers is a supported configuration, so without a lease the counts scale
+        with the number of workers rather than with the number of faults. The lock is
+        session-scoped: it is released when this connection closes, so a worker killed
+        mid-tick cannot hold it against the rest of the pool.
+        """
+        with connect(self.settings) as connection:
+            row = connection.execute(
+                "SELECT pg_try_advisory_lock(%s) AS acquired", (MONITOR_TICK_LOCK_KEY,)
+            ).fetchone()
+            acquired = bool(row and row["acquired"])
+            try:
+                yield acquired
+            finally:
+                if acquired:
+                    connection.execute("SELECT pg_advisory_unlock(%s)", (MONITOR_TICK_LOCK_KEY,))
 
     def upsert_incident(
         self,

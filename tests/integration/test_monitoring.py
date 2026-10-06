@@ -13,6 +13,7 @@ database accumulates content-addressed state across runs.
 from __future__ import annotations
 
 import json
+import logging
 import uuid
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
@@ -22,6 +23,7 @@ import pytest
 
 from data_engine.catalog.database import initialize_schema
 from data_engine.catalog.repository import PostgresCatalog
+from data_engine.cli import _monitor_tick
 from data_engine.config import Settings
 from data_engine.jobs.state import JobState
 from data_engine.monitoring.baselines import Baseline, BaselineBook
@@ -409,3 +411,71 @@ class TestFullTick:
         self._monitor(catalog).tick()
         preview = self._monitor(catalog).notify_preview()
         assert isinstance(preview, str)
+
+
+class TestMonitorLease:
+    """ADR 0031: one tick per interval across a pool of workers."""
+
+    def test_the_lease_admits_one_ticker_and_releases_on_exit(
+        self, catalog: PostgresCatalog
+    ) -> None:
+        other = PostgresCatalog(catalog.settings)
+        with catalog.monitor_lease() as first:
+            assert first is True
+            # A second connection stands in for another worker's loop.
+            with other.monitor_lease() as second:
+                assert second is False
+        # The lock is session-scoped: closing the block releases it.
+        with other.monitor_lease() as again:
+            assert again is True
+
+    def test_two_catalogs_can_take_the_lease_in_sequence(self, catalog: PostgresCatalog) -> None:
+        first = PostgresCatalog(catalog.settings)
+        second = PostgresCatalog(catalog.settings)
+        with first.monitor_lease() as held:
+            assert held is True
+        with second.monitor_lease() as held:
+            assert held is True
+
+
+class TestScheduledTick:
+    """ADR 0031: the worker loop's own path is enough to open an incident.
+
+    This is the release-blocker acceptance criterion - "an incident appears where
+    nobody POSTs `/api/v1/monitoring/tick`" - exercised through `_monitor_tick`,
+    which is the function `_worker_loop` calls.
+    """
+
+    def _monitor(self, catalog: PostgresCatalog) -> MonitorService:
+        return MonitorService(
+            catalog,
+            config=MonitorConfig(policy=TriagePolicy(budget_per_window=100)),
+        )
+
+    def test_a_scheduled_tick_opens_an_incident_without_the_http_route(
+        self, catalog: PostgresCatalog
+    ) -> None:
+        job = _job(catalog)
+        catalog.register_contract(job["id"], Expectation(expected_episodes=50).to_dict())
+
+        _monitor_tick(self._monitor(catalog), catalog, logging.getLogger("test"))
+
+        labels = {row["label"] for row in catalog.list_incidents(status="open", limit=50)}
+        assert Label.CONTRACT_BREACH.value in labels
+
+    def test_the_scheduled_tick_yields_when_the_lease_is_held(
+        self, catalog: PostgresCatalog
+    ) -> None:
+        class _Spy(MonitorService):
+            ticks = 0
+
+            def tick(self, target: Any | None = None) -> Any:
+                type(self).ticks += 1
+                return super().tick(target)
+
+        monitor = _Spy(catalog, config=MonitorConfig(policy=TriagePolicy(budget_per_window=100)))
+        with catalog.monitor_lease() as held:
+            assert held is True
+            _monitor_tick(monitor, catalog, logging.getLogger("test"))
+
+        assert _Spy.ticks == 0

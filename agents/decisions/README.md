@@ -38,3 +38,4 @@ supersede it with a new ADR and update the affected docs.
 | [0028](0028-versioned-catalog-migrations.md) | Versioned forward-only catalog migrations behind `de migrate` | accepted |
 | [0029](0029-task-vocabulary-first.md) | The task vocabulary is the source of truth; clustering only proposes | accepted |
 | [0030](0030-streamed-downloads.md) | Streamed downloads are the same read with a different serializer | accepted |
+| [0031](0031-monitor-scheduling.md) | The monitor runs on a schedule the worker pool holds, one tick at a time | accepted |

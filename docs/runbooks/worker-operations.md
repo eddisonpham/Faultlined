@@ -94,6 +94,24 @@ Both are on the worker, not the API. **With no worker running, nothing reaps.** 
 looks stuck in `running` and jobs are timing out, check for a live worker before anything
 else — that ordering is the whole diagnosis.
 
+## The monitor
+
+The worker loop also evaluates one monitoring window every `MONITOR_INTERVAL_SECONDS` (60 s),
+under a catalog-held advisory lease so that N workers produce **one tick per interval** rather
+than one each (ADR [0031](../../agents/decisions/0031-monitor-scheduling.md)). This is what makes
+`/ui/incidents` show anything at all — the rules, control limits and notification classification
+were implemented long before anything called them (EXP-0016, EXP-0018).
+
+- **With no worker running, incidents do not appear.** Monitoring is a worker responsibility, like
+  reaping. `POST /api/v1/monitoring/tick` still evaluates one window on demand; it is the probe, not
+  the schedule, and it deliberately does not take the lease.
+- **A failed tick is a lost observation.** It is logged as `monitor_tick_failed` and the loop keeps
+  going: monitoring can never fail a job (ADR 0020).
+- **What to alert on.** One log line, `incidents_opened`, per tick that wrote rows. The incident
+  store itself is the durable record — `curl -s 'localhost:8000/api/v1/incidents?status=open'`.
+- **Ticks are not free but are cheap.** A tick measured 249.5 ms p50 / 435.1 ms p95 (EXP-0018); at
+  a 60 s cadence that is well under one percent of a core.
+
 ## Recovering a stuck queue
 
 1. `just doctor`. If Postgres is down, everything else is noise — restart the cluster with
