@@ -69,6 +69,15 @@ for stage 4, with load testing (NFR-003, item 5 of the stage plan) following imm
 - **Videos are not exported.** No ingested format carries video frames today
   (`has_video` is recorded, frames are not); an exported dataset declares
   `total_videos: 0`. This is a recorded limit, not an omission.
+- **Only Parquet-backed episodes can be exported (added 2026-10-06).**
+  `_parquet_frames` reads each episode's artifact as Parquet, so a build
+  containing an episode ingested from MCAP fails export: the handler raises a
+  terminal `ExportError` naming the episode and the reader's own complaint
+  (`Parquet magic bytes not found in footer`). Such episodes are readable,
+  validatable, buildable and queryable - only export is out of reach, until an
+  MCAP-to-columnar converter exists. This decision was written against the
+  LeRobot v3 target and the synthetic source and never stated the boundary; it
+  is recorded here because a user otherwise meets it as a failed job.
 - **The build hash does not change.** Export is a projection of an immutable manifest;
   nothing about the build is mutated. `builds.exported_at` is not introduced - the
   filesystem address and the artifact store are the record.

@@ -341,8 +341,9 @@ def _field(name: str) -> str:
 
     Only the last dotted segment participates, so `...joint_states.position[0]`
     is classified by `position[0]`, while a payload that literally names a field
-    `gripper` still is one. `observation.state[3]` has no dot and is classified
-    whole. A continuous gripper channel is a real motion signal once the topic
+    `gripper` still is one. `observation.state[3]` is classified by `state[3]`,
+    its own field name with the collection prefix dropped. A continuous gripper
+    channel is a real motion signal once the topic
     stops vetoing it; the binary gripper the exclusion exists for is still caught
     by the discrete-dimension rule (`<= DISCRETE_MAX_UNIQUE` values).
     """

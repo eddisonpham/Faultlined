@@ -311,6 +311,15 @@ the queue, and an attach that no longer matched a candidate was refused with
   quality verdict, a non-finite channel statistic failing the episode after three retries, and the persisted failure
   message being the literal string `"job handler failed"`) are P0 and are independent of both tracks.
 
+- **Closed 2026-10-06.** All three P0 defects are fixed ([ADR 0018](../decisions/0018-episode-quality-signals.md),
+  [ADR 0023](../decisions/0023-quality-metrics-honesty.md), [ADR 0015](../decisions/0015-cooperative-job-lifecycle.md)
+  amendments), the monitor is scheduled by the worker loop under a catalog lease
+  ([ADR 0031](../decisions/0031-monitor-scheduling.md), [EXP-0018](../experiments/0018-monitor-scheduling.md)), and the
+  browser completes the loop — validate on `/ui/episodes`, build on `/ui/builds`, export on `/ui/builds/{hash}`,
+  slice creation on `/ui/slices` ([ADR 0014 amendment](../decisions/0014-minimal-ui-server-rendered.md)). Closing the
+  last one uncovered a defect in the API's own export contract (`ExportPayload.build_hash` capped at 64 characters
+  while the canonical identity is 68), now fixed. Track B is unblocked; nothing in it has been started.
+
 ## 7. Not built (both NOT-lists, condensed)
 
 No BERTopic/embedding cluster stack; no LLM in the grouping or decision path; no auto-labeling;
