@@ -2050,6 +2050,17 @@
             "title": "Baseline Scopes",
             "type": "integer"
           },
+          "blind": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Blind"
+          },
           "budget_window_seconds": {
             "title": "Budget Window Seconds",
             "type": "number"

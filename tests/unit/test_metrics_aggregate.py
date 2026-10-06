@@ -13,6 +13,8 @@ from data_engine.catalog.repository import _timed_operation
 from data_engine.observability.aggregate import (
     format_labels,
     heartbeat_age_seconds,
+    newest_metric_at,
+    newest_record,
     percentile,
     read_metric_records,
     series,
@@ -230,6 +232,26 @@ def test_heartbeat_age_comes_from_newest_record() -> None:
         )
     ]
     assert heartbeat_age_seconds(future, now=now) == 0.0
+
+
+@pytest.mark.unit
+def test_newest_record_picks_the_latest_of_one_metric() -> None:
+    """The read-back that lets one process report what another one is doing."""
+    base = datetime(2026, 10, 6, 12, 0, 0, tzinfo=UTC)
+    records = [
+        _record("monitor_tick_seconds", 1.0, timestamp=base.isoformat()),
+        _record("other", 9.0, timestamp=(base + timedelta(hours=1)).isoformat()),
+        _record("monitor_tick_seconds", 3.0, timestamp=(base + timedelta(seconds=30)).isoformat()),
+        _record("monitor_tick_seconds", 2.0, timestamp=(base + timedelta(minutes=1)).isoformat()),
+    ]
+    newest = newest_record(records, name="monitor_tick_seconds")
+    assert newest is not None
+    assert newest["value"] == 2.0
+    assert newest_metric_at(records, name="monitor_tick_seconds") == base + timedelta(minutes=1)
+    assert newest_record(records, name="absent") is None
+    assert newest_metric_at(records, name="absent") is None
+    # A record with no readable timestamp cannot be reported as a time.
+    assert newest_metric_at([_record("m", 1.0, timestamp="not a time")], name="m") is None
 
 
 @pytest.mark.unit

@@ -101,3 +101,30 @@ Constraints that shaped the choice:
 - [deployment](../architecture/deployment.md) (what schedules the monitor)
 - [HANDOFF](../HANDOFF.md), [implementation status](../implementation/status.md)
 - `docs/runbooks/worker-operations.md` (monitoring is a worker responsibility)
+
+## Amendment (2026-10-06): health answers for the process that ticked
+
+The Consequences section above notes that the API and the worker hold **separate**
+`MonitorService` instances. Running the real deployment (`just run`) showed why that is
+not merely an implementation detail: `/api/v1/monitoring/health` returned
+`last_tick_at: null` while the worker was visibly ticking (`monitor_tick_seconds` written
+twice in the shared sink), and `/ui/incidents` rendered `blind: no` because `health()`
+never carried a `blind` key at all. An operator checking the one endpoint whose stated
+purpose is to catch a stopped monitor would have concluded the monitor was stopped, and
+the page would have claimed the monitor could see when it could not.
+
+Both facts are now read back from the metric sink — the one record every process shares
+(ADR 0017) — when the serving process has not ticked itself:
+
+- `last_tick_at` is the newest `monitor_tick_seconds` record, or `null` when no tick has
+  run anywhere.
+- `blind` is the newest `monitor_blind` value: `true`, `false`, or `null` when no tick
+  has run. `null` is deliberately distinct from `false`; the incidents page renders it
+  `unknown` rather than as a healthy "no".
+
+The read is a bounded tail (`HEALTH_TAIL_RECORDS = 20_000`), because health is served on a
+page load and a full-history scan would make the health check the slowest thing on the
+page. In-process values still win when this process has ticked. Tests:
+`tests/unit/test_monitoring_health.py` (cross-process read-back, most-recent-wins, the
+never-ticked case, and the tail bound); the monitoring contract test now points the app
+at an isolated sink so it cannot assert against a developer's own telemetry file.

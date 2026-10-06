@@ -623,6 +623,9 @@ class MonitoringHealthResponse(BaseModel):
 
     feature_schema_version: int
     last_tick_at: str | None = None
+    blind: bool | None = None
+    """Whether the newest tick reported itself blind; `null` when no tick has run
+    anywhere yet, which is different from a tick that found nothing wrong."""
     tick_seconds: float
     baseline_scopes: int
     warm_scopes: int

@@ -104,12 +104,32 @@ The acceptance is also enforced permanently, without a script:
 | Tick cost, n = 20 | **p50 249.5 ms, p95 435.1 ms, mean 283.4 ms** |
 | Lease, two catalogs nested | `True`, `False` — the second worker yields |
 | Lease released after the block | yes (asserted by `TestMonitorLease`) |
+| `just run` for ~90 s | `monitor_tick_seconds` ×2 in the sink — the worker ticks in a real deployment |
+| Health in that deployment, after the fix | `last_tick_at` non-null, `blind` a real boolean |
 
 Compared to the EXP-0016 baseline (349–407 ms p50, measured under contention with the HTTP route),
 the scheduled tick is in the same band and slightly cheaper on an idle machine with a cold sink. The
 60 s cadence therefore spends roughly **0.4 % of one core** on detection, which is the price of the
 rule engine plus one sink read, not of the tick's own evaluation (EXP-0003 measured evaluation at
 0.2 ms).
+
+## Finding from the live run: health reported a stopped monitor that was running
+
+Running the documented deployment (`just run`) rather than the probe surfaced a defect the
+probe could not: `/api/v1/monitoring/health` read `last_tick_at: null` and the incidents
+page read `blind: no` **while the worker was ticking** (`monitor_tick_seconds` was written
+twice into the shared sink). The tick runs in the worker; the endpoint is served by the
+API; `health()` answered from its own process's memory, and `blind` was not a key it ever
+returned. The one endpoint whose purpose is to catch a silently stopped monitor therefore
+reported the opposite.
+
+Fixed: both facts are read back from the metric sink when the serving process has not
+ticked, `blind: null` is distinct from `blind: false` and the page renders `unknown`, and
+the read is a bounded tail. See the
+[ADR 0031 amendment](../decisions/0031-monitor-scheduling.md#amendment-2026-10-06-health-answers-for-the-process-that-ticked)
+and `tests/unit/test_monitoring_health.py`. The probe would never have found it: it calls `_monitor_tick` and reads the
+catalog directly, so it never asks the API what it thinks the monitor is doing. The
+deployment path is the only path that asks that question.
 
 ## Trade-offs
 

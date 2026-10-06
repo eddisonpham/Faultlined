@@ -8,7 +8,9 @@ covered by ``tests/integration/test_monitoring.py`` against a real database.
 
 from __future__ import annotations
 
+import tempfile
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -127,7 +129,11 @@ class MonitorCatalogStub:
 
 
 def _client(stub: MonitorCatalogStub | None = None) -> TestClient:
-    app = create_app(Settings(_env_file=None), initialize_database=False)
+    # An empty metrics sink on purpose: health reads the newest tick back from the
+    # sink (ADR 0031), so a test using the developer's real `var/metrics` would
+    # assert against whatever they last ran.
+    sink = Path(tempfile.mkdtemp()) / "runtime.jsonl"
+    app = create_app(Settings(_env_file=None, metrics_path=sink), initialize_database=False)
     app.state.catalog = stub or MonitorCatalogStub()
     return TestClient(app)
 
@@ -211,7 +217,10 @@ def test_monitor_health_reports_its_own_state() -> None:
     assert body["tick_seconds"] == 60.0
     assert "CONTRACT_BREACH" in body["notify_labels"]
     assert "worker_lost" in body["detectors"]
+    # Nothing has ticked in this process, and the isolated sink is empty: the
+    # endpoint reports "never" rather than inventing a healthy state.
     assert body["last_tick_at"] is None
+    assert body["blind"] is None
 
 
 @pytest.mark.contract

@@ -66,7 +66,14 @@ from data_engine.monitoring.queue import (
 )
 from data_engine.monitoring.signals import NOTIFY_LABELS, Label, Signal
 from data_engine.monitoring.summary import render_notify, render_summary
-from data_engine.observability.aggregate import read_metric_records, window_records
+from data_engine.observability.aggregate import (
+    MONITOR_BLIND_METRIC,
+    MONITOR_TICK_METRIC,
+    newest_metric_at,
+    newest_record,
+    read_metric_records,
+    window_records,
+)
 from data_engine.observability.metrics import RuntimeMetrics
 from data_engine.observability.telemetry import sample_resources
 
@@ -75,6 +82,11 @@ logger = logging.getLogger(__name__)
 #: A monitor with no telemetry at all is blind; below this the window is treated
 #: as blind rather than as "nothing happened".
 SINK_LAG_BLIND_SECONDS = 600.0
+
+#: How far back the health read-back looks for the newest tick record. A tick every
+#: 60 s with many job metrics between them means the newest tick can sit a few
+#: thousand records down the sink; this is a bounded tail read, not a history scan.
+HEALTH_TAIL_RECORDS = 20_000
 
 
 @dataclass(frozen=True, slots=True)
@@ -147,6 +159,7 @@ class MonitorService:
         self._now = now
         self._book: BaselineBook | None = None
         self._last_tick: datetime | None = None
+        self._last_blind: bool | None = None
 
     def now(self) -> datetime:
         return self._now or datetime.now(UTC)
@@ -221,6 +234,7 @@ class MonitorService:
         )
         self._emit(report)
         self._last_tick = reference
+        self._last_blind = report.blind
         return report
 
     def notify_preview(self, catalog: Any | None = None) -> str:
@@ -234,12 +248,22 @@ class MonitorService:
         return render_notify([row for row in rows if row["notify_class"] == "notify"])
 
     def health(self) -> dict[str, Any]:
-        """The monitor's own state; a monitor that silently stops is the worst outcome."""
+        """The monitor's own state; a monitor that silently stops is the worst outcome.
+
+        The tick usually runs in a **different process** from the one serving this
+        endpoint - the worker loop ticks, the API answers (ADR 0031) - so an
+        in-memory answer would read `last_tick_at: null` and `blind: no` about a
+        monitor that is running perfectly. Both facts are therefore read back from
+        the metric sink, which is the one record every process shares (ADR 0017),
+        and the in-process values are used only when this process has ticked itself.
+        """
         book = self._book
-        last = self._last_tick
+        last = self._last_tick or self._sink_tick_at()
+        blind = self._last_blind if self._last_blind is not None else self._sink_blind()
         return {
             "feature_schema_version": FEATURE_SCHEMA_VERSION,
             "last_tick_at": last.isoformat() if last else None,
+            "blind": blind,
             "tick_seconds": self._config.tick_seconds,
             "baseline_scopes": len(book) if book else 0,
             "warm_scopes": len(book.warm_scopes()) if book else 0,
@@ -249,6 +273,33 @@ class MonitorService:
             "notify_labels": sorted(NOTIFY_LABELS),
             "detectors": [name for name, _ in DETECTORS],
         }
+
+    def _sink_tick_at(self) -> datetime | None:
+        """When the newest tick anywhere was recorded, from the shared sink.
+
+        Bounded by `health_records` (a tail read), because this is served on a page
+        load and a search that walked a whole history would make the health check
+        the slowest thing on the page.
+        """
+        records = self._health_records()
+        return newest_metric_at(records, name=MONITOR_TICK_METRIC) if records else None
+
+    def _sink_blind(self) -> bool | None:
+        """Whether the newest tick anywhere reported itself blind, or None if it
+        has never run."""
+        records = self._health_records()
+        if not records:
+            return None
+        record = newest_record(records, name=MONITOR_BLIND_METRIC)
+        return bool(record.get("value")) if record else None
+
+    def _health_records(self) -> list[dict[str, Any]]:
+        if self._metrics_path is None:
+            return []
+        try:
+            return read_metric_records(self._metrics_path, max_records=HEALTH_TAIL_RECORDS)
+        except OSError:
+            return []
 
     # ---- steps --------------------------------------------------------------
 

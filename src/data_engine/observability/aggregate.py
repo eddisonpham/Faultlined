@@ -17,6 +17,11 @@ from pathlib import Path
 from typing import Any
 
 WORKER_HEARTBEAT_METRIC = "workers_heartbeat_age_seconds"
+#: Emitted once per monitor tick (ADR 0020). A tick runs in whichever process
+#: schedules it, so these two records are how a *different* process learns when the
+#: monitor last ran and whether it was blind (ADR 0031).
+MONITOR_TICK_METRIC = "monitor_tick_seconds"
+MONITOR_BLIND_METRIC = "monitor_blind"
 
 #: Backward chunk size for a newest-N read. One MiB keeps a tick's read a few
 #: pages regardless of how long the sink has grown; 64 MiB is the ceiling past
@@ -204,6 +209,32 @@ def series(
     return result
 
 
+def newest_record(records: Iterable[dict[str, Any]], *, name: str) -> dict[str, Any] | None:
+    """The newest record for one metric name, or None if it was never emitted.
+
+    The sink is the shared record between processes (ADR 0017), which is what makes
+    this the honest way for one process to ask what another one is doing. A monitor
+    tick runs in the worker loop (ADR 0031) while the health endpoint is served by
+    the API, so reading its own memory would report `never` about a monitor that is
+    running - the exact false negative the endpoint exists to prevent.
+    """
+    newest: dict[str, Any] | None = None
+    newest_at: datetime | None = None
+    for record in records:
+        if record.get("name") != name:
+            continue
+        timestamp = _parse_timestamp(record.get("timestamp"))
+        if timestamp is not None and (newest_at is None or timestamp > newest_at):
+            newest, newest_at = record, timestamp
+    return newest
+
+
+def newest_metric_at(records: Iterable[dict[str, Any]], *, name: str) -> datetime | None:
+    """Timestamp of the newest record for one metric name, or None."""
+    record = newest_record(records, name=name)
+    return _parse_timestamp(record.get("timestamp")) if record else None
+
+
 def heartbeat_age_seconds(
     records: Iterable[dict[str, Any]], *, now: datetime | None = None
 ) -> float | None:
@@ -213,13 +244,7 @@ def heartbeat_age_seconds(
     heartbeat. Age is therefore derived at read time instead of being emitted as a
     stale gauge.
     """
-    newest: datetime | None = None
-    for record in records:
-        if record.get("name") != WORKER_HEARTBEAT_METRIC:
-            continue
-        timestamp = _parse_timestamp(record.get("timestamp"))
-        if timestamp is not None and (newest is None or timestamp > newest):
-            newest = timestamp
+    newest = newest_metric_at(records, name=WORKER_HEARTBEAT_METRIC)
     if newest is None:
         return None
     reference = now or datetime.now(UTC)

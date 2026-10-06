@@ -1509,14 +1509,21 @@ def _health_strip(health: dict[str, Any]) -> str:
     if not health:
         return ""
     last = str(health.get("last_tick_at") or "never")
-    blind = "no" if not health.get("blind") else "YES"
+    # `None` is not "not blind": it means no tick has run anywhere yet, and
+    # rendering that as "no" would be the same false negative (as "never" above).
+    blind_flag = health.get("blind")
+    blind = "unknown" if blind_flag is None else ("YES" if blind_flag else "no")
     readouts = _readouts(
         [
             ("last tick", escape(last), "info"),
             ("baseline scopes", str(int(health.get("baseline_scopes", 0))), "comment"),
             ("held", str(int(health.get("held_scopes", 0))), "warning"),
             ("budget/window", str(int(health.get("alert_budget_per_window", 0))), "comment"),
-            ("blind", blind, "error" if health.get("blind") else "success"),
+            (
+                "blind",
+                blind,
+                "error" if blind_flag else ("warning" if blind_flag is None else "success"),
+            ),
         ]
     )
     return _section("Monitor health", readouts, "is the notifier itself alive")
