@@ -12,6 +12,7 @@ and it is why a completed run is not re-runnable in place.
 """
 
 import json
+import re
 import sys
 import time
 import urllib.error
@@ -524,15 +525,24 @@ check(
 )
 
 schema = call("GET", "/ui/schema", raw=True)[1].decode()
+# The graph states its own numbers in its accessible name, and those come from
+# the database. Comparing the drawing against them is the same claim the two
+# constants below used to make - "the graph is the catalog" - except the
+# constants rotted: they read `14` nodes and `9` edges, while the catalog had
+# grown to 23 tables and 11 foreign keys across ADR 0029, and the `"<path"`
+# count was including the brand mark's two paths. A gate that fails because it
+# remembers an old schema teaches people to ignore it.
+stated = re.search(r"catalog entity graph: (\d+) tables, (\d+) foreign keys", schema)
+nodes, edges = schema.count('class="de-node-link"'), schema.count('class="de-edge"')
 check(
     "the entity graph is drawn from the live catalog",
-    schema.count("de-node-link") == 14,
-    f"{schema.count('de-node-link')} nodes",
+    stated is not None and nodes == int(stated.group(1)),
+    f"{nodes} nodes, the graph says {stated.group(1) if stated else '?'} tables",
 )
 check(
     "the graph is built from real foreign keys",
-    schema.count("<path") == 9,
-    f"{schema.count('<path')} edges",
+    stated is not None and edges == int(stated.group(2)),
+    f"{edges} edges, the graph says {stated.group(2) if stated else '?'} foreign keys",
 )
 check("row counts are live", ">5 rows<" in schema)
 check("the data flow is described", "How data moves" in schema)
