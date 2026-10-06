@@ -105,6 +105,7 @@ class _Topic:
         "lowest",
         "messages",
         "names",
+        "nonfinite",
         "numbers",
         "plan",
         "ref",
@@ -126,6 +127,8 @@ class _Topic:
         self.schema_id = schema_id
         self.messages = 0
         self.numbers = 0
+        self.nonfinite = 0
+        """Samples that were NaN or infinite: counted, never accumulated."""
         self.total = 0.0
         self.squares = 0.0
         self.lowest = math.inf
@@ -198,6 +201,13 @@ class _Topic:
             if value is None:
                 continue
             seen = True
+            if not math.isfinite(value):
+                # Counted, not accumulated: an infinite sample would make every
+                # statistic of the channel infinite and the `jsonb` write reject
+                # the whole episode (EXP-0014 D2). The quality window still sees
+                # it via `_sample_slots`, so `analyze` can report it honestly.
+                self.nonfinite += 1
+                continue
             self.numbers += 1
             self.total += value
             self.squares += value * value
@@ -266,6 +276,9 @@ class _Topic:
         if not dims:
             return
         for value in dims.values():
+            if not math.isfinite(value):
+                self.nonfinite += 1
+                continue
             self.numbers += 1
             self.total += value
             self.squares += value * value
@@ -315,6 +328,7 @@ class _Topic:
             max=None if count == 0 else self.highest,
             mean=mean,
             std=spread,
+            nonfinite=self.nonfinite,
         )
 
     def quality_series(self) -> dict[str, list[float]]:

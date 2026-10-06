@@ -19,6 +19,9 @@ class ReasonCode(StrEnum):
     IO_WRITE_FAILED = "IO_WRITE_FAILED"
     IO_ARTIFACT_MISSING = "IO_ARTIFACT_MISSING"
     RETRYABLE_IO = "RETRYABLE_IO"
+    #: The catalog refused the record (bad text for `jsonb`, value out of range,
+    #: string too long). Deterministic on the input, so terminal rather than retried.
+    CATALOG_WRITE_REJECTED = "CATALOG_WRITE_REJECTED"
     # Jobs (F4-F8, F11)
     IDEMPOTENCY_KEY_CONFLICT = "IDEMPOTENCY_KEY_CONFLICT"
     JOB_NOT_CANCELABLE = "JOB_NOT_CANCELABLE"

@@ -968,7 +968,9 @@ def job_detail_page(
         ("deadline", _deadline(job)),
     ]
     if job.get("error"):
-        facts.append(("error", escape(str((job["error"] or {}).get("code", "see below")))))
+        error = job["error"] or {}
+        label = error.get("reason_code") or error.get("type") or "see below"
+        facts.append(("error", escape(str(label))))
     blocks = [
         _section("State", _strip(state) + _cancel_action(job, theme), state),
         _section(

@@ -13,11 +13,37 @@ either into the catalog would make ingest O(dataset) and defeat content addressi
 
 from __future__ import annotations
 
+import math
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
 
 from data_engine.analysis.quality import EpisodeQuality
+
+
+def finite_or_none(value: Any) -> Any:
+    """A real number passes through when it is finite; anything else is left alone.
+
+    Postgres `jsonb` cannot store `NaN` or `Infinity` - Python's `json` module
+    has always written them and the database rejects them - so one infinite
+    sample made `register_episode`'s metadata insert raise
+    `InvalidTextRepresentation`, which the worker classified retryable and retried
+    three times over the same bytes (EXP-0014 D2). A statistic that is not a
+    number is not a measurement, so it is written as `None` (absent) rather than
+    taking the rest of the episode's record down with it.
+
+    A vector is sanitized element by element: the LeRobot reader carries a
+    multi-dimensional feature's published `min`/`max` as a vector, and an infinite
+    element inside one is exactly the defect this guards, so leaving the vector
+    untouched would only move the problem. A value of any other shape is returned
+    unchanged - it is not a statistic this function has an opinion about.
+    """
+    if isinstance(value, list | tuple):
+        return [finite_or_none(item) for item in value]
+    if value is None or isinstance(value, bool) or not isinstance(value, int | float):
+        return value
+    return value if math.isfinite(value) else None
 
 
 class ReaderError(ValueError):
@@ -37,22 +63,30 @@ class ChannelStats:
     name: str
     dtype: str
     count: int
-    min: float | None = None
-    max: float | None = None
-    mean: float | None = None
-    std: float | None = None
+    # A published multi-dimensional feature carries its per-dimension statistics as
+    # a vector, so these are a number *or* a number per dimension - not the
+    # `float | None` they were annotated with while the reader already stored lists.
+    min: float | Sequence[float] | None = None
+    max: float | Sequence[float] | None = None
+    mean: float | Sequence[float] | None = None
+    std: float | Sequence[float] | None = None
     shape: tuple[int, ...] | None = None
+    nonfinite: int = 0
+    """Samples the reader refused to turn into a statistic. Non-zero means the
+    camera/encoder/decoder emitted a value that is not a number, and the fields
+    above describe only the finite samples; it is *not* a silent drop."""
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "name": self.name,
             "dtype": self.dtype,
             "count": self.count,
-            "min": self.min,
-            "max": self.max,
-            "mean": self.mean,
-            "std": self.std,
+            "min": finite_or_none(self.min),
+            "max": finite_or_none(self.max),
+            "mean": finite_or_none(self.mean),
+            "std": finite_or_none(self.std),
             "shape": list(self.shape) if self.shape is not None else None,
+            "nonfinite": self.nonfinite,
         }
 
 
@@ -95,8 +129,8 @@ class EpisodeExtraction:
             "task": self.task,
             "tasks": list(self.tasks),
             "frame_count": self.frame_count,
-            "duration_seconds": self.duration_seconds,
-            "fps": self.fps,
+            "duration_seconds": finite_or_none(self.duration_seconds),
+            "fps": finite_or_none(self.fps),
             "channel_stats": {channel.name: channel.to_dict() for channel in self.channels},
         }
 

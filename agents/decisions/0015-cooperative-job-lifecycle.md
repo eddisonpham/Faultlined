@@ -123,3 +123,16 @@ remain unused, and the presumed-death timeout is the implemented mechanism.
 - [../observability/conventions.md](../observability/conventions.md) (three new metrics)
 - [../implementation/status.md](../implementation/status.md)
 - [../spec/definition-of-done.md](../spec/definition-of-done.md)
+
+## Amendment (2026-10-06): the job row carries the handler's own reason
+
+`_settle_failure` persisted the constant `{"type": ..., "message": "job handler failed"}` on every
+handler failure, so the Jobs page, `GET /api/v1/jobs/{id}` and the Failures page all showed the same
+string while the reader's real exception existed only in the JSON logs. Diagnosing EXP-0014's D1/D2
+required traceback spelunking instead of reading a job report (EXP-0014 D3).
+
+`jobs/worker.py::_error_message` now persists the exception's own type and a one-line, length-capped,
+credential-scrubbed message, plus the `reason_code` the API contract already promised. The literal
+`"job handler failed"` survives only as the last-resort fallback for an exception with no text.
+Tests: `tests/unit/test_worker.py::test_a_failed_job_persists_the_handlers_own_reason`,
+`::test_error_message_scrubs_credentials_and_is_capped`.

@@ -3,12 +3,19 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+import psycopg
 import pytest
 
 from data_engine.config import Settings
+from data_engine.ingest.readers.base import ReaderError
 from data_engine.jobs.state import JobState
-from data_engine.jobs.worker import IngestWorker
+from data_engine.jobs.worker import (
+    _MAX_ERROR_MESSAGE,
+    IngestWorker,
+    _error_message,
+)
 from data_engine.observability.metrics import JsonlMetricSink, RuntimeMetrics
+from data_engine.observability.reason_codes import ReasonCode
 
 
 class FakeCatalog:
@@ -254,3 +261,56 @@ def test_worker_cancel_beats_a_retry_on_transient_failure(
     assert "jobs_cancellations_total" in {point["name"] for point in points}
     # No retry fires: cancel was set on the catalog, so _settle_failure
     # settles as canceled before the retry branch is reached.
+
+
+@pytest.mark.unit
+def test_a_failed_job_persists_the_handlers_own_reason(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """EXP-0014 D3: the row must carry why a job failed, not a constant string."""
+    catalog = FakeCatalog(_job(attempts=1, max_attempts=1))
+    worker = _worker(catalog, tmp_path)
+
+    def _explode(self: Any, job: dict[str, Any], job_type: str) -> dict[str, Any]:
+        raise ReaderError("cannot read MCAP /data/bag.mcap: unexpected end of file")
+
+    monkeypatch.setattr("data_engine.jobs.worker.IngestWorker._run_handler", _explode)
+
+    result = worker.process_one()
+
+    assert result is not None
+    assert result["state"] == JobState.FAILED.value
+    assert result["error"]["type"] == "ReaderError"
+    assert "unexpected end of file" in result["error"]["message"]
+    assert result["error"]["reason_code"] == ReasonCode.INGEST_PARSE_FAILED.value
+    assert result["error"]["message"] != "job handler failed"
+
+
+@pytest.mark.unit
+def test_a_catalog_data_error_is_terminal_and_not_retried(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A deterministic write rejection must not burn the retry budget (EXP-0014 D2)."""
+    catalog = FakeCatalog(_job(attempts=1, max_attempts=3))
+    worker = _worker(catalog, tmp_path)
+
+    def _explode(self: Any, job: dict[str, Any], job_type: str) -> dict[str, Any]:
+        raise psycopg.errors.InvalidTextRepresentation("invalid input syntax for type json")
+
+    monkeypatch.setattr("data_engine.jobs.worker.IngestWorker._run_handler", _explode)
+
+    result = worker.process_one()
+
+    assert result is not None
+    assert result["state"] == JobState.FAILED.value
+    assert catalog.requeues == 0
+    assert result["error"]["reason_code"] == ReasonCode.CATALOG_WRITE_REJECTED.value
+
+
+@pytest.mark.unit
+def test_error_message_scrubs_credentials_and_is_capped() -> None:
+    assert "hunter2" not in _error_message(RuntimeError("postgresql://user:hunter2@db/x"))
+    assert "hunter2" not in _error_message(RuntimeError("password=hunter2"))
+    assert "://***:***@" in _error_message(RuntimeError("connect postgresql://u:p@host/db"))
+    assert len(_error_message(RuntimeError("x" * 5000))) <= _MAX_ERROR_MESSAGE
+    assert _error_message(RuntimeError("   ")) == "job handler failed"

@@ -117,3 +117,30 @@ succeed.
 - `integrity` is the only signal in the product that distinguishes "the robot was still" from "the
   recorder stopped". No per-frame statistic ever could, and this is what makes the temporal half worth
   its seven columns.
+
+## Amendment (2026-10-06): the non-finite guarantee now holds at the reader boundary too
+
+This ADR's guarantee was implemented inside `analysis/quality.py::analyze`, one layer *below* where
+non-finite values enter the engine. A single `Infinity` in a frame made the MCAP reader's channel
+statistics infinite, so `episode_metadata` carried `Infinity` in its `jsonb`, Postgres rejected the
+insert with `InvalidTextRepresentation`, and the worker classified that as **retryable**: the file
+was re-read three times before the job parked, for an error that is identical on every attempt
+(EXP-0014 D2). ADR 0023's promise — "a non-finite value is an absence of a measurement" — was true
+of the quality row and false of the episode's own metadata.
+
+Three changes enforce it at the boundary:
+
+1. **Readers count non-finite samples instead of accumulating them** (`mcap_reader._Topic`), and
+   `ChannelStats` carries the count. The quality window still sees the values, so
+   `analyze` still reports `nonfinite` and returns the honouring `unknown` verdict — the event is
+   recorded, not dropped.
+2. **Statistics are written as `None`, never as a non-number.** `finite_or_none` guards every
+   float that reaches `jsonb`, including `duration_seconds` and `fps`.
+3. **A deterministic catalog rejection is terminal.** `psycopg.errors.DataError` joins the terminal
+   failure set with the new reason code `CATALOG_WRITE_REJECTED`, because retrying bytes the
+   database will reject identically only delays the operator's signal and inflates
+   `jobs_failures_total` three-fold.
+
+Tests: `tests/unit/readers/test_mcap.py::test_a_non_finite_sample_is_counted_not_accumulated`,
+`::test_finite_or_none_replaces_unrepresentable_statistics`,
+`tests/unit/test_worker.py::test_a_catalog_data_error_is_terminal_and_not_retried`.

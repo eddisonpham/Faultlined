@@ -9,7 +9,7 @@ from typing import Any
 from data_engine.analysis.quality import analyze
 from data_engine.catalog import vocabulary
 from data_engine.catalog.repository import PostgresCatalog, canonical_json
-from data_engine.ingest.readers.base import EpisodeExtraction, ReaderError
+from data_engine.ingest.readers.base import EpisodeExtraction, ReaderError, finite_or_none
 from data_engine.ingest.readers.registry import read_episode
 from data_engine.observability.metrics import RuntimeMetrics
 from data_engine.storage.artifacts import FileArtifactStore
@@ -90,7 +90,9 @@ class EpisodeIngestService:
             "task": episode["task"],
             "robot": episode["robot"],
             "frame_count": len(timestamps),
-            "duration_seconds": timestamps[-1] - timestamps[0],
+            # A non-finite timestamp is not a duration, and `jsonb` refuses to
+            # store `Infinity` at all (EXP-0014 D2).
+            "duration_seconds": finite_or_none(timestamps[-1] - timestamps[0]),
         }
         return self._register(
             source_hash=artifact_hash,

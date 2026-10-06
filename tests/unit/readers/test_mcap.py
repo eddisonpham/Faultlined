@@ -13,6 +13,7 @@ differently from the benchmark would be testing a different format than it claim
 from __future__ import annotations
 
 import json
+import math
 import struct
 from pathlib import Path
 from typing import Any
@@ -20,7 +21,7 @@ from typing import Any
 import pytest
 from mcap.writer import CompressionType, Writer
 
-from data_engine.ingest.readers.base import ReaderError
+from data_engine.ingest.readers.base import ChannelStats, ReaderError, finite_or_none
 from data_engine.ingest.readers.mcap_reader import (
     MAGIC,
     QUALITY_WINDOW,
@@ -457,3 +458,50 @@ def test_an_unrepresentable_number_survives_the_whole_read(tmp_path: Path) -> No
     joints = next(channel for channel in episode.channels if channel.name == "/j")
     assert joints.count == 2
     assert joints.max == 3.0
+
+
+@pytest.mark.unit
+def test_a_non_finite_sample_is_counted_not_accumulated(tmp_path: Path) -> None:
+    """One `Infinity` must not fail the read, and must not vanish (EXP-0014 D2).
+
+    Before this, the infinite sample made every channel statistic infinite and
+    `register_episode`'s `jsonb` write rejected the whole episode, which the
+    worker classified retryable and retried three times over the same bytes.
+    """
+    bag = _bag(
+        tmp_path / "inf.mcap",
+        {"/j": (10.0, [{"a": float("inf"), "b": 2.0}, {"a": 4.0, "b": 3.0}])},
+    )
+    episode = read_episode(bag)
+    joints = next(channel for channel in episode.channels if channel.name == "/j")
+    assert joints.count == 2
+    assert joints.nonfinite == 1
+    assert joints.max == 4.0
+    # The event reaches the quality signal rather than being silently dropped:
+    # a non-finite value is an absence of a measurement (ADR 0023).
+    assert episode.quality is not None
+    assert episode.quality.nonfinite == 1
+    assert episode.quality.verdict == "unknown"
+    # And nothing about to be written to `jsonb` is non-finite.
+    payload = joints.to_dict()
+    assert all(
+        payload[field] is None or math.isfinite(payload[field])
+        for field in ("min", "max", "mean", "std")
+    )
+
+
+@pytest.mark.unit
+def test_finite_or_none_replaces_unrepresentable_statistics() -> None:
+    stats = ChannelStats(
+        name="/j", dtype="json", count=2, min=0.0, max=float("inf"), mean=float("nan"), std=1.0
+    )
+    payload = stats.to_dict()
+    assert payload["max"] is None
+    assert payload["mean"] is None
+    assert payload["min"] == 0.0
+    assert payload["std"] == 1.0
+    assert finite_or_none(None) is None
+    assert finite_or_none(float("inf")) is None
+    assert finite_or_none(2.5) == 2.5
+    # A LeRobot published vector is sanitized element-wise, not passed whole.
+    assert finite_or_none([0.5, float("inf"), 2.0]) == [0.5, None, 2.0]

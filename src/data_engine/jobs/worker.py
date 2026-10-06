@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import errno
 import logging
+import re
 import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+
+import psycopg
 
 from data_engine.builds import BuildError, DatasetBuilder
 from data_engine.builds.export import BuildExporter, ExportBuildUnknown, ExportError
@@ -68,6 +71,12 @@ _TERMINAL_FAILURES: tuple[type[Exception], ...] = (
     InvalidProfile,
     ExportBuildUnknown,
     ExportError,
+    # A database `DataError` (bad text for `jsonb`, a value out of range, a string
+    # too long for a column) is a property of the bytes the job carries, not of
+    # the moment it ran: every attempt produces the identical error. Retrying it
+    # burns the budget crash recovery needs and inflates `jobs_failures_total`
+    # three-fold for one deterministic defect - what EXP-0014 D2 measured.
+    psycopg.errors.DataError,
 )
 
 
@@ -88,6 +97,8 @@ def _failure_reason_code(exc: Exception) -> ReasonCode:
         return ReasonCode.INGEST_FORMAT_UNKNOWN
     if isinstance(exc, InvalidProfile):
         return ReasonCode.VALIDATION_PROFILE_INVALID
+    if isinstance(exc, psycopg.errors.DataError):
+        return ReasonCode.CATALOG_WRITE_REJECTED
     if isinstance(exc, FileNotFoundError):
         return ReasonCode.IO_ARTIFACT_MISSING
     if isinstance(exc, OSError):
@@ -99,6 +110,45 @@ def _failure_reason_code(exc: Exception) -> ReasonCode:
     if isinstance(exc, KeyError):
         return ReasonCode.INGEST_PARSE_FAILED
     return ReasonCode.INTERNAL_ERROR
+
+
+#: How much of an exception's own text a job row carries. Long enough to name a
+#: field and its value, short enough that a pathological message cannot bloat the
+#: row or the page that renders it.
+_MAX_ERROR_MESSAGE = 400
+#: `scheme://user:password@host` and `password=...` are the two shapes a credential
+#: takes in an exception string. Neither may reach the job row (CLAUDE.md: secrets).
+_URL_CREDENTIALS = re.compile(r"://[^/\s:@]+:[^/\s@]+@")
+_SECRET_ASSIGNMENT = re.compile(r"(?i)\b(password|passwd|secret|token|api[_-]?key)\s*=\s*\S+")
+
+
+def _error_message(exc: Exception) -> str:
+    """One line of the exception's own text, capped and scrubbed of credentials.
+
+    The job row used to carry the constant string `"job handler failed"` while the
+    reader's real message existed only in logs, so diagnosing a failed ingest meant
+    traceback spelunking instead of reading a job report (EXP-0014 D3). The message
+    is the operator-facing half of the reason code; collapsing whitespace keeps it
+    one line, and truncation stops an exception that embeds a whole document from
+    becoming the row.
+    """
+    text = " ".join(str(exc).split())
+    text = _URL_CREDENTIALS.sub("://***:***@", text)
+    text = _SECRET_ASSIGNMENT.sub(lambda match: f"{match.group(1)}=***", text)
+    if len(text) > _MAX_ERROR_MESSAGE:
+        text = text[: _MAX_ERROR_MESSAGE - 1].rstrip() + "\u2026"
+    return text or "job handler failed"
+
+
+def _failure_payload(exc: Exception, reason_code: ReasonCode) -> dict[str, Any]:
+    """What is persisted on the job row when a handler fails, and rendered by the
+    job report and `/ui/jobs/{id}`: the exception type, its own sanitized message,
+    and the stable reason code the API contract already promises."""
+    return {
+        "type": type(exc).__name__,
+        "message": _error_message(exc),
+        "reason_code": reason_code.value,
+    }
 
 
 def _elapsed_seconds(earlier: object, later: object) -> float | None:
@@ -455,7 +505,11 @@ class IngestWorker:
             # canceled so the row reflects the interrupt, not the claim state.
             self._settle_failure(
                 job,
-                {"type": "CancelRequested", "message": "cancel requested while job was running"},
+                {
+                    "type": "CancelRequested",
+                    "message": "cancel requested while job was running",
+                    "reason_code": ReasonCode.JOB_CANCELED.value,
+                },
                 terminal=False,
             )
             return self.catalog.get_job(str(job["id"]))
@@ -479,7 +533,7 @@ class IngestWorker:
             )
             self._settle_failure(
                 job,
-                {"type": type(exc).__name__, "message": "job handler failed"},
+                _failure_payload(exc, reason_code),
                 terminal=_is_terminal(exc),
             )
             return self.catalog.get_job(str(job["id"]))
