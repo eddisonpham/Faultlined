@@ -323,24 +323,36 @@ def test_cancel_endpoint_reports_missing_and_conflicting_jobs() -> None:
     assert "running -> canceled" in body["detail"]
 
 
-def test_export_job_submits_with_its_own_contract() -> None:
-    """`export` names a build; the payload is flat, like validate/build."""
+#: A shape-valid build hash, built the way the API builds one, so the test cannot
+#: drift from the identity it is asserting. The fixtures here used to be the 10-character
+#: `bld_abc123`, which passed the old 64-character cap and hid the fact that no real
+#: hash could (EXP-0014 follow-up: the export job was unreachable from the API).
+_REAL_BUILD_HASH = "bld_" + "ab" * 32
+
+
+def test_export_job_submits_the_hash_the_api_publishes() -> None:
+    """`export` names a build; the payload is flat, like validate/build.
+
+    The hash is the canonical `bld_<sha256>` (68 characters) that
+    `GET /api/v1/builds` returns, because that is the only value a client can paste.
+    """
     app = create_app(Settings(_env_file=None), initialize_database=False)
     catalog = FakeCatalog()
     app.state.catalog = catalog
     client = TestClient(app)
+    assert len(_REAL_BUILD_HASH) == 68
 
     response = client.post(
         "/api/v1/jobs",
-        json={"type": "export", "payload": {"build_hash": "bld_abc123"}},
+        json={"type": "export", "payload": {"build_hash": _REAL_BUILD_HASH}},
         headers={"Idempotency-Key": "exp-1"},
     )
 
-    assert response.status_code == 202
+    assert response.status_code == 202, response.text
     body = response.json()
     assert body["type"] == "export"
-    assert body["payload"] == {"build_hash": "bld_abc123"}
-    assert catalog.last_payload == {"build_hash": "bld_abc123"}
+    assert body["payload"] == {"build_hash": _REAL_BUILD_HASH}
+    assert catalog.last_payload == {"build_hash": _REAL_BUILD_HASH}
 
 
 def test_export_job_rejects_an_empty_build_hash() -> None:
@@ -350,9 +362,25 @@ def test_export_job_rejects_an_empty_build_hash() -> None:
     assert response.status_code == 422
 
 
+def test_export_job_rejects_a_hash_that_is_not_a_build_identity() -> None:
+    """A bare digest is refused at the boundary, not queued to fail as a job.
+
+    It used to be the one value the schema admitted: the job was created, claimed and
+    only then answered `ExportBuildUnknown`, spending a retry budget and an operator's
+    attention on a request the API could have rejected in the first place.
+    """
+    response = _client().post(
+        "/api/v1/jobs", json={"type": "export", "payload": {"build_hash": "ab" * 32}}
+    )
+    assert response.status_code == 422, response.text
+
+
 def test_export_job_rejects_unknown_payload_fields() -> None:
     response = _client().post(
         "/api/v1/jobs",
-        json={"type": "export", "payload": {"build_hash": "bld_x", "unexpected": 1}},
+        json={
+            "type": "export",
+            "payload": {"build_hash": _REAL_BUILD_HASH, "unexpected": 1},
+        },
     )
     assert response.status_code == 422

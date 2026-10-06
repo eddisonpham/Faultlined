@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from itertools import pairwise
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from data_engine.jobs.state import DEFAULT_MAX_ATTEMPTS
 
@@ -128,10 +129,38 @@ class SubmitBuildJobRequest(_JobPolicy):
     payload: BuildPayload
 
 
+#: A build's identity is `bld_` + the SHA-256 of its own manifest
+#: (`builds/service.py::build_hash`), so it is 68 characters long. This field used to
+#: cap the string at 64, which rejected every hash the API itself publishes: `POST
+#: /api/v1/jobs` with the `hash` from `GET /api/v1/builds`, from `/ui/builds/{hash}`,
+#: or from a build job's own result answered 422, and the only value the cap admitted
+#: (a bare 64-hex digest) failed as `ExportBuildUnknown`, because the catalog keys
+#: builds by the prefixed form. The pattern states the identity rather than
+#: approximating its length, so a client can paste what the API gave it.
+BUILD_HASH_PATTERN = r"^bld_[0-9a-f]{64}$"
+_BUILD_HASH = re.compile(BUILD_HASH_PATTERN)
+
+
 class ExportPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    build_hash: str = Field(min_length=1, max_length=64)
+    build_hash: str = Field(pattern=BUILD_HASH_PATTERN)
+
+    @field_validator("build_hash", mode="before")
+    @classmethod
+    def _say_what_a_build_hash_is(cls, value: Any) -> Any:
+        """Name the shape before the regex does.
+
+        `mode="before"` on purpose: the pattern constraint runs first otherwise and
+        answers with the pattern itself, which is a fine contract and a poor
+        explanation. The pattern stays for OpenAPI and for non-string inputs.
+        """
+        if isinstance(value, str) and not _BUILD_HASH.fullmatch(value):
+            raise ValueError(
+                "a build hash is `bld_` followed by 64 hex characters, exactly as "
+                "`GET /api/v1/builds` returns it"
+            )
+        return value
 
 
 class SubmitExportJobRequest(_JobPolicy):

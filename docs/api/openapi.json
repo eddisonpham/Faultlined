@@ -1153,8 +1153,7 @@
         "additionalProperties": false,
         "properties": {
           "build_hash": {
-            "maxLength": 64,
-            "minLength": 1,
+            "pattern": "^bld_[0-9a-f]{64}$",
             "title": "Build Hash",
             "type": "string"
           }
@@ -7075,7 +7074,7 @@
         "summary": "Ui Jobs"
       },
       "post": {
-        "description": "Queue an ingest job from the browser form.\n\nThe form is parsed by hand rather than with ``Form(...)`` because that\nwould pull in ``python-multipart`` for a single urlencoded body - a new\ndependency, on the dependency-free path ADR 0014 is built around, to save\nthree lines of ``urllib.parse``.\n\nThe payload is built and then validated through the *same* Pydantic\nmodels the JSON endpoint uses. A form is a second front door to the same\ndoor, and a second front door with its own weaker validation is how a\nUI ends up able to create jobs the API would refuse.\n\nOn a bad submission this re-renders the page with the error inline and\nthe typed values preserved, rather than redirecting: losing what someone\ntyped because of one bad field is the fastest way to make a form feel\nhostile. The redirect on success is 303, so a refresh does not queue the\nsame job twice.",
+        "description": "Queue a job from the browser form.\n\nOne front door, five kinds: `episode` and `path` are ingest, and `validate`,\n`build` and `export` complete the loop those three form pages host (the audit's\nrelease blocker 1 - EXP-0017 measured the last three steps as curl-only).\n\nThe form is parsed by hand rather than with ``Form(...)`` because that\nwould pull in ``python-multipart`` for a single urlencoded body - a new\ndependency, on the dependency-free path ADR 0014 is built around, to save\nthree lines of ``urllib.parse``.\n\nEvery kind is built and then validated through the *same* Pydantic models\nthe JSON endpoint uses. A form is a second front door to the same door, and\na second front door with its own weaker validation is how a UI ends up able\nto create jobs the API would refuse.\n\nOn a bad submission this re-renders the page that owns the form with the\nerror inline and the typed values preserved, rather than redirecting: losing\nwhat someone typed because of one bad field is the fastest way to make a form\nfeel hostile. The redirect on success is 303, so a refresh does not queue the\nsame job twice.",
         "operationId": "ui_submit_job_ui_jobs_post",
         "responses": {
           "200": {
