@@ -5,6 +5,7 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
+from data_engine.analysis.coverage import GAP_LIMIT, VALUE_LIMIT
 from data_engine.api.app import create_app
 from data_engine.catalog.repository import SliceNameConflict
 from data_engine.config import Settings
@@ -327,6 +328,8 @@ class IngestCatalogStub(ListingCatalogStub):
         self.slice_conflict = False
         self.members: list[dict[str, Any]] = []
         self.fingerprint_rows: list[dict[str, Any]] = []
+        self.coverage_inputs = _coverage_inputs()
+        self.coverage_limit = 0
         self.build = {
             "hash": BUILD_HASH,
             "name": "pick-set",
@@ -350,6 +353,12 @@ class IngestCatalogStub(ListingCatalogStub):
     def episode_fingerprint_inputs(self, episode_ids: list[str]) -> list[dict[str, Any]]:
         wanted = set(episode_ids)
         return [row for row in self.fingerprint_rows if str(row["id"]) in wanted]
+
+    def build_coverage_inputs(self, build_hash: str, *, limit: int = 20) -> dict[str, Any]:
+        self.coverage_limit = limit
+        if build_hash != BUILD_HASH:
+            return {"episode_count": 0, "catalog_size": 0, "values": [], "vocabulary": {}}
+        return self.coverage_inputs
 
     def list_slices(self, *, limit: int = 50) -> list[dict[str, Any]]:
         return []
@@ -1080,3 +1089,147 @@ def test_a_build_with_nothing_to_compare_says_so_rather_than_showing_zeros() -> 
     client, _ = _build_with_members("ep-a")
     body = client.get(f"/ui/builds/{BUILD_HASH}").text
     assert "fewer than two scored episodes" in body
+
+
+# ------------------------------------------------- build coverage (ADR 0033)
+
+
+def _coverage_inputs() -> dict[str, Any]:
+    """A `build_coverage_inputs` result: two of five episodes, one robot and two tasks absent."""
+
+    def row(
+        axis: str,
+        value: str,
+        build_count: int,
+        catalog_count: int,
+        *,
+        build_distinct: int = 1,
+        catalog_distinct: int = 1,
+        gap_total: int = 0,
+        rank: int = 1,
+    ) -> dict[str, Any]:
+        return {
+            "axis": axis,
+            "value": value,
+            "build_count": build_count,
+            "catalog_count": catalog_count,
+            "build_distinct": build_distinct,
+            "catalog_distinct": catalog_distinct,
+            "gap_total": gap_total,
+            "build_total": 2,
+            "catalog_total": 5,
+            "build_rank": rank,
+            "value_rank": rank,
+        }
+
+    return {
+        "episode_count": 2,
+        "catalog_size": 5,
+        "values": [
+            row("format", "synthetic-json", 2, 5),
+            row("robot", "so101", 2, 3, catalog_distinct=2, gap_total=1),
+            row("robot", "ur5e", 0, 2, catalog_distinct=2, gap_total=1, rank=2),
+            row("task", "pick", 2, 2, catalog_distinct=3, gap_total=2),
+            row("verdict", "smooth", 1, 4, build_distinct=2, catalog_distinct=2),
+            row(
+                "verdict",
+                "(unscored)",
+                1,
+                1,
+                build_distinct=2,
+                catalog_distinct=2,
+                rank=2,
+            ),
+        ],
+        "vocabulary": {
+            "total": 3,
+            "missing_total": 2,
+            "gaps": [
+                {"id": "voc_1", "label": "fold", "catalog_episodes": 2},
+                {"id": "voc_2", "label": "place the can", "catalog_episodes": 0},
+            ],
+        },
+    }
+
+
+@pytest.mark.contract
+def test_the_coverage_route_reports_what_the_build_holds_and_what_it_lacks() -> None:
+    client, _ = _ingest_client()
+
+    response = client.get(f"/api/v1/builds/{BUILD_HASH}/coverage")
+    body = response.json()
+
+    assert response.status_code == 200
+    assert body["method"] == "build-coverage-v1"
+    assert body["build_hash"] == BUILD_HASH
+    assert body["episode_count"] == 2
+    assert body["catalog_size"] == 5
+    assert body["coverage_ratio"] == pytest.approx(0.4)
+    axes = {axis["axis"]: axis for axis in body["axes"]}
+    assert list(axes) == ["task", "robot", "format", "verdict"]
+    assert axes["robot"]["gaps"] == ["ur5e"]
+    assert axes["task"]["values"][0]["value"] == "pick"
+    assert axes["task"]["gaps"] == ["fold", "place the can"]
+    assert axes["verdict"]["present"] == 2
+    assert body["vocabulary_total"] == 3
+    assert body["vocabulary_missing"] == 2
+
+
+@pytest.mark.contract
+def test_the_coverage_route_asks_the_catalog_for_a_window_wide_enough_for_its_caps() -> None:
+    """A window narrower than `GAP_LIMIT` would cap the gap list below what the report promises."""
+    client, catalog = _ingest_client()
+
+    client.get(f"/api/v1/builds/{BUILD_HASH}/coverage")
+
+    assert catalog.coverage_limit == max(VALUE_LIMIT, GAP_LIMIT)
+
+
+@pytest.mark.contract
+def test_the_coverage_route_is_404_for_an_unknown_build() -> None:
+    client, _ = _ingest_client()
+    assert client.get(f"/api/v1/builds/{'c' * 68}/coverage").status_code == 404
+
+
+@pytest.mark.contract
+def test_the_build_page_shows_the_coverage_gaps_it_serves() -> None:
+    client, _ = _ingest_client()
+
+    body = client.get(f"/ui/builds/{BUILD_HASH}").text
+
+    assert "Coverage" in body
+    assert "place the can" in body
+    assert "ur5e" in body
+    assert "2 of 3 tasks absent" in body
+    assert 'aria-label="40 percent"' in body, "the meter says the ratio in text, not only in bars"
+    assert "[##########" in body
+    assert "at most 20 values" in body
+    assert "read-only" in body
+
+
+@pytest.mark.contract
+def test_a_build_that_lacks_nothing_on_an_axis_says_so_rather_than_showing_a_blank() -> None:
+    client, catalog = _ingest_client()
+    inputs = _coverage_inputs()
+    inputs["values"] = [row for row in inputs["values"] if row["build_count"] > 0]
+    inputs["vocabulary"] = {"total": 1, "missing_total": 0, "gaps": []}
+    catalog.coverage_inputs = inputs
+
+    body = client.get(f"/ui/builds/{BUILD_HASH}").text
+
+    assert "nothing on this axis" in body
+    assert "0 of 1 tasks absent" in body
+
+
+@pytest.mark.contract
+def test_a_coverage_report_that_cannot_be_folded_does_not_dark_the_build_page() -> None:
+    """The page keeps its other sections when the aggregation comes back wrong."""
+    client, catalog = _ingest_client()
+    catalog.coverage_inputs = {"episode_count": "two", "values": ["not a row"]}
+
+    response = client.get(f"/ui/builds/{BUILD_HASH}")
+
+    assert response.status_code == 200
+    assert "Lineage" in response.text
+    assert "Coverage" in response.text
+    assert "0 of 0 tasks absent" in response.text

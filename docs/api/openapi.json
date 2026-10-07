@@ -55,6 +55,57 @@
         "title": "ArtifactSummary",
         "type": "object"
       },
+      "BuildCoverageResponse": {
+        "description": "What one build contains, measured against the catalog it was drawn from (ADR 0033).\n\nBounded by construction: the payload is bounded by the axes and their limits, never by the\nepisode count. Read-only - no coverage figure takes part in a build's identity and no build\nis refused for a gap.",
+        "properties": {
+          "axes": {
+            "items": {
+              "$ref": "#/components/schemas/CoverageAxisResponse"
+            },
+            "title": "Axes",
+            "type": "array"
+          },
+          "build_hash": {
+            "title": "Build Hash",
+            "type": "string"
+          },
+          "catalog_size": {
+            "title": "Catalog Size",
+            "type": "integer"
+          },
+          "coverage_ratio": {
+            "title": "Coverage Ratio",
+            "type": "number"
+          },
+          "episode_count": {
+            "title": "Episode Count",
+            "type": "integer"
+          },
+          "method": {
+            "title": "Method",
+            "type": "string"
+          },
+          "vocabulary_missing": {
+            "default": 0,
+            "title": "Vocabulary Missing",
+            "type": "integer"
+          },
+          "vocabulary_total": {
+            "default": 0,
+            "title": "Vocabulary Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "build_hash",
+          "method",
+          "episode_count",
+          "catalog_size",
+          "coverage_ratio"
+        ],
+        "title": "BuildCoverageResponse",
+        "type": "object"
+      },
       "BuildDetailResponse": {
         "additionalProperties": true,
         "description": "A build plus the manifest and membership it is reproducible from.",
@@ -790,6 +841,78 @@
           }
         },
         "title": "ContractRequest",
+        "type": "object"
+      },
+      "CoverageAxisResponse": {
+        "description": "One axis of a build's coverage: what the build holds, and what it lacks (ADR 0033).\n\n`missing` is the number of gaps before `gaps` was truncated, so a capped list reads as \"at\nleast this many\" rather than as the whole answer. The task axis's gaps are vocabulary\nlabels, so a label with no episode anywhere is a gap; every other axis's gaps are the\ncatalog's values the build left out.",
+        "properties": {
+          "axis": {
+            "title": "Axis",
+            "type": "string"
+          },
+          "gaps": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Gaps",
+            "type": "array"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "missing": {
+            "default": 0,
+            "title": "Missing",
+            "type": "integer"
+          },
+          "present": {
+            "title": "Present",
+            "type": "integer"
+          },
+          "truncated": {
+            "default": false,
+            "title": "Truncated",
+            "type": "boolean"
+          },
+          "values": {
+            "items": {
+              "$ref": "#/components/schemas/CoverageValueResponse"
+            },
+            "title": "Values",
+            "type": "array"
+          }
+        },
+        "required": [
+          "axis",
+          "label",
+          "present"
+        ],
+        "title": "CoverageAxisResponse",
+        "type": "object"
+      },
+      "CoverageValueResponse": {
+        "description": "One value on one coverage axis, with how much of the build it accounts for.",
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "share": {
+            "title": "Share",
+            "type": "number"
+          },
+          "value": {
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "value",
+          "count",
+          "share"
+        ],
+        "title": "CoverageValueResponse",
         "type": "object"
       },
       "EpisodeExportResponse": {
@@ -4010,6 +4133,46 @@
           }
         },
         "summary": "Get Build"
+      }
+    },
+    "/api/v1/builds/{build_hash}/coverage": {
+      "get": {
+        "description": "What this build contains, and what the catalog holds that it does not (ADR 0033).\n\nDeterministic and read-only, computed from attributes ingest already wrote - task, robot,\nformat and verdict. The gap list is the actionable half: it names the values the catalog\nholds and this build left out, and for tasks it names the vocabulary entries with no\nepisode here whether or not an episode exists for them anywhere.\n\nThe payload is bounded by the axes and their limits, never by the episode count, with\n`missing` and `truncated` carrying what the caps left out.",
+        "operationId": "build_coverage_api_v1_builds__build_hash__coverage_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "build_hash",
+            "required": true,
+            "schema": {
+              "title": "Build Hash",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuildCoverageResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Build Coverage"
       }
     },
     "/api/v1/builds/{build_hash}/redundancy": {

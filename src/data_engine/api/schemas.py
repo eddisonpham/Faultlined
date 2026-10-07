@@ -239,6 +239,50 @@ class BuildRedundancyResponse(BaseModel):
     truncated: bool = False
 
 
+class CoverageValueResponse(BaseModel):
+    """One value on one coverage axis, with how much of the build it accounts for."""
+
+    value: str
+    count: int
+    share: float
+
+
+class CoverageAxisResponse(BaseModel):
+    """One axis of a build's coverage: what the build holds, and what it lacks (ADR 0033).
+
+    `missing` is the number of gaps before `gaps` was truncated, so a capped list reads as "at
+    least this many" rather than as the whole answer. The task axis's gaps are vocabulary
+    labels, so a label with no episode anywhere is a gap; every other axis's gaps are the
+    catalog's values the build left out.
+    """
+
+    axis: str
+    label: str
+    present: int
+    values: list[CoverageValueResponse] = Field(default_factory=list)
+    gaps: list[str] = Field(default_factory=list)
+    missing: int = 0
+    truncated: bool = False
+
+
+class BuildCoverageResponse(BaseModel):
+    """What one build contains, measured against the catalog it was drawn from (ADR 0033).
+
+    Bounded by construction: the payload is bounded by the axes and their limits, never by the
+    episode count. Read-only - no coverage figure takes part in a build's identity and no build
+    is refused for a gap.
+    """
+
+    build_hash: str
+    method: str
+    episode_count: int
+    catalog_size: int
+    coverage_ratio: float
+    axes: list[CoverageAxisResponse] = Field(default_factory=list)
+    vocabulary_total: int = 0
+    vocabulary_missing: int = 0
+
+
 class JobResponse(BaseModel):
     id: str
     type: str

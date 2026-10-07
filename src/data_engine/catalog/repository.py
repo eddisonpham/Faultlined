@@ -953,6 +953,133 @@ class PostgresCatalog:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def build_coverage_inputs(self, build_hash: str, *, limit: int = 20) -> dict[str, Any]:
+        """What a build holds and what its catalog holds, per axis (ADR 0033).
+
+        Two statements, both bounded by the number of axis values rather than by the number of
+        episodes: the first expands four persisted attributes onto one row per member per axis and
+        returns the top `limit` build values plus the catalog-only values of the gap axes; the
+        second lists the vocabulary entries with no episode in this build, which is where the
+        *task* gaps come from (a label with no episode anywhere is still a gap).
+
+        The window counts travel with the capped rows, so a truncated report can still say how many
+        values were left out rather than presenting the sample as the whole. Nothing is stored: the
+        report is a query over facts that already exist, so it cannot drift from them.
+        """
+        with connect(self.settings) as connection:
+            values = connection.execute(
+                """WITH scoped AS MATERIALIZED (
+                       SELECT 'build'::text AS scope, e.id,
+                              coalesce(v.preferred_label,
+                                       nullif(btrim(e.metadata->>'task'), ''),
+                                       '(no task)') AS task,
+                              coalesce(nullif(btrim(e.metadata->>'robot'), ''),
+                                       nullif(btrim(e.metadata->>'robot_type'), ''),
+                                       '(no robot)') AS robot,
+                              e.format AS format,
+                              coalesce(q.verdict, '(unscored)') AS verdict
+                         FROM build_episodes be
+                         JOIN episodes e ON e.id = be.episode_id
+                         LEFT JOIN task_vocabulary_mappings m
+                                ON m.task_string = e.metadata->>'task'
+                         LEFT JOIN task_vocabulary_entries v ON v.id = m.entry_id
+                         LEFT JOIN episode_quality q ON q.episode_id = e.id
+                        WHERE be.build_hash = %s
+                       UNION ALL
+                       SELECT 'catalog', e.id,
+                              coalesce(v.preferred_label,
+                                       nullif(btrim(e.metadata->>'task'), ''),
+                                       '(no task)') AS task,
+                              coalesce(nullif(btrim(e.metadata->>'robot'), ''),
+                                       nullif(btrim(e.metadata->>'robot_type'), ''),
+                                       '(no robot)') AS robot,
+                              e.format AS format,
+                              coalesce(q.verdict, '(unscored)') AS verdict
+                         FROM episodes e
+                         LEFT JOIN task_vocabulary_mappings m
+                                ON m.task_string = e.metadata->>'task'
+                         LEFT JOIN task_vocabulary_entries v ON v.id = m.entry_id
+                         LEFT JOIN episode_quality q ON q.episode_id = e.id
+                   ), per_value AS (
+                       SELECT scope, axis, value, count(*) AS n
+                         FROM (SELECT scope, id, a.axis, a.value
+                                 FROM scoped
+                                 CROSS JOIN LATERAL (VALUES ('task', task),
+                                                            ('robot', robot),
+                                                            ('format', format),
+                                                            ('verdict', verdict))
+                                            AS a(axis, value)) AS expanded
+                        GROUP BY scope, axis, value
+                   ), joined AS (
+                       SELECT coalesce(b.axis, c.axis) AS axis,
+                              coalesce(b.value, c.value) AS value,
+                              coalesce(b.n, 0) AS build_count,
+                              coalesce(c.n, 0) AS catalog_count
+                         FROM (SELECT * FROM per_value WHERE scope = 'build') AS b
+                         FULL JOIN (SELECT * FROM per_value WHERE scope = 'catalog') AS c
+                                ON b.axis = c.axis AND b.value = c.value
+                   ), ranked AS (
+                       SELECT axis, value, build_count, catalog_count,
+                              count(*) FILTER (WHERE build_count > 0) OVER (PARTITION BY axis)
+                                  AS build_distinct,
+                              count(*) FILTER (WHERE catalog_count > 0) OVER (PARTITION BY axis)
+                                  AS catalog_distinct,
+                              count(*) FILTER (WHERE build_count = 0) OVER (PARTITION BY axis)
+                                  AS gap_total,
+                              sum(build_count) OVER (PARTITION BY axis)::bigint AS build_total,
+                              sum(catalog_count) OVER (PARTITION BY axis)::bigint AS catalog_total,
+                              row_number() OVER (PARTITION BY axis
+                                                 ORDER BY build_count DESC, value) AS build_rank,
+                              row_number() OVER (PARTITION BY axis ORDER BY value) AS value_rank
+                         FROM joined
+                   )
+                   SELECT * FROM ranked
+                    WHERE (build_count > 0 AND build_rank <= %s)
+                       OR (build_count = 0 AND catalog_count > 0 AND axis <> 'task'
+                           AND value_rank <= %s)
+                    ORDER BY axis, build_count DESC, value""",
+                (build_hash, limit, limit),
+            ).fetchall()
+            vocabulary = connection.execute(
+                """WITH entries AS (
+                       SELECT id, preferred_label FROM task_vocabulary_entries
+                   ), gaps AS (
+                       SELECT v.id, v.preferred_label AS label,
+                              (SELECT count(*)
+                                 FROM episodes e
+                                 JOIN task_vocabulary_mappings m
+                                   ON m.task_string = e.metadata->>'task'
+                                WHERE m.entry_id = v.id) AS catalog_episodes
+                         FROM entries v
+                        WHERE NOT EXISTS (
+                                  SELECT 1 FROM build_episodes be
+                                    JOIN episodes e ON e.id = be.episode_id
+                                    JOIN task_vocabulary_mappings m
+                                      ON m.task_string = e.metadata->>'task'
+                                   WHERE be.build_hash = %s AND m.entry_id = v.id)
+                   )
+                   SELECT (SELECT count(*) FROM entries) AS total,
+                          (SELECT count(*) FROM gaps) AS missing_total,
+                          (SELECT coalesce(jsonb_agg(jsonb_build_object(
+                                      'id', id, 'label', label,
+                                      'catalog_episodes', catalog_episodes)
+                                      ORDER BY label), '[]'::jsonb)
+                             FROM (SELECT * FROM gaps ORDER BY label LIMIT %s) AS capped)
+                            AS gaps""",
+                (build_hash, limit),
+            ).fetchone()
+        rows = [dict(row) for row in values]
+        entry = dict(vocabulary) if vocabulary else {}
+        entry.setdefault("total", 0)
+        entry.setdefault("missing_total", 0)
+        entry.setdefault("gaps", [])
+        return {
+            "episode_count": rows[0]["build_total"] if rows else 0,
+            "catalog_size": rows[0]["catalog_total"] if rows else 0,
+            "values": rows,
+            "vocabulary": entry,
+        }
+
     def record_episode_quality(self, episode_id: str, quality: dict[str, Any]) -> dict[str, Any]:
         """Persist the motion-quality summary computed at ingest (ADR 0018).
 

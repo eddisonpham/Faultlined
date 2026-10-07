@@ -183,6 +183,21 @@ Sits between Ingest and the catalog write: signals are computed from the rows th
   than raising (ADR 0023's rule, one layer over) and the report counts what it could actually
   compare; a pair with neither a trace nor a judged dimension is reported as incomparable rather
   than scored. Cost is bounded by `MAX_EPISODES` and the bound is reported ([EXP-0019](../experiments/0019-behavioural-fingerprint-calibration.md)).
+- **Build coverage** (`analysis/coverage.py`, [ADR 0033](../decisions/0033-build-coverage.md)):
+  what a build holds on each axis the catalog already persists — task (normalised through the
+  vocabulary), robot, format, verdict — and what its catalog holds instead, so the answer is a gap
+  list rather than a score. The reference set is what makes it actionable: a distribution alone
+  only describes the build. Task gaps come from the operator's vocabulary rather than from the
+  stored episodes, so a label with no episode anywhere is still a gap (ADR 0029). Aggregated on
+  read by `PostgresCatalog.build_coverage_inputs()` and never stored (ADR 0033 decision 1), so it
+  cannot drift from the catalog it is derived from.
+- **Coverage failure behavior:** a malformed or non-numeric count reads as zero rather than raising
+  (ADR 0023's rule, one layer over), because a dark panel for a reason the operator cannot see is
+  worse than a report that says it has nothing. The payload is bounded by the axes — at most
+  `VALUE_LIMIT` values and `GAP_LIMIT` gaps per axis, each with its true total and a truncation
+  flag — and not by the episode count: measured at 100 / 1 000 / 10 000 episodes as 31 rows and
+  2 221 → 2 296 bytes of payload, 126.0 ms read plus fold at 10 000
+  ([EXP-0021](../experiments/0021-build-coverage-cost-and-what-it-sees.md)).
 - **Owner:** implementer.
 
 ## 16. Monitoring notifier (`monitoring/`)

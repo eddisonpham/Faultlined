@@ -231,3 +231,81 @@ def test_a_fully_distinct_build_says_so_rather_than_showing_an_empty_table() -> 
     )
     assert "every scored episode is distinct" in body
     assert "Near-duplicate episodes in this build" not in body
+
+
+# --------------------------------------------------------------- coverage (ADR 0033)
+
+
+def _coverage(**overrides: object) -> dict:
+    """A coverage report in the shape the JSON route serves."""
+
+    def axis(name: str, label: str, values: list[dict], gaps: list[str], missing: int) -> dict:
+        return {
+            "axis": name,
+            "label": label,
+            "present": len(values),
+            "values": values,
+            "gaps": gaps,
+            "missing": missing,
+            "truncated": missing > len(gaps),
+        }
+
+    return {
+        "method": "build-coverage-v1",
+        "build_hash": "b" * 64,
+        "episode_count": 2,
+        "catalog_size": 5,
+        "coverage_ratio": 0.4,
+        "axes": [
+            axis(
+                "task",
+                "Task",
+                [{"value": "pick", "count": 2, "share": 1.0}],
+                ["fold", "place the can"],
+                2,
+            ),
+            axis("robot", "Embodiment", [{"value": "so101", "count": 2, "share": 1.0}], [], 0),
+        ],
+        "vocabulary_total": 3,
+        "vocabulary_missing": 2,
+        **overrides,
+    }
+
+
+@pytest.mark.unit
+def test_a_build_without_a_coverage_report_renders_without_one() -> None:
+    assert "Coverage" not in lineage_page(_build(2), "vt220")
+
+
+@pytest.mark.unit
+def test_the_coverage_section_names_the_gaps_beside_what_the_build_holds() -> None:
+    """The set difference is the actionable half, so it is on the page, not only in the JSON."""
+    body = lineage_page({**_build(2), "coverage": _coverage()}, "vt220")
+
+    assert "Coverage" in body
+    assert 'pick <span class="num">2</span>' in body
+    assert "fold, place the can" in body
+    assert "2 of 3 tasks absent" in body
+    assert "read-only" in body, "nothing here removes an episode or changes the address"
+
+
+@pytest.mark.unit
+def test_a_capped_axis_is_drawn_with_the_true_total_beside_it() -> None:
+    body = lineage_page({**_build(2), "coverage": _coverage() | {"axes": []}}, "vt220")
+    assert "Coverage" not in body, "an empty axis list is not a coverage report"
+
+    capped = _coverage()
+    capped["axes"][0] |= {"gaps": ["fold"], "missing": 25, "truncated": True}
+    body = lineage_page({**_build(2), "coverage": capped}, "vt220")
+
+    assert "and 24 more" in body
+    assert "at most 20 values and 20 gaps" in body
+
+
+@pytest.mark.unit
+def test_a_coverage_report_in_a_shape_the_page_cannot_read_is_skipped() -> None:
+    """Better no panel than a panel of zeros that reads like a measured catalog of nothing."""
+    for broken in ({"axes": ["not an axis"]}, "not a report", {"axes": None}):
+        body = lineage_page({**_build(2), "coverage": broken}, "vt220")
+        assert "Coverage" not in body
+        assert "Members" in body, "the rest of the page is still drawn"

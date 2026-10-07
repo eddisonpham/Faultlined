@@ -40,4 +40,4 @@ supersede it with a new ADR and update the affected docs.
 | [0030](0030-streamed-downloads.md) | Streamed downloads are the same read with a different serializer | accepted |
 | [0031](0031-monitor-scheduling.md) | The monitor runs on a schedule the worker pool holds, one tick at a time | accepted |
 | [0032](0032-behavioural-fingerprints.md) | Behavioural fingerprints: redundancy and similarity from signals ingest already computed | accepted |
-| [0031](0031-monitor-scheduling.md) | The monitor runs on a schedule the worker pool holds, one tick at a time | accepted |
+| [0033](0033-build-coverage.md) | Build coverage: what a build contains, and what it lacks | accepted |

@@ -15,6 +15,7 @@ from fastapi import FastAPI, Header, HTTPException, Query, Request, Response
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
 from pydantic import ValidationError
 
+from data_engine.analysis.coverage import GAP_LIMIT, VALUE_LIMIT, coverage_report
 from data_engine.analysis.fingerprint import DEFAULT_THRESHOLD, redundancy_report
 from data_engine.api.cluster_schemas import (
     ClusterConfirmRequest,
@@ -38,6 +39,7 @@ from data_engine.api.schemas import (
     AnyJobRequest,
     ArtifactListResponse,
     ArtifactSummary,
+    BuildCoverageResponse,
     BuildDetailResponse,
     BuildListResponse,
     BuildPayload,
@@ -272,6 +274,22 @@ def _build_redundancy(
     return redundancy_report(
         [by_id[episode_id] for episode_id in ordered if episode_id in by_id],
         threshold=DEFAULT_THRESHOLD if threshold is None else threshold,
+    ).to_dict()
+
+
+def _build_coverage(
+    catalog: PostgresCatalog, build_hash: str, limit: int | None = None
+) -> dict[str, Any]:
+    """One build's coverage report (ADR 0033).
+
+    Shared by the JSON route and the build page so the two cannot disagree, and computed on read
+    from the catalog rather than from anything stored: a cached rollup would have to be invalidated
+    on every ingest, vocabulary edit and build, and would be wrong in the window between.
+    """
+    value_limit = VALUE_LIMIT if limit is None else limit
+    inputs = catalog.build_coverage_inputs(build_hash, limit=max(value_limit, GAP_LIMIT))
+    return coverage_report(
+        build_hash, inputs, value_limit=value_limit, gap_limit=GAP_LIMIT
     ).to_dict()
 
 
@@ -909,6 +927,23 @@ def create_app(
             **_build_redundancy(catalog_for_request, build_hash, threshold),
         }
 
+    @app.get("/api/v1/builds/{build_hash}/coverage", response_model=BuildCoverageResponse)
+    def build_coverage(build_hash: str, request: Request) -> dict[str, Any]:
+        """What this build contains, and what the catalog holds that it does not (ADR 0033).
+
+        Deterministic and read-only, computed from attributes ingest already wrote - task, robot,
+        format and verdict. The gap list is the actionable half: it names the values the catalog
+        holds and this build left out, and for tasks it names the vocabulary entries with no
+        episode here whether or not an episode exists for them anywhere.
+
+        The payload is bounded by the axes and their limits, never by the episode count, with
+        `missing` and `truncated` carrying what the caps left out.
+        """
+        catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
+        if catalog_for_request.get_build(build_hash) is None:
+            raise HTTPException(status_code=404, detail=f"No build {build_hash}.")
+        return _build_coverage(catalog_for_request, build_hash)
+
     @app.get("/api/v1/episodes/{episode_id}/builds", response_model=BuildListResponse)
     def builds_for_episode(episode_id: str, request: Request) -> dict[str, Any]:
         """The reverse lineage direction (FR-008): what contains this episode."""
@@ -963,6 +998,7 @@ def create_app(
                     **row,
                     "episodes": catalog_for_request.build_episodes(build_hash),
                     "redundancy": _build_redundancy(catalog_for_request, build_hash),
+                    "coverage": _build_coverage(catalog_for_request, build_hash),
                 },
                 theme_or_default(theme),
             )

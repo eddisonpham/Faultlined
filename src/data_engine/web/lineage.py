@@ -259,6 +259,91 @@ def _redundancy_section(build: dict[str, Any]) -> str:
     )
 
 
+def _coverage_section(build: dict[str, Any]) -> str:
+    """What this build holds on each axis, and what the catalog holds instead (ADR 0033).
+
+    The gap column is the point of the section. A distribution alone describes the build; the set
+    difference against the catalog is the only part an operator can act on, and for tasks it is
+    read from the vocabulary, so a label the operator named and never recorded appears here as
+    missing rather than not existing.
+    """
+    from data_engine.web.pages import _meter, _readouts, _section
+
+    report = build.get("coverage")
+    if not isinstance(report, dict):
+        return ""
+    axes = [axis for axis in (report.get("axes") or []) if isinstance(axis, dict)]
+    if not axes:
+        return ""
+    episode_count = int(report.get("episode_count") or 0)
+    catalog_size = int(report.get("catalog_size") or 0)
+    ratio = float(report.get("coverage_ratio") or 0.0)
+    vocabulary_total = int(report.get("vocabulary_total") or 0)
+    vocabulary_missing = int(report.get("vocabulary_missing") or 0)
+
+    def holds(axis: dict[str, Any]) -> str:
+        values = [item for item in (axis.get("values") or []) if isinstance(item, dict)]
+        if not values:
+            return '<span class="de-sub">none</span>'
+        return " &#183; ".join(
+            f"{escape(str(item.get('value') or ''))} "
+            f'<span class="num">{int(item.get("count") or 0)}</span>'
+            for item in values
+        )
+
+    def lacks(axis: dict[str, Any]) -> str:
+        gaps = [str(gap) for gap in (axis.get("gaps") or [])]
+        missing = int(axis.get("missing") or 0)
+        if not gaps:
+            return '<span class="de-sub">nothing on this axis</span>'
+        shown = ", ".join(escape(gap) for gap in gaps)
+        if axis.get("truncated") and missing > len(gaps):
+            shown += f' <span class="de-sub">and {missing - len(gaps)} more</span>'
+        return shown
+
+    rows = "".join(
+        "<tr>"
+        f"<td>{escape(str(axis.get('label') or axis.get('axis') or ''))}</td>"
+        f'<td class="num">{int(axis.get("present") or 0)}</td>'
+        f"<td>{holds(axis)}</td>"
+        f"<td>{lacks(axis)}</td>"
+        "</tr>"
+        for axis in axes
+    )
+    table = (
+        '<div class="de-table-wrap" tabindex="0" role="region" '
+        'aria-label="Coverage of this build"><table class="de-table">'
+        '<caption class="de-sr">Each axis the catalog records, how many distinct values this'
+        " build holds, which values those are, and which values the catalog holds that this build"
+        ' does not</caption><thead><tr><th>Axis</th><th class="num">Values</th>'
+        "<th>This build holds</th><th>Missing from this build</th></tr></thead>"
+        f"<tbody>{rows}</tbody></table></div>"
+    )
+
+    return _section(
+        "Coverage",
+        _readouts(
+            [
+                ("episodes", str(episode_count), ""),
+                ("catalog", str(catalog_size), ""),
+                ("of catalog", f"{ratio * 100:.0f}%", ""),
+                (
+                    "task gaps",
+                    f"{vocabulary_missing} / {vocabulary_total}",
+                    "",
+                ),
+            ]
+        )
+        + f'<p class="de-sub">{_meter(ratio)} of this catalog\u2019s episodes, on every axis'
+        " &#183; read-only: nothing here removes an episode or changes the build\u2019s address</p>"
+        + table
+        + '<p class="de-sub">per axis at most 20 values and 20 gaps are listed, with the true'
+        " totals carried beside them, so the payload is bounded by the axes rather than by the"
+        " episode count</p>",
+        f"{len(axes)} axes &#183; {vocabulary_missing} of {vocabulary_total} tasks absent",
+    )
+
+
 def _index_body(model: dict[str, Any]) -> str:
     items = model.get("items") or []
     if not items:
@@ -327,6 +412,7 @@ def _detail_body(build: dict[str, Any]) -> str:
         )
         + _section("Members", _members_table(build), str(int(build.get("episode_count") or 0)))
         + _redundancy_section(build)
+        + _coverage_section(build)
     )
 
 
