@@ -1759,9 +1759,8 @@ def vocabulary_page(model: dict[str, Any], theme: str) -> str:
 
 
 def vocabulary_fragment(model: dict[str, Any]) -> str:
-    """The triage queue, ranked by how much it is costing: candidates first, then the raw queue,
-    then the vocabulary itself, then what was done to it.
-    """
+    """The triage queue, ranked by how much it is costing: candidates first, then the raw queue,"""
+
     health = model.get("health") or {}
     entries = model.get("entries") or []
     unmapped = model.get("unmapped") or []

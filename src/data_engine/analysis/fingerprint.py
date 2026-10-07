@@ -107,9 +107,8 @@ class RedundancyReport:
 
     @property
     def distinct_count(self) -> int:
-        """How many behaviours the set holds: kept representatives, plus episodes that could not be
-        compared to anything (counting those as distinct is the honest direction).
-        """
+        """Behaviours held: kept reps + episodes with no comparison (each = distinct)."""
+
         return self.episode_count - self.redundant_count
 
     @property
@@ -306,9 +305,8 @@ def _rank_key(item: Fingerprint) -> tuple[int, float, int, str]:
 
 
 def _parts(first: Fingerprint, second: Fingerprint) -> dict[str, float] | None:
-    """Per-component distances over what two fingerprints have in common, or `None` when that is
-    nothing worth comparing on.
-    """
+    """Per-component distances over what two fingerprints have in common, or `None` when that is"""
+
     parts: dict[str, float] = {}
     if first.shape and second.shape:
         parts["shape"] = _mean_abs(first.shape, second.shape)

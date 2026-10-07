@@ -1037,8 +1037,8 @@ def test_the_redundancy_route_is_404_for_an_unknown_build() -> None:
 
 @pytest.mark.contract
 def test_the_redundancy_route_refuses_a_threshold_it_cannot_honour() -> None:
-    """A distance above 1.0 is not producible, so a threshold above it is a client bug, not a
-    request to be clamped silently."""
+    """A distance above 1.0 is not producible, so a threshold above it is a client bug, not a"""
+
     client, _ = _build_with_members("ep-a", "ep-b")
     assert client.get(f"/api/v1/builds/{BUILD_HASH}/redundancy?threshold=2.0").status_code == 422
     assert client.get(f"/api/v1/builds/{BUILD_HASH}/redundancy?threshold=-0.5").status_code == 422

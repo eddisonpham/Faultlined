@@ -63,9 +63,8 @@ class InvalidTransition(ValueError):
 
 
 def canonical_json(value: Any) -> bytes:
-    """Re-exported from [data_engine.canonical](../canonical.py); kept here because the idempotency
-    request hash has always been imported from this module.
-    """
+    """Re-exported from [data_engine.canonical]; kept here because the idempotency"""
+
     return _canonical_json(value)
 
 

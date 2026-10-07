@@ -1,7 +1,4 @@
-"""Entry point for the stage 2.5 clustering experiments.
-
-Run with `just cluster <subcommand>`.
-"""
+"""Entry point for the stage 2.5 clustering experiments."""
 
 from __future__ import annotations
 

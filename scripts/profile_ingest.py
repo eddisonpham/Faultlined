@@ -1,9 +1,5 @@
 #!/usr/bin/env python3
-"""Attribute MCAP ingest time per stage and dump cProfile hotspots.
-
-uv run --all-extras python scripts/profile_ingest.py
-uv run --all-extras python scripts/profile_ingest.py --reps 5 --save
-"""
+"""Attribute MCAP ingest time per stage and dump cProfile hotspots."""
 
 from __future__ import annotations
 

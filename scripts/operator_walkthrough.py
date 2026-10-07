@@ -1,9 +1,5 @@
 #!/usr/bin/env python3
-"""Crawl the live UI and count the clicks between the things an operator needs.
-
-uv run python scripts/operator_walkthrough.py
-uv run python scripts/operator_walkthrough.py --json var/walkthrough.json
-"""
+"""Crawl the live UI and count the clicks between the things an operator needs."""
 
 from __future__ import annotations
 

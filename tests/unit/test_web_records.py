@@ -99,8 +99,8 @@ def test_the_repositorys_own_baselines_and_experiments_are_readable() -> None:
 
 @pytest.mark.unit
 def test_a_truncated_record_is_skipped_and_reported(fake_repo: Path) -> None:
-    """A half-written file from an interrupted run must not take the page down, and it must not
-    vanish silently either."""
+    """A half-written file from an interrupted run must not take the page down, and it must not"""
+
     _write(fake_repo / "benchmarks" / "baselines" / "good.json", _baseline("good", p50=0.5))
     (fake_repo / "benchmarks" / "results" / "cut-off.json").write_text('{"run_id": "x"', "utf-8")
 

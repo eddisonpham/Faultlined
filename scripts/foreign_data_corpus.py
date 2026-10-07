@@ -1,9 +1,5 @@
 #!/usr/bin/env python3
-"""Generate a corpus of *non-LeRobot* robot data, deterministically.
-
-uv run --with h5py python scripts/foreign_data_corpus.py var/foreign-corpus
-uv run --with h5py python scripts/foreign_data_corpus.py var/foreign-corpus --manifest-only
-"""
+"""Generate a corpus of *non-LeRobot* robot data, deterministically."""
 
 from __future__ import annotations
 

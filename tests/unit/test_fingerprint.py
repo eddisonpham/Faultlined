@@ -111,8 +111,8 @@ def test_the_shape_is_blind_to_the_overall_scale_of_the_motion() -> None:
 
 
 def test_a_flat_trace_has_no_shape_rather_than_a_vector_of_zeros() -> None:
-    """A zero vector would sit at distance zero from every other flat episode - a false duplicate
-    produced by an absence of motion rather than by a shared motion."""
+    """A zero vector would sit at distance zero from every other flat episode - a false duplicate"""
+
     flat = fingerprint(_row("a", trace=_trace([0.0] * 40), dims=[]))
     assert flat.shape == ()
     assert not flat.comparable
@@ -126,8 +126,8 @@ def test_a_trace_with_no_clock_is_absent_and_the_episode_says_so() -> None:
 
 
 def test_dynamics_are_keyed_by_the_dimensions_own_field_name() -> None:
-    """An MCAP dimension is `<topic>.<path>`; the topic is where a signal came from, not what it
-    is (the ADR 0018 amendment)."""
+    """An MCAP dimension is `<topic>.<path>`; the topic is where a signal came from, not what it"""
+
     left = fingerprint(_row("a", dims=_dims(prefix="position")))
     right = fingerprint(
         _row(
@@ -157,8 +157,8 @@ def test_a_discrete_dimension_is_excluded_the_way_the_verdict_excludes_it() -> N
 
 
 def test_the_descriptor_uses_qualitys_own_field_rule() -> None:
-    """One rule, not two: a change to what a dimension's name *is* cannot make `analysis.quality`
-    and `analysis.fingerprint` disagree about a gripper."""
+    """One rule, not two: a change to what a dimension's name *is* cannot make `analysis.quality`"""
+
     assert field_name("/left/gripper/joint_states.position[3]") == "position[3]"
     assert field_name("observation.state[3]") == "state[3]"
 
@@ -264,8 +264,8 @@ def test_a_set_of_genuinely_different_behaviours_is_left_alone() -> None:
 
 
 def test_the_representative_is_the_cleanest_take_not_the_first_one_seen() -> None:
-    """Collapsing a group must keep the demonstration worth training on, whatever order the
-    membership arrived in."""
+    """Collapsing a group must keep the demonstration worth training on, whatever order the"""
+
     values = _wave(60)
     rows = [
         _row("jerky", trace=_trace(_jittered(values, index=2)), verdict="jerky"),
@@ -282,8 +282,8 @@ def test_the_representative_is_the_cleanest_take_not_the_first_one_seen() -> Non
 
 
 def test_a_group_says_which_signal_made_it_a_duplicate() -> None:
-    """The justification for a deterministic measure is that an operator can disagree with it by
-    reading it, so the reason travels with the row."""
+    """The justification for a deterministic measure is that an operator can disagree with it by"""
+
     rows = [_row("a"), _row("b", stall=0.10)]
     report = redundancy_report(rows)
 
@@ -294,9 +294,8 @@ def test_a_group_says_which_signal_made_it_a_duplicate() -> None:
 
 
 def test_temporal_character_alone_cannot_carry_a_group_at_the_calibrated_threshold() -> None:
-    """A consequence of calibrating for precision, asserted so it cannot drift silently: the
-    temporal component carries the smallest weight, so a pair that differs only in how much it
-    stalls has to differ by very little to collapse."""
+    """A consequence of calibrating for precision, asserted so it cannot drift silently: the"""
+
     rows = [_row("a"), _row("b", stall=0.9, gap=0.2)]
     assert redundancy_report(rows).groups == ()
 
@@ -356,8 +355,8 @@ def test_the_default_threshold_separates_the_planted_pair_from_the_unrelated_one
 
 
 def test_a_non_finite_signal_does_not_poison_every_distance_it_touches() -> None:
-    """A NaN would make every `<= threshold` test false, which is the failure ADR 0023 exists to
-    prevent one layer up: it must not become an invisible shape here either."""
+    """A NaN would make every `<= threshold` test false, which is the failure ADR 0023 exists to"""
+
     item = fingerprint(_row("a", stall=float("nan"), gap=float("inf")))
     assert item.stall_ratio == 0.0
     assert item.gap_ratio == 0.0
@@ -391,9 +390,8 @@ def test_a_gap_between_runs_is_still_one_chronological_series() -> None:
 
 
 def test_the_pruning_shortcut_agrees_with_the_public_distance() -> None:
-    """`redundancy_report`'s early exits are an optimisation, not a second definition of the
-    measure: a pair collapses exactly when `distance()` says it should, for every threshold on
-    the grid."""
+    """`redundancy_report`'s early exits are an optimisation, not a second definition of the"""
+
     rows = [
         _row("a"),
         _row("b", trace=_trace(_jittered(_wave(60), index=1))),
@@ -418,8 +416,8 @@ def test_the_pruning_shortcut_agrees_with_the_public_distance() -> None:
 
 @pytest.mark.parametrize("threshold", [0.01, 0.04, 0.10])
 def test_every_reported_distance_is_within_the_threshold(threshold: float) -> None:
-    """The shortcut's soundness, stated as the property an operator relies on: nothing in the
-    report is further from its representative than the threshold it was collapsed under."""
+    """The shortcut's soundness, stated as the property an operator relies on: nothing in the"""
+
     rng_values = _wave(60)
     rows = [
         _row(f"ep-{index}", trace=_trace(_jittered(rng_values, index=index % 3)))

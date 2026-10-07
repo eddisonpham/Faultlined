@@ -1,7 +1,4 @@
-"""Generate a deterministic MCAP sensor log - the project's real-data fixture.
-
-python scripts/make_mcap_log.py var/real-data/so101_pick_place.mcap --seconds 20
-"""
+"""Generate a deterministic MCAP sensor log - the project's real-data fixture."""
 
 from __future__ import annotations
 

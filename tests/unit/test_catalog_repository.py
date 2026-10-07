@@ -180,9 +180,8 @@ def test_register_episode_fails_if_upsert_returns_no_record() -> None:
 
 @pytest.mark.unit
 def test_episode_fingerprint_inputs_projects_only_the_signals_it_reads() -> None:
-    """`dims` and `motion_trace` are the largest jsonb values the catalog stores, so the
-    projection is deliberate: a report over a build of thousands must not drag every episode's
-    full metadata and history along with two columns it will not look at."""
+    """`dims` and `motion_trace` are the largest jsonb values the catalog stores, so the"""
+
     catalog, connection = _catalog_with([{"id": "episode-1"}])
     rows = catalog.episode_fingerprint_inputs(["episode-1"])
 

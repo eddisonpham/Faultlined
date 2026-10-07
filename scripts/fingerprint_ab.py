@@ -1,8 +1,4 @@
-"""A/B the curation claim, end to end through the real entry point (ADR 0032).
-
-just run
-uv run --all-extras python scripts/fingerprint_ab.py --behaviours 24 --copies 4
-"""
+"""A/B the curation claim, end to end through the real entry point (ADR 0032)."""
 
 from __future__ import annotations
 

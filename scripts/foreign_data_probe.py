@@ -1,9 +1,5 @@
 #!/usr/bin/env python3
-"""Run every foreign-corpus fixture through the real ingest path and record the outcome.
-
-uv run python scripts/foreign_data_probe.py var/foreign-corpus
-uv run python scripts/foreign_data_probe.py var/foreign-corpus --in-process
-"""
+"""Run every foreign-corpus fixture through the real ingest path and record the outcome."""
 
 from __future__ import annotations
 

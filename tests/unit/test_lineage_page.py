@@ -168,8 +168,8 @@ def test_the_redundancy_section_links_both_sides_of_a_duplicate_pair() -> None:
 
 @pytest.mark.unit
 def test_the_redundancy_section_states_the_measure_and_that_nothing_was_removed() -> None:
-    """A report that proposed collapses without saying it is read-only would read as a decision
-    already taken."""
+    """A report that proposed collapses without saying it is read-only would read as a decision"""
+
     body = lineage_page({**_build(2), "redundancy": _report()}, "vt220")
     assert "threshold 0.10" in body
     assert "read-only" in body

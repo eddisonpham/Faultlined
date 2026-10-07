@@ -14,8 +14,8 @@ no rationale/Args/Returns; rationale stays in `agents/` (ADRs, experiments, arch
 ## Findings
 
 ### F-1 multi-statement docstrings — 0 remaining
-32 multi-statement project-owned docstrings (12 scripts + 20 src/tests/exp) rewritten to
-single-line summary + usage. Ruff format left them normalized. No rationale/Args/Returns remains.
+36 project-owned multi-statement docstrings (12 scripts + 20 src/tests/exp) rewritten to
+single-line summary. Ruff format normalized spacing. No rationale/Args/Returns remains.
 
 ### F-2 non-directive comments — 0
 Tokenize scan across `src/tests/scripts/benchmarks/experiments/agents/docs/de` (venv/vendor
@@ -33,15 +33,15 @@ ratio 282/282 intact), `scripts/ui_audit.mjs` (0 non-leading, `node --check` exi
 `vendor/terminal-ui/*.css` exempt per policy.
 
 ### F-6 secrets — none
-Grep for `hf_`, `sk-ant-`, `sk-`, `AKIA`, `ghp_/gho_/ghs_/ghu_`, `-----BEGIN` across
+`grep` for `hf_`, `sk-ant-`, `sk-`, `AKIA`, `ghp_/gho_/ghs_/ghu_`, `-----BEGIN` across
 src/scripts/tests/benchmarks/experiments/agents/docs returned no credential material
 (matches were docstring text naming secret-token shapes or regex definitions, not keys).
 `HF_KEY` is read from env, never written.
 
-### F-7 gates — green (final tree)
+### F-7 gates — all green (final tree)
 - `ruff format --check .` — 403 files formatted
 - `ruff check .` — All checks passed
-- `mypy src` — no issues found in 83 source files
+- `mypy src` — no issues found in 80 source files
 - `mypy experiments` — no issues found in 22 source files
 - `pytest -m "not slow and not gpu"` — 100% passed
 - `scripts/check_repo_hygiene.py` — OK

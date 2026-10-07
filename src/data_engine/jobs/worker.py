@@ -105,10 +105,8 @@ def _error_message(exc: Exception) -> str:
 
 
 def _failure_payload(exc: Exception, reason_code: ReasonCode) -> dict[str, Any]:
-    """What is persisted on the job row when a handler fails, and rendered by the job report and
-    `/ui/jobs/{id}`: the exception type, its own sanitized message, and the stable reason code
-    the API contract already promises.
-    """
+    """What is persisted on the job row when a handler fails, and rendered by the job report and"""
+
     return {
         "type": type(exc).__name__,
         "message": _error_message(exc),

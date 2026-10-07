@@ -1,9 +1,5 @@
 #!/usr/bin/env python3
-"""Simulate the workflows that actually run at the same time, and measure the interference.
-
-uv run python scripts/multi_workflow.py
-uv run python scripts/multi_workflow.py --jobs 12 --seconds 90
-"""
+"""Simulate the workflows that actually run at the same time, and measure the interference."""
 
 from __future__ import annotations
 

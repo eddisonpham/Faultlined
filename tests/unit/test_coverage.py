@@ -228,8 +228,8 @@ def test_the_task_axis_keeps_its_gap_total_when_the_gap_list_is_capped() -> None
 
 @pytest.mark.unit
 def test_a_gap_list_cut_by_the_query_still_reports_how_many_gaps_there_were() -> None:
-    """The query caps rows, so counting the rows it returned would report "no gaps" for a cut
-    axis."""
+    """The query caps rows, so counting the rows it returned would report "no gaps" for a cut"""
+
     rows = _inputs()["values"] + [
         _row(
             "verdict",

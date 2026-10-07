@@ -1,9 +1,5 @@
 #!/usr/bin/env python3
-"""Measure the latency of every shipped feature against a live API, at several scales.
-
-uv run python scripts/feature_latency.py --scales 20 1000 10000
-uv run python scripts/feature_latency.py --scales 1000 --trials 30 --json var/lat.json
-"""
+"""Measure the latency of every shipped feature against a live API, at several scales."""
 
 from __future__ import annotations
 

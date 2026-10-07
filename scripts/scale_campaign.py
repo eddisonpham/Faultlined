@@ -1,8 +1,5 @@
 #!/usr/bin/env python3
-"""Stage-4 scaling campaign driver: NFR-005, NFR-008 concurrency leg, NFR-010.
-
-uv run --all-extras python scripts/scale_campaign.py --leg job-scaling
-"""
+"""Stage-4 scaling campaign driver: NFR-005, NFR-008 concurrency leg, NFR-010."""
 
 from __future__ import annotations
 
@@ -286,10 +283,8 @@ def leg_depth_curve(catalog, dsn: str, _tmpdir: Path) -> dict[str, object]:
 
 
 def leg_catalog_scale(catalog, dsn: str, _tmpdir: Path) -> dict[str, object]:
-    """10k-episode catalog (NFR-003, NFR-008 read side): query p95 over the real repository, and a
-    real validate job over all 10k episodes through a real worker process (NFR-002's system-scale
-    reading).
-    """
+    """10k-episode catalog leg: P95 query + real validate job over all 10k episodes."""
+
     initialize(dsn)
     seed_seconds, episode_ids = _seed_catalog(dsn, 10_000)
 
@@ -677,9 +672,8 @@ def _run_leg(catalog, dsn: str, args: argparse.Namespace) -> dict[str, object]:
 
 
 def leg_production_workers(catalog, dsn: str, _tmpdir: Path) -> dict[str, object]:
-    """NFR-005 E5: re-run the depth-100 enqueue->start point with 2 workers so the queue-position
-    wait is also depth-capacity confirmed (wait ratio 1w : 2w).
-    """
+    """NFR-005 E5: re-run the depth-100 enqueue->start point with 2 workers so the queue-position"""
+
     _enqueue(catalog, 100, prefix="backlog-2w")
     measured = _enqueue(catalog, 1, prefix="two-worker")
     job_id = measured[0]
@@ -716,9 +710,8 @@ def leg_production_workers(catalog, dsn: str, _tmpdir: Path) -> dict[str, object
 
 
 def leg_cancel_running(catalog, dsn: str, _tmpdir: Path) -> dict[str, object]:
-    """NFR-005 E6b: cancel takes effect for a *running* job (cooperative path), in addition to the
-    already-measured queued-job cancel.
-    """
+    """NFR-005 E6b: cancel a *running* job (coop path), plus already-measured queued cancel."""
+
     backlogs = _enqueue(catalog, 28, prefix="cancel-running-backlog")
     procs, _ready = _start_workers(dsn, 1)
     try:

@@ -1,8 +1,4 @@
-"""Measure what the coverage report costs at scale (ADR 0033).
-
-export DE_DATABASE_URL=postgresql://data_engine@127.0.0.1:55432/bb_coverage
-uv run --all-extras python scripts/coverage_bench.py --episodes 100 1000 10000
-"""
+"""Measure what the coverage report costs at scale (ADR 0033)."""
 
 from __future__ import annotations
 

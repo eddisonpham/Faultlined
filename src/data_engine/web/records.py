@@ -259,9 +259,8 @@ def _commit(run: Run) -> str:
 
 
 def _status_badge(status: str) -> str:
-    """`ok` reads as success and anything else as a warning, using terminal-ui's own text-colour
-    classes so the cell follows the active theme.
-    """
+    """`ok` reads as success and anything else as a warning, using terminal-ui's own text-colour"""
+
     css = {"ok": "success", "baseline": "info", "pass": "success"}.get(status, "warning")
     return f'<span class="text-{css}">{escape(status)}</span>'
 

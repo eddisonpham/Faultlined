@@ -1,8 +1,4 @@
-"""Measure what the behavioural fingerprint can actually see (ADR 0032).
-
-export DE_DATABASE_URL=postgresql://data_engine@127.0.0.1:55432/bb_fingerprint
-uv run --all-extras python scripts/fingerprint_calibration.py --latency-episodes 1000 5000
-"""
+"""Measure what the behavioural fingerprint can actually see (ADR 0032)."""
 
 from __future__ import annotations
 

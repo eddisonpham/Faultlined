@@ -1,7 +1,4 @@
-"""The end-to-end run, driven from an empty catalog to prove the fixes.
-
-uv run --all-extras python scripts/verify_e2e.py
-"""
+"""The end-to-end run, driven from an empty catalog to prove the fixes."""
 
 import json
 import re
