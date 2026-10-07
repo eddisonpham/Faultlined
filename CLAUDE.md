@@ -29,7 +29,7 @@ Then read only what your task touches: `agents/implementation/`, `agents/testing
   Do not duplicate hand-perception, VLA-quantization, or grasp-deployment themes.
 - **Green before commit:** format, lint, type-check, tests, and `python scripts/check_repo_hygiene.py`.
 - **Measure before optimizing.** Benchmarks follow `agents/benchmarking/methodology.md`; results become experiment records.
-- Comments/docstrings: minimal and useful. Don't explain obvious code.
+- **No comments** in code. One-line docstrings only: a module, class or function states what it is in a single sentence. Rationale belongs in `agents/` (ADRs, experiments, architecture), not beside the code.
 
 ## Working loop
 

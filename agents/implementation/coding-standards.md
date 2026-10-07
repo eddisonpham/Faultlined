@@ -7,7 +7,9 @@ Tooling follows ADR [0004](../decisions/0004-language-and-toolchain.md): Python 
 - Modules have one reason to change. Dependencies point inward: domain logic never imports frameworks/IO.
 - Explicit over clever. Prefer plain functions and typed data over deep class hierarchies.
 - No dead code, no duplicated logic, no commented-out code.
-- Comments/docstrings: only for non-obvious intent, invariants, or trade-offs. Never restate the code.
+- **No comments.** The only `#` a reader should meet is one a tool reads (`# type: ignore`, `# noqa`, `# pragma`, `# fmt:`, a shebang). CSS and JS follow the same rule; vendored themes are exempt because they are not ours to edit.
+- **One-line docstrings.** A module, class or function says in one sentence what it is. No rationale, no parameter tables, no examples, no change history, no "why we did this" paragraphs.
+- Rationale, alternatives and measurements live in `agents/` (ADR, experiment, architecture record) and are linked from the commit, never restated beside the code.
 
 ## Correctness and robustness
 - Validate at boundaries (API input, file/episode ingestion, config); trust internal invariants.
