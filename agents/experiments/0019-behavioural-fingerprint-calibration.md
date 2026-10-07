@@ -96,6 +96,10 @@ Cost is superlinear in episodes because the scan is O(n × kept). Two changes ca
 2. **`MAX_EPISODES` 2 000 → 500**, chosen from this table rather than from taste: 500 is the
    largest measured size that keeps the page inside a quarter second, and 2 000 was a two-second
    page. A truncated report says so.
+3. **The shape time index is built once per fingerprint, not once per sample point.** Isolated on
+   500 synthetic 240-point traces: 89 ms with the per-point rebuild, 40 ms with the index hoisted,
+   so **~50 ms of a 500-episode report's scoring pass** — real but a fifth of the report, not the
+   half an earlier comment in the code claimed. Output is unchanged.
 
 ## Trade-offs
 
