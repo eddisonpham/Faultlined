@@ -30,7 +30,7 @@ class TelemetrySample:
 
 
 def sample_resources(*, include_gpu: bool = True) -> TelemetrySample:
-    """Take one host snapshot. GPU fields remain absent when NVML is unavailable."""
+    """Take one host snapshot."""
     try:
         memory = psutil.virtual_memory()
         memory_used: int | None = int(memory.used)

@@ -1,27 +1,4 @@
-"""The evaluation tick: one pass of the notifier over the current window.
-
-Everything the notifier does happens here, in a fixed order, and the order is the
-design:
-
-1. **Probe the catalog.** A failure produces ``DATABASE_UNREACHABLE`` and nothing
-   else — every catalog-derived feature is untrustworthy that tick, and reporting
-   "all quiet" from a monitor that cannot see is the one outcome that must never
-   happen.
-2. **Build the feature vector** from the window's metric records and the snapshot.
-3. **Evaluate every rule**, then every pending completion contract.
-4. **Triage**, which is where precision is actually enforced.
-5. **Persist** incidents and control limits, then emit the monitor's own metrics.
-
-Two properties are worth stating because they are what make this safe to leave
-running unattended:
-
-* **The monitor is out of band.** Nothing in a tick can fail a build. A tick that
-  raises is a lost observation; a tick that *propagates* would be a lost build.
-  Everything is caught, counted, and reported through the health endpoint.
-* **The book survives a database outage.** Baselines are reloaded from the catalog
-  when it is reachable and kept in memory when it is not, so a brief outage blips
-  the incident store rather than resetting every control limit to cold.
-"""
+"""The evaluation tick: one pass of the notifier over the current window."""
 
 from __future__ import annotations
 
@@ -79,13 +56,8 @@ from data_engine.observability.telemetry import sample_resources
 
 logger = logging.getLogger(__name__)
 
-#: A monitor with no telemetry at all is blind; below this the window is treated
-#: as blind rather than as "nothing happened".
 SINK_LAG_BLIND_SECONDS = 600.0
 
-#: How far back the health read-back looks for the newest tick record. A tick every
-#: 60 s with many job metrics between them means the newest tick can sit a few
-#: thousand records down the sink; this is a bounded tail read, not a history scan.
 HEALTH_TAIL_RECORDS = 20_000
 
 
@@ -164,15 +136,8 @@ class MonitorService:
     def now(self) -> datetime:
         return self._now or datetime.now(UTC)
 
-    # ---- one pass -----------------------------------------------------------
-
     def _cat(self, override: Any | None = None) -> Any:
-        """The catalog to use for this tick.
-
-        An override exists because ``app.state.catalog`` is swappable — the API
-        tests wire a stub in after the app is built — and a monitor holding a
-        stale reference would quietly read the wrong database.
-        """
+        """The catalog to use for this tick."""
         return override if override is not None else self._catalog
 
     def tick(self, catalog: Any | None = None) -> TickReport:
@@ -238,31 +203,13 @@ class MonitorService:
         return report
 
     def notify_preview(self, catalog: Any | None = None) -> str:
-        """What a notifier would send right now. Rendering only; nothing is sent.
-
-        The delivery path is deliberately not implemented (ADR 0020 §10.3): email
-        requires explicit owner authorization, and this exists so the dry run is a
-        real code path rather than a description of one.
-        """
+        """What a notifier would send right now."""
         rows = self._cat(catalog).list_incidents(status="open", limit=50)
         return render_notify([row for row in rows if row["notify_class"] == "notify"])
 
     def health(self) -> dict[str, Any]:
-        """The monitor's own state; a monitor that silently stops is the worst outcome.
-
-        The tick usually runs in a **different process** from the one serving this
-        endpoint - the worker loop ticks, the API answers (ADR 0031) - so an
-        in-memory answer would read `last_tick_at: null` and `blind: no` about a
-        monitor that is running perfectly. Both facts are therefore read back from
-        the metric sink, which is the one record every process shares (ADR 0017),
-        and the in-process values are used only when this process has ticked itself.
-        """
+        """The monitor's own state; a monitor that silently stops is the worst outcome."""
         book = self._book
-        # One tail read serves both facts. They used to be read separately, which parsed
-        # the same window twice on every call - and this is called on every render of
-        # `/ui/incidents`, a page that polls, as well as by the endpoint: measured at
-        # 42 ms p50 on a 5k-record sink and 97 ms at the 20k bound, half of it duplicated.
-        # A process that has ticked itself needs no read at all.
         records = (
             self._health_records() if self._last_tick is None or self._last_blind is None else []
         )
@@ -288,20 +235,13 @@ class MonitorService:
         }
 
     def _health_records(self) -> list[dict[str, Any]]:
-        """The bounded tail of the shared sink, read once per `health()` call.
-
-        Bounded because health is served on a page load: a search that walked a whole
-        history would make the health check the slowest thing on the page, and a monitor
-        that costs more than it watches is its own defect.
-        """
+        """The bounded tail of the shared sink, read once per `health()` call."""
         if self._metrics_path is None:
             return []
         try:
             return read_metric_records(self._metrics_path, max_records=HEALTH_TAIL_RECORDS)
         except OSError:
             return []
-
-    # ---- steps --------------------------------------------------------------
 
     def _probe(self, reference: datetime, catalog: Any) -> tuple[dict[str, Any], bool]:
         try:
@@ -482,17 +422,7 @@ class MonitorService:
         reference: datetime,
         features: FeatureVector,
     ) -> None:
-        """Hold the limits a signal breached, release the rest, then observe.
-
-        Holding is what stops a sustained fault redefining what normal looks like.
-        Releasing is unconditional, so a resolved fault cannot be pinned open by a
-        stale hold; ``release_expired`` is the backstop if a tick never runs at all.
-
-        Observation happens *after* the hold/release decision, and ``observe``
-        itself refuses to absorb a held scope — so a breach freezes its own limit
-        for exactly one tick too many, which is deliberate: the freeze must outlast
-        the signal that caused it or it is not a freeze.
-        """
+        """Hold the limits a signal breached, release the rest, then observe."""
         held: set[tuple[str, str]] = set()
         for outcome in outcomes:
             if outcome.action.value in {"open", "bump"}:

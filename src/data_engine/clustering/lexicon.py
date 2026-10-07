@@ -1,21 +1,4 @@
-"""The word lists the task-string extractor works from.
-
-These are data, not code, and they are the weakest link in the whole clustering
-surface. EXP-2.5-08 measured what happens when a list is wrong: extract too little and
-the same task splits into a dozen clusters; extract too much and two unrelated tasks
-collapse into one. A cluster proposal built on a bad word list is confidently wrong,
-so the lists live in their own module, ship with their provenance, and can be replaced
-at runtime without touching the engine.
-
-**Where these came from.** The verb phrases and colours are the lists the stage 2.5
-experiments used, copied so the product and the evidence agree. They were built by
-reading 46 hand-written strings, then extended by looking at failures *inside the
-evaluation set*, which is why their measured coverage on those strings is 100% and
-their coverage on real operator text is unknown. The verb coverage actually measured on
-a corpus that deliberately contained out-of-lexicon verbs was 0.82
-(`experiments/clustering/results/README.md`, EXP-2.5-08). Nothing here should be read
-as 100%.
-"""
+"""The word lists the task-string extractor works from."""
 
 from __future__ import annotations
 
@@ -24,9 +7,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-#: Verb phrases, longest first at match time so "pick up" wins over "pick".
-#: Multi-word entries first matters: matching "pick" alone would leave "up the mug"
-#: behind and produce a core that still contains a verb.
 DEFAULT_VERBS: tuple[str, ...] = (
     "pick up",
     "put down",
@@ -79,7 +59,6 @@ DEFAULT_VERBS: tuple[str, ...] = (
     "unplug",
 )
 
-#: Colour words lifted out of the string when the colour axis is ignored.
 DEFAULT_COLOURS: frozenset[str] = frozenset(
     {
         "amber",
@@ -110,14 +89,10 @@ DEFAULT_COLOURS: frozenset[str] = frozenset(
     }
 )
 
-#: Articles and pronouns. Always removed: they carry no object identity, and leaving
-#: them in splits "the mug" from "a mug" into two clusters.
 DEFAULT_STOPWORDS: frozenset[str] = frozenset(
     {"a", "an", "the", "this", "that", "these", "those", "it", "its", "them", "then"}
 )
 
-#: Prepositions that start a destination phrase. Used only when the operator asks for
-#: locations to be ignored: everything from the first of these onwards is dropped.
 DEFAULT_PREPOSITIONS: frozenset[str] = frozenset(
     {
         "into",
@@ -162,11 +137,7 @@ class Lexicon:
 
     @classmethod
     def from_json(cls, document: dict[str, Any]) -> Lexicon:
-        """Build from a document, keeping only the keys it actually carries.
-
-        A partial override is the normal case: an operator who finds a missing verb
-        should not have to restate the other three hundred words.
-        """
+        """Build from a document, keeping only the keys it actually carries."""
         return cls(
             verbs=tuple(document.get("verbs", DEFAULT_VERBS)),
             colours=frozenset(document.get("colours", DEFAULT_COLOURS)),
@@ -182,36 +153,21 @@ class Lexicon:
         return cls.from_json(json.loads(path.read_text(encoding="utf-8")))
 
 
-#: The axes the extractor can be asked to ignore, in the order the UI lists them.
-#: Each one is a decision with a cost, so each is opt-in rather than assumed.
 AXES: tuple[str, ...] = ("verb", "colour", "site")
 
 
 @dataclass(frozen=True, slots=True)
 class Ignored:
-    """Which axes this extraction ignores.
-
-    The field defaults and `parse` deliberately disagree, and the reason is measured.
-    `Ignored()` drops the verb and the colour, which is what groups 48 objects into 47
-    clusters with a B-cubed of 0.986 - the only configuration that produced real groups.
-    `parse("")` means *nothing* is ignored, because that is what an empty checkbox group
-    on the Clusters page means, and silently reading it as the useful default would
-    report a fragmentation that the operator did not ask for.
-    """
+    """Which axes this extraction ignores."""
 
     verb: bool = True
     colour: bool = True
     site: bool = False
-    #: Axes beyond the three, for forward compatibility with a learned extractor.
     extra: frozenset[str] = field(default_factory=frozenset)
 
     @classmethod
     def parse(cls, value: str | None) -> Ignored:
-        """`"verb,colour,site"` in, an `Ignored` out.
-
-        Empty means nothing ignored, which is deliberately *not* the field default; see
-        the class docstring for why the two differ.
-        """
+        """`"verb,colour,site"` in, an `Ignored` out."""
         wanted = {part.strip().lower() for part in (value or "").split(",") if part.strip()}
         return cls(
             verb="verb" in wanted,

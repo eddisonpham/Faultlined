@@ -79,11 +79,7 @@ logger = logging.getLogger(__name__)
 
 
 class RuntimeMetrics:
-    """Emit the observability registry's runtime signals; never fails the caller.
-
-    Telemetry absence must not break the pipeline (ADR 0008), so sink write errors are
-    logged once per failure and swallowed. Without a sink the recorder is a no-op.
-    """
+    """Emit the observability registry's runtime signals; never fails the caller."""
 
     def __init__(self, sink: JsonlMetricSink | None = None) -> None:
         self.sink = sink
@@ -157,18 +153,8 @@ class RuntimeMetrics:
         """Liveness ping; the record's timestamp is the heartbeat, its value is 0."""
         self._emit("workers_heartbeat_age_seconds", 0, "seconds", {"worker_state": worker_state})
 
-    # ---- host gauges (the `system_*` registry rows) ----
-
     def sample_host(self, *, process_role: str = "worker") -> None:
-        """Take one host sample and record the registry's `system_*` gauges.
-
-        This is what makes those registry rows real rather than aspirational: they
-        were documented, sampled once per benchmark run into provenance, and never
-        emitted on the runtime interval an operator actually watches.
-
-        A sampling error is logged and dropped (ADR 0008) because this runs inside
-        the worker loop: telemetry must not be able to stop the worker.
-        """
+        """Take one host sample and record the registry's `system_*` gauges."""
         try:
             sample = sample_resources()
         except Exception:
@@ -177,13 +163,7 @@ class RuntimeMetrics:
         self.emit_host_sample(sample, process_role=process_role)
 
     def emit_host_sample(self, sample: TelemetrySample, *, process_role: str = "worker") -> None:
-        """Record one already-taken host sample.
-
-        A field the host could not report is skipped rather than emitted as zero.
-        `sample_resources` represents "could not read it" as `null`, and a fabricated
-        0 would read as a measured value on the metrics page - the same reason a
-        missing GPU produces no `system_gpu_*` record at all rather than a zeroed one.
-        """
+        """Record one already-taken host sample."""
         gauges: tuple[tuple[str, float | int | None, str, dict[str, str] | None], ...] = (
             ("system_cpu_percent", sample.cpu_percent, "percent", None),
             ("system_memory_used_bytes", sample.memory_used_bytes, "bytes", None),
@@ -193,8 +173,6 @@ class RuntimeMetrics:
                 "bytes",
                 {"process_role": process_role},
             ),
-            # The sample is taken on the process's working directory, so `volume` is
-            # the one directory this deployment writes artifacts under.
             ("system_disk_free_bytes", sample.disk_free_bytes, "bytes", {"volume": "."}),
             (
                 "system_network_bytes_sent_total",
@@ -226,13 +204,6 @@ class RuntimeMetrics:
                 continue
             self._emit(name, float(value), unit, labels)
 
-    # ---- monitor self-observability (ADR 0020) ----
-    #
-    # `scope` is deliberately absent from every label below. For RUN_STALLED the
-    # scope is a job id, and a per-job metric series is exactly the unbounded
-    # cardinality ADR 0017 forbids: it would create a time series per job, none of
-    # which would ever be worth reading.
-
     def monitor_tick(self, seconds: float) -> None:
         self._emit("monitor_tick_seconds", seconds, "seconds")
 
@@ -255,7 +226,5 @@ class RuntimeMetrics:
         self._emit("monitor_sensor_availability", ratio, "ratio")
 
     def monitor_blind(self, blind: bool) -> None:
-        """1 while the monitor cannot see the platform. Never an incident: a monitor
-        reports itself blind on the health endpoint rather than paging about a
-        platform it is not observing."""
+        """1 while the monitor cannot see the platform."""
         self._emit("monitor_blind", 1.0 if blind else 0.0, "boolean")

@@ -1,29 +1,4 @@
-"""Per-scope control limits: EWMA centre plus a median/MAD robust spread.
-
-This is *fitted parameters*, not a model (ADR 0020). The distinction is load-bearing
-and worth stating plainly: there is no artifact to version, no training step, and
-every limit is recomputable from the bounded sample window stored alongside it.
-
-Four behaviours exist because the naive version of each fails in a specific,
-observable way:
-
-* **Median/MAD rather than mean/std.** One spike must not widen the very limits
-  that are meant to catch it. A mean/std baseline adapts to a sustained fault
-  within a few samples and the incident then resolves itself silently.
-* **Cold-start abstention.** Until a scope has :data:`MIN_OBSERVATIONS`, only
-  absolute-threshold rules apply and statistical rules decline to answer. A
-  monitor that is confidently wrong on its first ten ticks is worse than a
-  silent one.
-* **Freeze during a breach.** While a scope is held, its baseline does not absorb
-  observations. This is the rule that stops a sustained fault becoming the new
-  normal. A hold has a maximum duration (:data:`MAX_HOLD_SECONDS`) so a resolved
-  fault can never be pinned open by a stuck hold.
-* **Bounded windows.** The sample window is capped, so a baseline's cost and
-  memory are constant regardless of uptime.
-
-The sample window is persisted rather than a pre-computed median, so the stored
-row is self-describing and any limit can be re-derived and audited.
-"""
+"""Per-scope control limits: EWMA centre plus a median/MAD robust spread."""
 
 from __future__ import annotations
 
@@ -32,9 +7,6 @@ from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass, replace
 from typing import Any
 
-# A sample must be this far from the median, in robust sigmas, to count as a
-# breach. 3.5 is the conventional outlier cut and is high enough that ordinary
-# jitter does not trip it on a warm baseline.
 DEFAULT_Z_THRESHOLD = 3.5
 
 MIN_OBSERVATIONS = 20
@@ -42,9 +14,6 @@ SAMPLE_WINDOW = 50
 EWMA_ALPHA = 0.2
 MAX_HOLD_SECONDS = 3600.0
 
-# A perfectly stable scope has MAD 0, which would make the z-score infinite. The
-# floor is relative to the level so it scales with the quantity being watched, and
-# it stops a constant-but-wrong signal from reading as an infinite deviation.
 RELATIVE_SIGMA_FLOOR = 0.05
 ABSOLUTE_SIGMA_FLOOR = 1e-9
 
@@ -150,11 +119,7 @@ class BaselineBook:
         return [self._baselines[key] for key in self.keys()]
 
     def observe(self, feature: str, value: float, *, scope: str = "") -> Baseline:
-        """Record one observation, unless the scope is currently held.
-
-        A held scope is the freeze-during-breach rule: the observation is dropped
-        so a sustained fault cannot redefine what normal looks like.
-        """
+        """Record one observation, unless the scope is currently held."""
         key: BaselineKey = (feature, scope)
         current = self._baselines.get(key) or Baseline(feature=feature, scope=scope)
         if current.breached:
@@ -195,12 +160,7 @@ class BaselineBook:
     def release_expired(
         self, *, now: float, max_hold_seconds: float = MAX_HOLD_SECONDS
     ) -> list[BaselineKey]:
-        """Drop holds older than ``max_hold_seconds``.
-
-        Without this, a hold raised by a crash between the breach and the tick
-        that would have released it would pin the baseline — and therefore the
-        incident — open indefinitely.
-        """
+        """Drop holds older than ``max_hold_seconds``."""
         expired: list[BaselineKey] = []
         for key in self.keys():
             baseline = self._baselines[key]

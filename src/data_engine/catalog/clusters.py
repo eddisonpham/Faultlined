@@ -1,20 +1,4 @@
-"""Catalog storage for cluster proposals and the confirmations attached to them.
-
-Separate from `repository.py` on purpose. That module is the vertical slice of jobs,
-episodes and lineage; this one is a different concern with a different lifetime, and
-putting it in the same 1900-line file would make both worse to read. The table
-definitions live with the schema in `database.py`.
-
-**A confirmation is a claim about task strings, not about a row.** That distinction is
-the whole design. A proposal's key is a hash of its primary core, so changing the
-extraction options re-keys every proposal - and the first version of this module pointed
-`cluster_confirmations` at that key with `ON DELETE CASCADE`. Measured consequence: one
-rebuild with a different axis set deleted every label an operator had written. The
-tables now store the *task strings* a confirmation covers, and `reapply` re-attaches
-each one to whichever proposal holds those strings after a rebuild. A confirmation whose
-strings are no longer together is counted as orphaned and reported, never silently
-reattached to the nearest cluster.
-"""
+"""Catalog storage for cluster proposals and the confirmations attached to them."""
 
 from __future__ import annotations
 
@@ -28,9 +12,6 @@ from data_engine.catalog.database import connect
 from data_engine.clustering import ProposalSet, token_vector
 from data_engine.config import Settings
 
-#: Catalog rows read per rebuild. The cap is reported in the run's health block rather
-#: than hidden: a clustering over the first 5000 task strings looks identical to a
-#: complete one unless somebody says otherwise.
 TASK_LIMIT = 5000
 REVIEW_LIMIT = 100
 REVIEW_MARGIN = 0.05
@@ -38,11 +19,7 @@ _CLUSTER_REVIEW_LOCK = 0x464C5256
 
 
 def distinct_tasks(settings: Settings, *, limit: int = TASK_LIMIT) -> dict[str, int]:
-    """Every distinct task string in the catalog, with its episode count.
-
-    Bounded on purpose: a catalog with a million episodes should not turn one page into
-    a million-row scan.
-    """
+    """Every distinct task string in the catalog, with its episode count."""
     with connect(settings) as connection:
         rows = connection.execute(
             """SELECT coalesce(metadata->>'task', '') AS task, count(*) AS episodes
@@ -98,20 +75,7 @@ class Reapplied:
 
 
 def labels_for(members: Mapping[str, set[str]], stored: Sequence[Confirmation]) -> dict[str, str]:
-    """The label each proposal inherits from the confirmations covering its tasks.
-
-    One function, used by both the rebuild and the page read, because two matching rules
-    would eventually disagree and the reader would see a confirmed cluster counted as
-    unconfirmed (or worse, the reverse).
-
-    A proposal inherits a label only if it holds **more than half** of the confirmation's
-    strings. Matching on any overlap at all was measured wrong: shrink the radius until a
-    confirmed pair of task strings scatters into two singletons, and each singleton
-    overlaps by one, the tie is broken on the key, and the operator's name lands on an
-    arbitrary neighbouring cluster. That is the exact failure this module exists to
-    avoid - a claim silently moving to something it was never about - so a confirmation
-    only survives while its strings are still recognisably together.
-    """
+    """The label each proposal inherits from the confirmations covering its tasks."""
     labels: dict[str, str] = {}
     for entry in stored:
         wanted = set(entry.tasks)
@@ -128,14 +92,7 @@ def labels_for(members: Mapping[str, set[str]], stored: Sequence[Confirmation]) 
 
 
 def reapply(stored: Sequence[Confirmation], proposals: ProposalSet) -> Reapplied:
-    """Re-attach confirmations to the proposals that now hold their task strings.
-
-    Matching is by overlap rather than by key, because a confirmation is about the
-    strings and the group survives an option change even when its key does not. A
-    confirmation whose strings no longer sit together in any one proposal is counted as
-    orphaned, which is a fact the operator needs and not a rounding error to hide. See
-    `labels_for` for why the threshold is a majority rather than any overlap.
-    """
+    """Re-attach confirmations to the proposals that now hold their task strings."""
     members: dict[str, set[str]] = {
         proposal.key: {member.task for member in proposal.members}
         for proposal in proposals.proposals
@@ -146,13 +103,7 @@ def reapply(stored: Sequence[Confirmation], proposals: ProposalSet) -> Reapplied
 
 
 def replace_proposals(settings: Settings, proposals: ProposalSet) -> dict[str, Any]:
-    """Write one proposal run, replacing the previous proposals atomically.
-
-    Confirmations are read and re-applied *before* the rows go, and they live in a table
-    with no foreign key to `task_clusters`, so a rebuild cannot take them with it. One
-    transaction means a crash mid-write leaves the previous run intact rather than a
-    half-written mixture.
-    """
+    """Write one proposal run, replacing the previous proposals atomically."""
     reapplied = reapply(confirmations(settings), proposals)
     with connect(settings) as connection, connection.transaction():
         connection.execute("SELECT pg_advisory_xact_lock(%s)", (_CLUSTER_REVIEW_LOCK,))
@@ -216,11 +167,7 @@ def replace_proposals(settings: Settings, proposals: ProposalSet) -> dict[str, A
 
 
 def list_proposals(settings: Settings, *, limit: int = 200) -> list[dict[str, Any]]:
-    """Proposals with their confirmation, biggest first.
-
-    The confirmation is matched on the task strings the proposal holds, for the same
-    reason `reapply` does: the stored key is historical and the strings are the claim.
-    """
+    """Proposals with their confirmation, biggest first."""
     stored = confirmations(settings)
     with connect(settings) as connection:
         rows = connection.execute(
@@ -301,12 +248,7 @@ def review_decisions(settings: Settings, *, limit: int = 30) -> list[dict[str, s
 def review_candidates(
     settings: Settings, *, limit: int = REVIEW_LIMIT, margin: float = REVIEW_MARGIN
 ) -> list[dict[str, Any]]:
-    """Rank bounded low-support or near-boundary members from the stored proposal run.
-
-    Distance is measured from each extracted core to its final stored proposal centroid.
-    Singleton status and radius margin are review heuristics, not calibrated confidence.
-    At most TASK_LIMIT stored members are examined so page reads stay bounded.
-    """
+    """Rank bounded low-support or near-boundary members from the stored proposal run."""
     if limit < 1 or limit > REVIEW_LIMIT:
         raise ValueError(f"review limit must be between 1 and {REVIEW_LIMIT}")
     candidates: list[dict[str, Any]] = []
@@ -455,12 +397,7 @@ def _tasks(settings: Settings, key: str) -> set[str]:
 
 
 def confirm(settings: Settings, key: str, label: str, *, who: str = "operator") -> bool:
-    """Confirm the proposal currently holding `key`, by its task strings.
-
-    The task list is stored with the confirmation, so the claim outlives the row. Returns
-    False when there is no such proposal or it holds no members, because a confirmation
-    of nothing is not a confirmation.
-    """
+    """Confirm the proposal currently holding `key`, by its task strings."""
     cleaned = label.strip()
     if not cleaned:
         raise ValueError("a confirmation needs a label")
@@ -518,13 +455,7 @@ def rebuild(
     rule: str = "running_mean",
     limit: int = TASK_LIMIT,
 ) -> dict[str, Any]:
-    """Regroup the catalog's task strings and store the result.
-
-    `source="sample"` proposes over the shipped LeRobot sentences instead, which is what
-    makes the page demonstrate itself on a catalog with nothing ingested yet. Those runs
-    are labelled `sample` in the stored health block so a later reader cannot mistake
-    them for catalog statistics.
-    """
+    """Regroup the catalog's task strings and store the result."""
     from data_engine.clustering import Ignored, build, sample_tasks
 
     if source == "sample":
@@ -547,12 +478,7 @@ def rebuild(
 
 
 def model(settings: Settings, *, limit: int = 512) -> dict[str, Any]:
-    """Everything the Clusters page renders, in one read.
-
-    Proposals come back from the catalog rather than being recomputed on the page view:
-    a page load must not change the numbers it is showing, and recomputing would make
-    every refresh a rebuild.
-    """
+    """Everything the Clusters page renders, in one read."""
     from data_engine.clustering import Ignored
 
     rows = list_proposals(settings, limit=limit)

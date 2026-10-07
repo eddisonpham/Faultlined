@@ -1,24 +1,4 @@
-"""Deterministic incident rendering.
-
-The summary is *rendered from the evidence, not generated*. Three consequences,
-all of them the point:
-
-* It is deterministic and offline. No network call, no quota, no credential, and
-  no way for the notifier to fail because a provider is down.
-* It cannot assert a cause the evidence does not contain, because every sentence
-  is assembled from fields that are stored alongside it.
-* It is instant and free, which means a slow or expensive explanation can never
-  be the reason an incident is delayed.
-
-A future LLM enrichment stage would take exactly this evidence bundle as input
-and rewrite this text — but it could not change what an incident *is*, because
-detection has already happened by the time anything is rendered (ADR 0020).
-
-Every line follows the same contract, taken from the afk rule: **actionable
-without opening the laptop, or it does not claim to be.** "Unusual metric activity
-detected" is not a summary. "3 of 200 episodes quarantined by `staged-strict`;
-rate is 4x the usual" is.
-"""
+"""Deterministic incident rendering."""
 
 from __future__ import annotations
 
@@ -149,8 +129,6 @@ def _resource_degraded(evidence: Mapping[str, Any], _detail: str) -> str:
 
 def _metric_shift(evidence: Mapping[str, Any], _detail: str) -> str:
     shifted = evidence.get("shifted") or []
-    # "sigmas" rather than the sigma glyph: this text is read in terminals, and a
-    # cp1252 console cannot encode the character.
     parts = ", ".join(
         f"{item['feature']}={float(item['value']):.4g} ({float(item['robust_z']):+.1f} sigmas)"
         for item in shifted
@@ -189,12 +167,7 @@ _RENDERERS = {
 
 
 def render_digest(incidents: Sequence[Mapping[str, Any]]) -> str:
-    """Batch the queue into one morning-read summary.
-
-    Notify-class incidents come first and are never batched away; queue-class
-    incidents follow in a single line each. An absent operator gets the wasted
-    night up front and everything else underneath it.
-    """
+    """Batch the queue into one morning-read summary."""
     if not incidents:
         return "No incidents."
     ordered = sorted(
@@ -231,11 +204,7 @@ def _severity_rank(value: str) -> int:
 
 
 def render_notify(incidents: Sequence[Mapping[str, Any]]) -> str:
-    """The body a notifier would deliver. Rendering only; nothing is sent.
-
-    Kept separate from :func:`render_digest` so the dry-run path and a future
-    delivery stage share one implementation of "what would the owner read".
-    """
+    """The body a notifier would deliver."""
     if not incidents:
         return ""
     header = (

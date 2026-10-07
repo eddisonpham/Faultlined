@@ -56,7 +56,7 @@
         "type": "object"
       },
       "BuildCoverageResponse": {
-        "description": "What one build contains, measured against the catalog it was drawn from (ADR 0033).\n\nBounded by construction: the payload is bounded by the axes and their limits, never by the\nepisode count. Read-only - no coverage figure takes part in a build's identity and no build\nis refused for a gap.",
+        "description": "What one build contains, measured against the catalog it was drawn from (ADR 0033).",
         "properties": {
           "axes": {
             "items": {
@@ -193,7 +193,7 @@
       },
       "BuildPayload": {
         "additionalProperties": false,
-        "description": "A dataset build over a named selection of episodes (FR-006).\n\nEmpty `episode_ids` means \"every episode that passed validation\" - the\nselection a first build almost always wants, and the one that is safe to\ndefault to because a failing episode is excluded rather than silently\nincluded.",
+        "description": "A dataset build over a named selection of episodes (FR-006).",
         "properties": {
           "episode_ids": {
             "items": {
@@ -222,7 +222,7 @@
         "type": "object"
       },
       "BuildRedundancyResponse": {
-        "description": "Near-duplicate structure of a build's membership (ADR 0032).\n\nRead-only: the report proposes which episodes are the same behaviour recorded twice and\nnever removes one. `incomparable` lists the episodes that carry no signal to compare on\n(no clock, no judged dimension) - they are counted as distinct, which is the honest\ndirection, and they are named so the count is not mistaken for a measurement.",
+        "description": "Near-duplicate structure of a build's membership (ADR 0032).",
         "properties": {
           "build_hash": {
             "title": "Build Hash",
@@ -457,7 +457,7 @@
         "type": "object"
       },
       "ClusterProposal": {
-        "description": "One proposal. `frozen` is derived from a confirmation existing, never stored twice.",
+        "description": "One proposal.",
         "properties": {
           "colours": {
             "additionalProperties": {
@@ -787,7 +787,7 @@
       },
       "ContractRequest": {
         "additionalProperties": false,
-        "description": "A declared expectation for one run. Every field is optional; all absent = no-op.",
+        "description": "A declared expectation for one run.",
         "properties": {
           "deadline_at": {
             "anyOf": [
@@ -844,7 +844,7 @@
         "type": "object"
       },
       "CoverageAxisResponse": {
-        "description": "One axis of a build's coverage: what the build holds, and what it lacks (ADR 0033).\n\n`missing` is the number of gaps before `gaps` was truncated, so a capped list reads as \"at\nleast this many\" rather than as the whole answer. The task axis's gaps are vocabulary\nlabels, so a label with no episode anywhere is a gap; every other axis's gaps are the\ncatalog's values the build left out.",
+        "description": "One axis of a build's coverage: what the build holds, and what it lacks (ADR 0033).",
         "properties": {
           "axis": {
             "title": "Axis",
@@ -1600,7 +1600,7 @@
         "type": "object"
       },
       "IncidentPayload": {
-        "description": "One incident. ``evidence`` is never empty: triage rejects uncited signals.",
+        "description": "One incident.",
         "properties": {
           "acknowledged_at": {
             "anyOf": [
@@ -2238,7 +2238,7 @@
         "type": "object"
       },
       "MonitoringHealthResponse": {
-        "description": "The monitor's own state. A monitor that silently stops is the worst outcome.",
+        "description": "The monitor's own state.",
         "properties": {
           "alert_budget_per_window": {
             "title": "Alert Budget Per Window",
@@ -2588,7 +2588,7 @@
         "type": "object"
       },
       "SliceImpactResponse": {
-        "description": "What a curation slice keeps and drops versus the whole dataset, and why.\n\n`kept` and `dropped` partition the dataset and carry the same quality\nsignals for each side, so \"this slice is smoother than what it dropped\" is\na readable claim rather than an inference. `drop_reasons` attributes each\ndropped episode to the first predicate it failed; `reorders_only` is the\nhonest zero: `short`/`long` order the view and exclude nothing.",
+        "description": "What a curation slice keeps and drops versus the whole dataset, and why.",
         "properties": {
           "dataset": {
             "additionalProperties": true,
@@ -3204,7 +3204,7 @@
       },
       "ValidatePayload": {
         "additionalProperties": false,
-        "description": "Which episodes to check, against which policy.\n\nAn empty `episode_ids` means \"everything currently ingested\" - the common\ncase after a bulk ingest, and an explicit statement rather than a default\nthat silently changes meaning if a caller forgets the field.\n\nThe policy travels as a whole document, not a name to look up. A job is a\nself-contained, retryable record: if the profile is edited between the\nsubmission and the attempt, the job must still validate against what was\nasked for, not against whatever the name resolves to now.",
+        "description": "Which episodes to check, against which policy.",
         "properties": {
           "episode_ids": {
             "items": {
@@ -3312,7 +3312,7 @@
         "type": "object"
       },
       "VocabularyCandidate": {
-        "description": "One ranked suggestion. A suggestion is a queue item, never an action.",
+        "description": "One ranked suggestion.",
         "properties": {
           "core": {
             "title": "Core",
@@ -3402,7 +3402,7 @@
         "type": "object"
       },
       "VocabularyEntry": {
-        "description": "One curated activity. The id is stable; the label is what a human approved.",
+        "description": "One curated activity.",
         "properties": {
           "core": {
             "default": "",
@@ -3960,7 +3960,7 @@
   "paths": {
     "/": {
       "get": {
-        "description": "Point a first-time visitor somewhere useful.\n\n`/` is JSON rather than a redirect because a bare 404 in the browser was\nthe original complaint; the UI is one field away and the API callers get\nthe machine-readable map they expect.",
+        "description": "Point a first-time visitor somewhere useful.",
         "operationId": "root__get",
         "responses": {
           "200": {
@@ -3981,7 +3981,7 @@
     },
     "/api/v1/artifacts": {
       "get": {
-        "description": "Newest-first page of content-addressed artifacts with their referencing episodes.\n\n``?format=csv|jsonl`` streams every artifact as a file download.",
+        "description": "Newest-first page of content-addressed artifacts with their referencing episodes.",
         "operationId": "list_artifacts_api_v1_artifacts_get",
         "parameters": [
           {
@@ -4137,7 +4137,7 @@
     },
     "/api/v1/builds/{build_hash}/coverage": {
       "get": {
-        "description": "What this build contains, and what the catalog holds that it does not (ADR 0033).\n\nDeterministic and read-only, computed from attributes ingest already wrote - task, robot,\nformat and verdict. The gap list is the actionable half: it names the values the catalog\nholds and this build left out, and for tasks it names the vocabulary entries with no\nepisode here whether or not an episode exists for them anywhere.\n\nThe payload is bounded by the axes and their limits, never by the episode count, with\n`missing` and `truncated` carrying what the caps left out.",
+        "description": "What this build contains, and what the catalog holds that it does not (ADR 0033).",
         "operationId": "build_coverage_api_v1_builds__build_hash__coverage_get",
         "parameters": [
           {
@@ -4177,7 +4177,7 @@
     },
     "/api/v1/builds/{build_hash}/redundancy": {
       "get": {
-        "description": "Which episodes in this build are the same behaviour recorded twice (ADR 0032).\n\nDeterministic and read-only, computed from signals ingest already wrote - no artifact\nis opened and no model is involved. Membership is read in ordinal order and the rows\nare put back into that order before the report runs, because truncation takes the\n*first* N and a report whose coverage depended on a database's return order would not\nbe comparable between two runs.\n\nAn episode that was never scored has no fingerprint and is absent, so `episode_count`\nis what was scored, not what the build holds.",
+        "description": "Which episodes in this build are the same behaviour recorded twice (ADR 0032).",
         "operationId": "build_redundancy_api_v1_builds__build_hash__redundancy_get",
         "parameters": [
           {
@@ -4313,7 +4313,7 @@
     },
     "/api/v1/contracts": {
       "get": {
-        "description": "Completion contracts, newest first.\n\n``?format=csv|jsonl`` streams the filtered set as a download.",
+        "description": "Completion contracts, newest first.",
         "operationId": "list_contracts_api_v1_contracts_get",
         "parameters": [
           {
@@ -4441,7 +4441,7 @@
         "summary": "Get Contract"
       },
       "put": {
-        "description": "Declare what a run is expected to produce; idempotent per job.\n\nRe-declaring resets the outcome to pending, because a revised expectation\nhas not been evaluated yet and claiming otherwise would hide a breach.",
+        "description": "Declare what a run is expected to produce; idempotent per job.",
         "operationId": "declare_contract_api_v1_contracts__job_id__put",
         "parameters": [
           {
@@ -4491,7 +4491,7 @@
     },
     "/api/v1/episodes": {
       "get": {
-        "description": "Scriptable episode catalog with the same curation views as the UI.\n\n``?format=csv|jsonl`` streams every matching episode as a file download,\nnewest first.",
+        "description": "Scriptable episode catalog with the same curation views as the UI.",
         "operationId": "list_episodes_api_api_v1_episodes_get",
         "parameters": [
           {
@@ -4582,7 +4582,7 @@
     },
     "/api/v1/episodes/export": {
       "get": {
-        "description": "Curated manifest for curation and dataset builds.\n\nThe same curation views as the catalog listing plus content identity\n(source/artifact hashes). Registered before `/api/v1/episodes/{episode_id}`\nso `export` is never read as an episode id.",
+        "description": "Curated manifest for curation and dataset builds.",
         "operationId": "export_episodes_api_api_v1_episodes_export_get",
         "parameters": [
           {
@@ -4835,7 +4835,7 @@
     },
     "/api/v1/failures/episodes": {
       "get": {
-        "description": "Quarantined episodes with the reason codes that put them there.\n\n``?format=csv|jsonl`` streams the whole quarantined set as a download.",
+        "description": "Quarantined episodes with the reason codes that put them there.",
         "operationId": "failures_episodes_api_v1_failures_episodes_get",
         "parameters": [
           {
@@ -4948,7 +4948,7 @@
     },
     "/api/v1/incidents": {
       "get": {
-        "description": "The incident queue, newest first. Read-only.\n\n``?format=csv|jsonl`` streams the filtered queue as a download.",
+        "description": "The incident queue, newest first.",
         "operationId": "list_incidents_api_v1_incidents_get",
         "parameters": [
           {
@@ -5168,7 +5168,7 @@
     },
     "/api/v1/incidents/{incident_id}/resolve": {
       "post": {
-        "description": "Resolve. A same-fault recurrence then opens a new incident, subject to cooldown.",
+        "description": "Resolve.",
         "operationId": "resolve_incident_api_v1_incidents__incident_id__resolve_post",
         "parameters": [
           {
@@ -5208,7 +5208,7 @@
     },
     "/api/v1/jobs": {
       "get": {
-        "description": "Newest-first page of jobs for the Jobs UI.\n\nCursor-based: pass the last item's ``created_at`` back as ``before``. The UI\nnever asks for every row. ``?format=csv|jsonl`` streams the whole filtered\nset as a file download instead; ``limit``/``before`` page the JSON view only.",
+        "description": "Newest-first page of jobs for the Jobs UI.",
         "operationId": "list_jobs_api_v1_jobs_get",
         "parameters": [
           {
@@ -5313,7 +5313,7 @@
         "summary": "List Jobs"
       },
       "post": {
-        "description": "Queue an ingest job.\n\nFour request shapes, one endpoint: `ingest` carries an episode in the\nrequest body (the synthetic contract), `ingest_source` names a dataset on\ndisk and lets a reader interpret it, `validate` and `build` name a\nselection of episodes already in the catalog. They are separate types\nrather than one optional payload because \"either a body or a path\" is\nexactly the kind of either/or that a typo turns into a confusing 422.",
+        "description": "Queue an ingest job.",
         "operationId": "submit_job_api_v1_jobs_post",
         "parameters": [
           {
@@ -5426,7 +5426,7 @@
     },
     "/api/v1/jobs/{job_id}/cancel": {
       "post": {
-        "description": "Request cancellation (F7).\n\nA queued job is canceled immediately; a running job moves to\n`cancel_requested` and the worker stops it at its next checkpoint. A job that\nalready reached a terminal state cannot be cancelled (409), and an unknown id\nis a 404.",
+        "description": "Request cancellation (F7).",
         "operationId": "cancel_job_api_v1_jobs__job_id__cancel_post",
         "parameters": [
           {
@@ -5546,7 +5546,7 @@
     },
     "/api/v1/metrics": {
       "get": {
-        "description": "Aggregated runtime telemetry from the JSONL metrics sink.\n\nSummaries describe every (metric, labels) sample set; series are bucketed\nmeans per metric name for sparklines. Worker heartbeat age is derived from\nthe newest heartbeat record's timestamp, over all records rather than the\nwindow (a dead worker must not vanish from a narrow window).\n\n``?format=csv|jsonl`` downloads the sparkline series (metric, t, v,\ncount) for the same window.",
+        "description": "Aggregated runtime telemetry from the JSONL metrics sink.",
         "operationId": "runtime_metrics_api_v1_metrics_get",
         "parameters": [
           {
@@ -5619,7 +5619,7 @@
     },
     "/api/v1/monitoring/health": {
       "get": {
-        "description": "The monitor's own state. A monitor that silently stops is the worst outcome.",
+        "description": "The monitor's own state.",
         "operationId": "monitoring_health_api_v1_monitoring_health_get",
         "responses": {
           "200": {
@@ -5638,7 +5638,7 @@
     },
     "/api/v1/monitoring/notify-preview": {
       "get": {
-        "description": "What a notifier would send right now. Rendering only; nothing is sent.\n\nEmail delivery is deliberately not implemented (ADR 0020 \u00a710.3): it needs\nexplicit owner authorization, and a dry run that is a real code path is the\nonly honest way to leave it switched off.",
+        "description": "What a notifier would send right now.",
         "operationId": "notify_preview_api_v1_monitoring_notify_preview_get",
         "responses": {
           "200": {
@@ -5657,7 +5657,7 @@
     },
     "/api/v1/monitoring/tick": {
       "post": {
-        "description": "Evaluate one window on demand.\n\nThe loop is a scheduler's job, not a webhook's; this exists so the notifier\ncan be driven deterministically from a test, a benchmark, or an operator who\nwants to see what it would say right now.",
+        "description": "Evaluate one window on demand.",
         "operationId": "run_monitor_tick_api_v1_monitoring_tick_post",
         "responses": {
           "200": {
@@ -5751,7 +5751,7 @@
         "summary": "List Slices"
       },
       "post": {
-        "description": "Save a named curation filter.\n\nMembership is recomputed on the next manifest read, so creating a slice is\ncheap and the slice never goes stale as episodes change.",
+        "description": "Save a named curation filter.",
         "operationId": "create_slice_api_v1_slices_post",
         "requestBody": {
           "content": {
@@ -6517,7 +6517,7 @@
     },
     "/ui": {
       "get": {
-        "description": "Status/Overview. The X-Fragment header returns only the polling body.",
+        "description": "Status/Overview.",
         "operationId": "ui_status_ui_get",
         "parameters": [
           {
@@ -6580,7 +6580,7 @@
     },
     "/ui/app.js": {
       "get": {
-        "description": "The client runtime. Served as a route rather than a static mount so the\nUI stays one Python-owned directory with no extra file-serving surface.",
+        "description": "The client runtime.",
         "operationId": "ui_app_js_ui_app_js_get",
         "responses": {
           "200": {
@@ -6675,7 +6675,7 @@
     },
     "/ui/benchmarks": {
       "get": {
-        "description": "Committed benchmark baselines and the runs recorded on this machine.\n\nReads `benchmarks/` off disk, so it needs no database and no catalog\ntable. A benchmark claim is a repository artifact, not a row.",
+        "description": "Committed benchmark baselines and the runs recorded on this machine.",
         "operationId": "ui_benchmarks_ui_benchmarks_get",
         "parameters": [
           {
@@ -6738,7 +6738,7 @@
     },
     "/ui/builds": {
       "get": {
-        "description": "Content-addressed builds. The address is the content.",
+        "description": "Content-addressed builds.",
         "operationId": "ui_builds_ui_builds_get",
         "parameters": [
           {
@@ -7425,7 +7425,7 @@
         "summary": "Ui Jobs"
       },
       "post": {
-        "description": "Queue a job from the browser form.\n\nOne front door, five kinds: `episode` and `path` are ingest, and `validate`,\n`build` and `export` complete the loop those three form pages host (the audit's\nrelease blocker 1 - EXP-0017 measured the last three steps as curl-only).\n\nThe form is parsed by hand rather than with ``Form(...)`` because that\nwould pull in ``python-multipart`` for a single urlencoded body - a new\ndependency, on the dependency-free path ADR 0014 is built around, to save\nthree lines of ``urllib.parse``.\n\nEvery kind is built and then validated through the *same* Pydantic models\nthe JSON endpoint uses. A form is a second front door to the same door, and\na second front door with its own weaker validation is how a UI ends up able\nto create jobs the API would refuse.\n\nOn a bad submission this re-renders the page that owns the form with the\nerror inline and the typed values preserved, rather than redirecting: losing\nwhat someone typed because of one bad field is the fastest way to make a form\nfeel hostile. The redirect on success is 303, so a refresh does not queue the\nsame job twice.",
+        "description": "Queue a job from the browser form.",
         "operationId": "ui_submit_job_ui_jobs_post",
         "responses": {
           "200": {
@@ -7497,7 +7497,7 @@
     },
     "/ui/jobs/{job_id}/cancel": {
       "post": {
-        "description": "Cancel from the UI and bounce back to the job.\n\nA plain form post, so the control works without JavaScript. It calls the same\nrepository method as the API route rather than issuing an HTTP request to\nourselves; the redirect is 303 so a refresh does not re-submit the cancel.",
+        "description": "Cancel from the UI and bounce back to the job.",
         "operationId": "ui_cancel_job_ui_jobs__job_id__cancel_post",
         "parameters": [
           {
@@ -7646,7 +7646,7 @@
     },
     "/ui/schema": {
       "get": {
-        "description": "The catalog, read live. A drawing of it would eventually be a lie.",
+        "description": "The catalog, read live.",
         "operationId": "ui_schema_ui_schema_get",
         "parameters": [
           {
@@ -7895,7 +7895,7 @@
     },
     "/ui/vendor/departure-mono/DepartureMono-Regular.woff2": {
       "get": {
-        "description": "Serve the vendored display font. See web/vendor/departure-mono/NOTICE.md.",
+        "description": "Serve the vendored display font.",
         "operationId": "ui_font_ui_vendor_departure_mono_DepartureMono_Regular_woff2_get",
         "responses": {
           "200": {
@@ -7912,7 +7912,7 @@
     },
     "/ui/vendor/terminal-ui/{name}.css": {
       "get": {
-        "description": "Serve the vendored terminal stylesheet. See web/vendor/terminal-ui/NOTICE.md.",
+        "description": "Serve the vendored terminal stylesheet.",
         "operationId": "ui_vendor_css_ui_vendor_terminal_ui__name__css_get",
         "parameters": [
           {

@@ -1,30 +1,4 @@
-"""LeRobot v3 export of dataset builds (ADR 0025).
-
-A build is a manifest; an export is the *dataset* the manifest describes, laid
-out on disk in LeRobot v3 form so a training script can load it without this
-engine installed. The rules come from ADR 0025, and each guards a failure mode:
-
-- **The directory is the build hash.** The hash is the dataset's identity, so
-  re-exporting is verifiably a no-op ("already done" is a claim about content,
-  not memory) and two exports of one build cannot diverge.
-- **Atomic publication.** The tree is staged under a `.pending-` sibling and
-  renamed into place only when complete, so a killed export never leaves a
-  half-valid dataset at the content address.
-- **Every member contributes its frames or the export fails.** A missing
-  episode is a silent hole in a training set; the manifest's episode count is
-  a promise, not a suggestion.
-- **One data file per episode, in manifest order.** A v3 episode is a row
-  range over concatenated files; giving every episode its own file makes the
-  row range trivially `[0, n)` for each, which is the layout least likely to
-  be read back as somebody else's frames.
-
-The acceptance consumer is our own `LeRobotReader`: the file naming, the index
-record keys, and the row-range math below are exactly what that reader
-resolves, and the round-trip test pins it.
-
-Videos are not exported: no ingested format carries video frames today, so the
-declared layout has none. A recorded limit, not an omission.
-"""
+"""LeRobot v3 export of dataset builds (ADR 0025)."""
 
 from __future__ import annotations
 
@@ -43,15 +17,12 @@ import pyarrow.parquet as pq
 from data_engine.canonical import canonical_json
 from data_engine.storage.artifacts import ArtifactIntegrityError, FileArtifactStore
 
-#: Engine-owned metadata inside the exported tree. LeRobot consumers ignore
-#: unknown directories; lineage travels with the data.
 FAULTLINED_DIR = "_faultlined"
 
 DATA_DIR = Path("data")
 META_DIR = Path("meta")
 EPISODES_META_DIR = META_DIR / "episodes"
 
-#: Files per chunk, the LeRobot convention; chunk/file indexes derive from it.
 CHUNKS_SIZE = 1000
 
 _STRUCTURAL = frozenset({"timestamp", "frame_index", "episode_index", "index", "task_index"})
@@ -73,13 +44,7 @@ class BuildExporter:
         self.artifacts = artifacts
 
     def export(self, build: dict[str, Any], members: list[dict[str, Any]]) -> dict[str, Any]:
-        """Export `build` with its member `episodes`; idempotent at the address.
-
-        `members` are episode rows (at minimum id/episode_id, artifact_hash, and
-        episode_key where the format has one). Raises ExportError when the build
-        is malformed or any member's artifact cannot be decoded into frames; a
-        failed export leaves no tree at the build-hash address.
-        """
+        """Export `build` with its member `episodes`; idempotent at the address."""
         build_hash = str(build.get("hash") or "")
         if not build_hash:
             raise ExportError("a build row without a hash cannot be exported")
@@ -95,8 +60,6 @@ class BuildExporter:
         dataset_root = self.export_root / build_hash
         existing = self.exported_path(build_hash)
         if existing is not None:
-            # The verified tree at the content address is the answer; no
-            # artifact is read, so a re-export never depends on the sources.
             info = json.loads((existing / META_DIR / "info.json").read_text(encoding="utf-8"))
             return {
                 "build_hash": build_hash,
@@ -121,20 +84,13 @@ class BuildExporter:
             return candidate
         return None
 
-    # ------------------------------------------------------------------ frames
-
     def _member_frames(
         self,
         build_hash: str,
         episodes: list[dict[str, Any]],
         members: list[dict[str, Any]],
     ) -> list[tuple[pa.Table, dict[str, Any]]]:
-        """Decode every member into a frame table, in manifest order.
-
-        The manifest is the identity of the episode list, so iteration follows
-        it; member rows are looked up by id to carry the artifact hash and the
-        metadata the index records need.
-        """
+        """Decode every member into a frame table, in manifest order."""
         by_id = {
             str(row.get("episode_id") or row.get("id") or ""): row
             for row in members
@@ -156,9 +112,6 @@ class BuildExporter:
             try:
                 blob = self.artifacts.get_bytes(artifact_hash)
             except ArtifactIntegrityError as exc:
-                # Corrupt content is a property of the bytes: retrying cannot
-                # fix it, so it is terminal. A plain OSError (disk, permissions)
-                # propagates unwrapped and stays retryable.
                 raise ExportError(
                     f"episode {episode_id} artifact {artifact_hash[:12]} is unreadable: {exc}"
                 ) from exc
@@ -181,24 +134,14 @@ class BuildExporter:
         try:
             _write_layout(staging, build, frames)
             if dataset_root.exists():
-                # A concurrent export won the rename; the address holds one tree
-                # either way, which is the property that matters.
                 return
             os.rename(staging, dataset_root)
         finally:
             shutil.rmtree(staging, ignore_errors=True)
 
 
-# ---------------------------------------------------------------- frame decode
-
-
 def _episode_frames(episode_id: str, blob: bytes, row: dict[str, Any]) -> pa.Table:
-    """One member's frames, whatever format ingested it.
-
-    Two artifact shapes exist today: canonical-JSON synthetic episodes and
-    Parquet files (a lerobot source file may be shared by many episodes, so it
-    is sliced by `episode_index` - the same contract the LeRobot reader keeps).
-    """
+    """One member's frames, whatever format ingested it."""
     if blob.lstrip()[:1] == b"{":
         return _synthetic_frames(episode_id, blob)
     table = _parquet_frames(episode_id, blob)
@@ -261,21 +204,12 @@ def _parse_episode_key(key: str) -> int:
         raise ExportError(f"cannot parse an episode index from {key!r}") from exc
 
 
-# -------------------------------------------------------------------- layout
-
-
 def _write_layout(
     staging: Path,
     build: dict[str, Any],
     frames: list[tuple[pa.Table, dict[str, Any]]],
 ) -> None:
-    """The v3 tree: per-episode data files, the episode index, info, tasks.
-
-    Episode `i` lives at `data/chunk-{c}/file-{f}.parquet` with
-    `c, f = i // CHUNKS_SIZE, i % CHUNKS_SIZE`, and its index record at
-    `meta/episodes/chunk-{c}/episode_{i:06d}.parquet` declares the row range
-    `[0, n)` over exactly that file - which is what the reader resolves.
-    """
+    """The v3 tree: per-episode data files, the episode index, info, tasks."""
     global_start = 0
     for index, (table, row) in enumerate(frames):
         chunk, file_index = index // CHUNKS_SIZE, index % CHUNKS_SIZE
@@ -320,12 +254,7 @@ def _write_layout(
 
 
 def _episode_index_record(index: int, start: int, length: int, row: dict[str, Any]) -> pa.Table:
-    """The v3 episode record: identity, locator, global row range, tasks.
-
-    The range is dataset-global, not per-file: the reader subtracts the file's
-    starting row (the sum of every earlier file's lengths) to locate the slice,
-    so a per-file zero here reads somebody else's frames or none at all.
-    """
+    """The v3 episode record: identity, locator, global row range, tasks."""
     return pa.table(
         {
             "episode_index": pa.array([index], pa.int64()),
@@ -388,7 +317,7 @@ def _features(frames: list[tuple[pa.Table, dict[str, Any]]]) -> dict[str, Any]:
         for name in table.schema.names:
             if name not in _STRUCTURAL and name not in names:
                 names.append(name)
-    dtype = "float64"  # what every column written by this module actually is
+    dtype = "float64"
     return {name: {"dtype": dtype, "shape": [1]} for name in names}
 
 

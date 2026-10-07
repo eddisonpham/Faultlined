@@ -1,26 +1,4 @@
-"""Migration 0002: the task vocabulary, backfilled from the cluster archive (ADR 0029).
-
-Schema-only changes are idempotent DDL and belong in the baseline; this
-migration exists for what idempotent DDL cannot express - the **one-time
-backfill** that turns the frozen cluster surface's confirmations and review
-dispositions into vocabulary entries and mappings.
-
-Backfill rules, stated because "first wins" is a decision:
-
-- One entry per distinct confirmation label (id derived from the label, so two
-  confirmations with the same label collapse into one entry).
-- One mapping per task string, provenance `confirm`. When several confirmations
-  cover the same string, the **oldest** wins (rows are read in id order); a
-  later confirmation cannot silently move a string an operator already placed.
-- Review dispositions: `dismissed` becomes a dismissal mapping; `class` with a
-  label becomes an entry + confirm mapping; `class` without a label is left
-  unmapped on purpose - it has no name to map to, and inventing one would put a
-  label nobody wrote into the vocabulary.
-
-The backfill writes no events: it is a reconstruction of history, not an
-operation, and its provenance is already recorded on every mapping row.
-Running it twice changes nothing (`ON CONFLICT DO NOTHING` throughout).
-"""
+"""Migration 0002: the task vocabulary, backfilled from the cluster archive (ADR 0029)."""
 
 from __future__ import annotations
 
@@ -31,8 +9,6 @@ from psycopg import Connection
 
 from data_engine.catalog.vocabulary import core_of, entry_id_for
 
-# Self-contained: the same idempotent DDL as the baseline, so `de migrate` can
-# run before any process has started against the database.
 _DDL = """
 CREATE TABLE IF NOT EXISTS task_vocabulary_entries (
     id text PRIMARY KEY,

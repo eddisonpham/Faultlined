@@ -1,20 +1,4 @@
-"""Deterministic notifier for unattended curation (ADR 0020).
-
-No trained model, no LLM call, and no network dependency in the detection path.
-Every incident is a rule or a control limit over a feature vector, and every
-incident cites the evidence that produced it.
-
-The pipeline, and the module that owns each stage:
-
-* :mod:`~data_engine.monitoring.features` — pure, versioned feature vector.
-* :mod:`~data_engine.monitoring.baselines` — per-scope EWMA centre, median/MAD spread.
-* :mod:`~data_engine.monitoring.detectors` — the rules.
-* :mod:`~data_engine.monitoring.contracts` — declared expectations and their breaches.
-* :mod:`~data_engine.monitoring.queue` — fingerprint, dedup, cooldown, alert budget.
-* :mod:`~data_engine.monitoring.signals` — severity, notify class, the label registry.
-* :mod:`~data_engine.monitoring.summary` — deterministic rendering.
-* :mod:`~data_engine.monitoring.service` — one evaluation tick.
-"""
+"""Deterministic notifier for unattended curation (ADR 0020)."""
 
 from data_engine.monitoring.baselines import Baseline, BaselineBook
 from data_engine.monitoring.contracts import Expectation, InvalidExpectation, RunOutcome

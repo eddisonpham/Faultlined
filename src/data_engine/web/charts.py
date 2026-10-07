@@ -1,26 +1,4 @@
-"""Server-rendered SVG chart primitives (ADR 0024).
-
-Pure functions from data to markup. No JavaScript, no CDN, no bundler, no
-dependency - ADR 0014 rules those out and ADR 0021 exists to keep the client
-runtime to one file that is already there.
-
-The reason these are a module and not three more helpers in `pages.py` is
-testability. A chart is a string, so a test asserts the path coordinates, the
-tick labels and the empty state without a browser and without a screenshot. The
-thing most likely to be wrong in a hand-built SVG - a scale that silently
-flattens four orders of magnitude into a line along the floor - is exactly the
-thing a coordinate assertion catches.
-
-**Scale selection is the whole ballgame here.** The reference run's episode
-speeds span 0.022 to 1.0e8 in raw units: on a linear axis four of five episodes
-are indistinguishable points on the floor, and the chart is not wrong, it is
-showing nothing. `choose_scale` therefore switches to log10 on its own when a
-series spans more than `DECADES_BEFORE_LOG` orders of magnitude, and says so in
-the returned `Scale` so the axis can be labelled `log10`. A series containing
-zero or negative values cannot be logged, so it stays linear; there is a test
-for that fallback, because a chart that refused to render would be a worse
-outcome than a chart that is merely flat.
-"""
+"""Server-rendered SVG chart primitives (ADR 0024)."""
 
 from __future__ import annotations
 
@@ -40,18 +18,13 @@ __all__ = [
     "polyline_points",
 ]
 
-#: Orders of magnitude above which a linear axis stops being informative.
 DECADES_BEFORE_LOG = 2.0
 
-#: Plot geometry, in viewBox units. The frame is inset so tick labels have room
-#: inside the SVG rather than being clipped by it.
 PAD_LEFT = 52
 PAD_RIGHT = 10
 PAD_TOP = 10
 PAD_BOTTOM = 22
 
-#: Text is drawn at this size in viewBox units and scales with the chart, which
-#: keeps it legible on a phone and on a 4K monitor without a second stylesheet.
 FONT = 10.0
 
 
@@ -65,30 +38,20 @@ def _anchor(x: float, left: float, right: float) -> str:
 
 
 def _plural(count: int, noun: str) -> str:
-    """`1 bucket` / `4 buckets`. Screen readers read these labels aloud."""
+    """`1 bucket` / `4 buckets`."""
     return f"{count} {noun}" if count == 1 else f"{count} {noun}s"
 
 
 def format_value(value: float) -> str:
-    """Short, readable, and honest about magnitude.
-
-    A chart axis that says `100015978.527` is a chart nobody reads. Fixed
-    notation below 1000, then significant digits with a suffix, so the reader
-    gets `1.0e8` rather than a number that overflows its own tick.
-    """
+    """Short, readable, and honest about magnitude."""
     if value == 0:
         return "0"
     if not math.isfinite(value):
         return "inf" if value > 0 else "-inf"
     magnitude = abs(value)
     if magnitude < 0.001 or magnitude >= 1e6:
-        # Past a million digits stop being readable as digits; `1.0e+08` is
-        # shorter than `100000000` and unambiguous about being approximate.
         return f"{value:.1e}"
     if value == int(value):
-        # A population count is an integer. `2.00 episodes` is a category error,
-        # and the same rule keeps a whole-number axis tick from reading as a
-        # measurement of something finer than it is.
         return str(int(value))
     if magnitude >= 100:
         return f"{value:.0f}"
@@ -112,9 +75,6 @@ class Scale:
         if not math.isfinite(value):
             return low
         if self.logarithmic:
-            # Every value on a log scale is positive by construction; a caller
-            # that slipped a zero in gets the floor of the domain rather than an
-            # exception, so one bad sample costs a pixel and not the page.
             safe = max(value, self.lo)
             span = math.log10(self.hi) - math.log10(self.lo)
             if span <= 0:
@@ -128,12 +88,7 @@ class Scale:
 
 
 def choose_scale(values: Sequence[float], *, decades: float = DECADES_BEFORE_LOG) -> Scale:
-    """Pick a linear or log10 domain for `values`, and say which in the result.
-
-    Non-finite samples are ignored rather than poisoning the domain: one `NaN`
-    would otherwise make every span infinite and silently flatten the chart,
-    which is the same failure ADR 0023 removed from the quality metrics.
-    """
+    """Pick a linear or log10 domain for `values`, and say which in the result."""
     finite = [float(v) for v in values if math.isfinite(float(v))]
     if not finite:
         return Scale(0.0, 1.0, False)
@@ -143,8 +98,6 @@ def choose_scale(values: Sequence[float], *, decades: float = DECADES_BEFORE_LOG
     if loggable:
         return Scale(lo, hi, True)
     if lo == hi:
-        # A flat series still deserves a visible band rather than a division by
-        # zero; the trace lands mid-height and reads as "steady", which it is.
         pad = abs(lo) * 0.5 or 1.0
         return Scale(lo - pad, hi + pad, False)
     return Scale(lo, hi, False)
@@ -159,20 +112,7 @@ def polyline_points(
     top: float,
     bottom: float,
 ) -> list[list[tuple[float, float]]]:
-    """Split `samples` into contiguous runs, one per list, breaking on `None`.
-
-    A `None` value is a gap in the recording, not a zero. Rendering it as a
-    connected line would draw motion across a dropout - the exact false
-    statement ADR 0023 was written to stop this product from making.
-
-    x is a *value* mapped over the drawn domain, not an index: a thirty-second
-    hole has to occupy thirty seconds of axis or the picture lies about time in
-    exactly the way the `None` break exists to prevent. Uniformly indexed input
-    (the metrics buckets) maps pixel-for-pixel as it always did, so this is a
-    correction for unevenly spaced series, not a change to evenly spaced ones.
-    A degenerate domain (one drawn point) pins to `x0`, where the ticks of a
-    one-sample window already point.
-    """
+    """Split `samples` into contiguous runs, one per list, breaking on `None`."""
     runs: list[list[tuple[float, float]]] = []
     current: list[tuple[float, float]] = []
     span = x1 - x0 or 1.0
@@ -240,17 +180,7 @@ def line_chart(
     caption: str = "",
     link: tuple[str, str] | None = None,
 ) -> str:
-    """A traced series with a real y axis, a real x axis, and visible gaps.
-
-    `samples` are `(x, y)` pairs; a `None` y is a break in the recording. The
-    numbers are repeated in `caption` as plain text, so they survive a screen
-    reader, a print, and a stylesheet that failed to load.
-
-    `caption` is escaped and `link` is a separate `(label, href)` pair rendered
-    as real markup - the same split `_empty` uses, for the same reason. One
-    argument that is escaped cannot carry a link, and one that is not is a hole
-    in every page that renders it.
-    """
+    """A traced series with a real y axis, a real x axis, and visible gaps."""
     if not samples:
         return _empty_plot(label, caption)
 
@@ -271,11 +201,6 @@ def line_chart(
         for run in runs
         for x, y in run
     )
-    # Anchored by position, not uniformly centred. A centred label at the right
-    # edge hangs half its width past the viewBox and is clipped: "04:22" lost
-    # its last two characters on every metrics plot. The first label anchors
-    # start and the last anchors end, so the run of text stays inside the frame
-    # without widening the plot's right margin to accommodate it.
     left, right = PAD_LEFT, width - PAD_RIGHT
     x_axis = "".join(
         f'<text class="de-tick" x="{x:.1f}" y="{bottom + 14:.1f}" '
@@ -310,8 +235,7 @@ def bar_chart(
     unit: str = "",
     highlight: str | None = None,
 ) -> str:
-    """Labelled bars. Unlike the trace, counts are linear - a log axis has no
-    meaning when the quantity being counted is a population."""
+    """Labelled bars."""
     if not buckets:
         return _empty_plot(label, "")
     values = [float(v) for _, v in buckets]
@@ -362,11 +286,7 @@ def _note(caption: str, link: tuple[str, str] | None) -> str:
 
 
 def _empty_plot(label: str, caption: str) -> str:
-    """An explicit empty state.
-
-    A chart frame with nothing in it and no explanation reads as a broken page.
-    The product's rule is that absence is stated where it is seen.
-    """
+    """An explicit empty state."""
     return (
         _frame(720, 120, f"{label}: no data", "de-plot de-plot-empty")
         + '<text class="de-tick" x="360" y="64" text-anchor="middle">no data</text>'

@@ -1,15 +1,4 @@
-"""Validation rules and their stable violation codes (FR-002).
-
-Each rule is a small function over the reader's `EpisodeExtraction` plus the profile. They
-never touch the artifact bytes: validation is O(metadata), so it can run on every episode
-(NFR-002), and there is no second implementation of the LeRobot layout to drift out of sync
-with the reader. A caller that wants a per-frame check passes a sample; the default path
-does not re-read the file (see ADR 0016).
-
-A rule that **raises** is a failure, not a pass. Rule bugs are recorded as
-`VALIDATION_RULE_ERROR` and quarantine the episode, because a validator that silently passes
-data it could not check is worse than one that stops the pipeline.
-"""
+"""Validation rules and their stable violation codes (FR-002)."""
 
 from __future__ import annotations
 
@@ -23,7 +12,7 @@ from data_engine.validation.profile import ValidationProfile
 
 
 class ViolationCode(StrEnum):
-    """Stable rule-violation codes. Add, never rename (ADR 0009)."""
+    """Stable rule-violation codes."""
 
     REQUIRED_CHANNEL_MISSING = "REQUIRED_CHANNEL_MISSING"
     FORBIDDEN_CHANNEL_PRESENT = "FORBIDDEN_CHANNEL_PRESENT"
@@ -65,9 +54,6 @@ class Validatable(Protocol):
 Rule = Callable[[Validatable], list[Violation]]
 
 
-# --------------------------------------------------------------- channel presence
-
-
 def required_channels(subject: Validatable) -> list[Violation]:
     present = {channel.name for channel in subject.episode.channels}
     return [
@@ -84,9 +70,6 @@ def forbidden_channels(subject: Validatable) -> list[Violation]:
         )
         for name in sorted(subject.profile.forbidden_channels & present)
     ]
-
-
-# ------------------------------------------------------------------ episode shape
 
 
 def frame_count(subject: Validatable) -> list[Violation]:
@@ -167,7 +150,7 @@ def finite_values(subject: Validatable) -> list[Violation]:
     found: list[Violation] = []
     for channel in subject.episode.channels:
         for value in (channel.min, channel.max, channel.mean, channel.std):
-            if value is not None and value != value:  # NaN
+            if value is not None and value != value:
                 found.append(
                     Violation(
                         ViolationCode.NON_FINITE_VALUES, "NaN in published statistics", channel.name
@@ -179,8 +162,6 @@ def finite_values(subject: Validatable) -> list[Violation]:
             found.append(Violation(ViolationCode.NON_FINITE_VALUES, "NaN in the sample", name))
     return found
 
-
-# -------------------------------------------------------------------- registry
 
 REGISTRY: dict[str, Rule] = {
     "required_channels": required_channels,

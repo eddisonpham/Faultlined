@@ -9,12 +9,8 @@ from typing import Any
 
 DEFAULT_MAX_ATTEMPTS = 3
 
-#: How long a `running` job may go without progress before the reaper presumes its
-#: worker died and reclaims it. Far longer than any healthy job, because a false
-#: reclaim duplicates work and a late one only delays recovery.
 ORPHANED_JOB_SECONDS = 900.0
 
-#: How often the worker sweeps for expired deadlines and dead workers.
 REAP_INTERVAL_SECONDS = 30.0
 
 
@@ -33,12 +29,10 @@ TERMINAL_STATES: frozenset[JobState] = frozenset(
     {JobState.SUCCEEDED, JobState.FAILED, JobState.CANCELED, JobState.TIMED_OUT}
 )
 
-# States in which a job is still live: eligible to be claimed, retried, or cancelled.
 ACTIVE_STATES: frozenset[JobState] = frozenset(
     {JobState.QUEUED, JobState.RUNNING, JobState.RETRYING, JobState.CANCEL_REQUESTED}
 )
 
-# Static contract of allowed transitions (enforced in phase 05; documented in data-flow.md §4).
 ALLOWED_TRANSITIONS: dict[JobState, frozenset[JobState]] = {
     JobState.QUEUED: frozenset({JobState.RUNNING, JobState.CANCELED, JobState.TIMED_OUT}),
     JobState.RUNNING: frozenset(
@@ -51,9 +45,6 @@ ALLOWED_TRANSITIONS: dict[JobState, frozenset[JobState]] = {
         }
     ),
     JobState.CANCEL_REQUESTED: frozenset({JobState.CANCELED, JobState.SUCCEEDED}),
-    # `retrying -> failed` exists because a requeue can be refused: if the budget turns
-    # out to be spent between the claim and the requeue, `retrying` would otherwise be a
-    # dead end with no transition out. The architecture diagram only drew the happy path.
     JobState.RETRYING: frozenset({JobState.QUEUED, JobState.FAILED}),
     JobState.SUCCEEDED: frozenset(),
     JobState.FAILED: frozenset(),

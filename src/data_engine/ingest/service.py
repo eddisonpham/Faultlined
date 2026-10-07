@@ -14,31 +14,19 @@ from data_engine.ingest.readers.registry import read_episode
 from data_engine.observability.metrics import RuntimeMetrics
 from data_engine.storage.artifacts import FileArtifactStore
 
-# The synthetic contract is the smallest thing this engine reads, and it is read the
-# same way as a file: validate the declared shape, then describe the episode. Letting
-# a malformed payload raise a bare `KeyError` would leak an implementation detail into
-# the job error and, worse, would make the failure look transient to the retry policy.
 _SYNTHETIC_FIELDS = ("task", "robot", "timestamps", "observations", "actions")
 
 logger = logging.getLogger(__name__)
 
 
 def _resolve_task(catalog: PostgresCatalog, task: str) -> str | None:
-    """Resolve a task string against the vocabulary (ADR 0029 §3), never failing ingest.
-
-    The episode row is the record and it keeps the raw task string; the mapping
-    is a derived view. If resolution cannot run, the string simply stays in the
-    unmapped queue and a human confirms it later - the designed path, not a
-    degraded one. A catalog without settings is a test double; a real failure is
-    logged with its event name, the way a host-sample failure is (ADR 0008:
-    enrichment never stops the pipeline).
-    """
+    """Resolve a task string against the vocabulary (ADR 0029 §3), never failing ingest."""
     settings = getattr(catalog, "settings", None)
     if settings is None:
         return None
     try:
         return vocabulary.map_or_resolve(settings, task)
-    except Exception as exc:  # enrichment must not fail the episode it describes
+    except Exception as exc:
         logger.warning("task resolution failed", extra={"event": "task_resolution_failed"})
         logger.debug("task resolution error", exc_info=exc)
         return None
@@ -59,15 +47,7 @@ def _frames(episode: dict[str, Any]) -> list[float]:
 
 
 class EpisodeIngestService:
-    """Registers one episode in the catalog, whatever format it arrived in.
-
-    Two paths, one contract. The synthetic path takes an episode that is already in
-    memory; the reader path takes a path on disk and returns a *description* of one
-    episode. Both end the same way: the bytes are content-addressed in the artifact
-    store, and a small metadata record is what the catalog keeps
-    (`architecture/storage.md` §1). The frames themselves are never copied into the
-    catalog, which is what keeps ingest O(one episode) instead of O(dataset).
-    """
+    """Registers one episode in the catalog, whatever format it arrived in."""
 
     def __init__(
         self,
@@ -90,8 +70,6 @@ class EpisodeIngestService:
             "task": episode["task"],
             "robot": episode["robot"],
             "frame_count": len(timestamps),
-            # A non-finite timestamp is not a duration, and `jsonb` refuses to
-            # store `Infinity` at all (EXP-0014 D2).
             "duration_seconds": finite_or_none(timestamps[-1] - timestamps[0]),
         }
         return self._register(
@@ -107,14 +85,7 @@ class EpisodeIngestService:
     def ingest_path(
         self, path: Path, *, job_id: str, episode_key: str | None = None
     ) -> dict[str, Any]:
-        """Register one episode read from disk, addressing the file that holds it.
-
-        The artifact is the reader's `source_path` - the Parquet file the rows came
-        from - not the dataset root. A LeRobot v3 file holds many episodes, so the
-        artifact is shared between them and the episode identity lives in the catalog
-        row; that is exactly the content-addressing model, and it is why the reader
-        reports the file it actually read.
-        """
+        """Register one episode read from disk, addressing the file that holds it."""
         extraction = read_episode(path, episode_key=episode_key)
         return self._register_extraction(extraction, job_id=job_id)
 
@@ -153,9 +124,6 @@ class EpisodeIngestService:
             episode_key=episode_key,
             episode_format=episode_format,
         )
-        # A known string needs no work, one whose extracted core matches exactly
-        # one entry is mapped now, and a novel string is left for the unmapped
-        # queue - which is a query, so nothing is written and nothing can go stale.
         task = str(metadata.get("task") or "").strip()
         if task:
             _resolve_task(self.catalog, task)
@@ -184,6 +152,4 @@ def _synthetic_series(episode: dict[str, Any]) -> dict[str, list[float]]:
     return series
 
 
-# The name the worker and its tests already use. Kept as an alias because renaming it
-# would touch every existing test for no behavioural gain.
 SyntheticEpisodeIngestService = EpisodeIngestService

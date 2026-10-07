@@ -1,20 +1,4 @@
-"""Severity, notification class, and the signal record every detector emits.
-
-Two vocabularies live here, and keeping them apart is the point.
-
-**Severity is the cost of the night, not the size of the deviation** (ADR 0020).
-On a fleet, severity is a property of the metric's blast radius. On one laptop
-that the owner has walked away from, it is a property of what happens if nobody
-acts: is the compute being wasted, is data being lost, or is a stated commitment
-being missed? A 3-sigma wobble in a metric nobody is waiting on is *less* urgent
-than a run that will never finish, and a severity model that says otherwise would
-wake someone for the wrong thing.
-
-**Notify class is the channel decision**, and it is far stricter than severity.
-Most incidents are ones the owner would find tomorrow by looking; those queue.
-Only three situations justify interrupting an absent person, and they are
-enumerated in :data:`NOTIFY_LABELS` so the policy is auditable in one place.
-"""
+"""Severity, notification class, and the signal record every detector emits."""
 
 from __future__ import annotations
 
@@ -59,9 +43,6 @@ class Label(StrEnum):
     RESOURCE_DEGRADED = "RESOURCE_DEGRADED"
 
 
-#: Labels that justify interrupting an absent operator. The three situations are
-#: "the night is being wasted", "data is being lost as we speak", and "a
-#: commitment was missed". Everything else batches (automation plan §10.1).
 NOTIFY_LABELS: frozenset[str] = frozenset(
     {
         Label.CONTRACT_BREACH.value,
@@ -73,18 +54,12 @@ NOTIFY_LABELS: frozenset[str] = frozenset(
     }
 )
 
-#: Defaults used when a detector does not state a channel decision explicitly.
 NOTIFY_SEVERITY_FLOOR = Severity.CRITICAL
 
 
 @dataclass(frozen=True, slots=True)
 class Signal:
-    """One detector's finding, carrying the evidence that justifies it.
-
-    ``evidence`` must be enough for a human to check the claim by hand. A signal
-    that cannot cite its numbers does not get to open an incident — that rule is
-    enforced at the triage boundary, not trusted to each detector.
-    """
+    """One detector's finding, carrying the evidence that justifies it."""
 
     label: str
     severity: Severity

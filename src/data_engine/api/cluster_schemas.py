@@ -1,13 +1,4 @@
-"""Cluster proposal schemas (ADR 0026).
-
-Small and explicit rather than permissive: a rebuild takes three decisions (which axes to
-ignore, how wide the radius is, which source to read) and each one changes what the
-numbers mean, so each is a field with a documented default instead of a bag of options.
-
-`ClusterProposal.model_config` forbids extra fields. A typo in an ignored axis would
-otherwise be accepted silently and produce a clustering that ignored nothing - the sort
-of failure that looks like a result.
-"""
+"""Cluster proposal schemas (ADR 0026)."""
 
 from __future__ import annotations
 
@@ -19,7 +10,7 @@ from data_engine.clustering.lexicon import AXES
 
 
 class ClusterRebuildRequest(BaseModel):
-    """Recompute proposals. Every field changes what the numbers mean, so none is free."""
+    """Recompute proposals."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -52,7 +43,7 @@ class ClusterRebuildRequest(BaseModel):
     )
 
     def ignored_argument(self) -> str:
-        """The comma form `Ignored.parse` takes. Kept here so both paths agree."""
+        """The comma form `Ignored.parse` takes."""
         allowed = set(AXES)
         return ",".join(sorted(axis for axis in self.ignore if axis in allowed))
 
@@ -67,11 +58,7 @@ class ClusterConfirmRequest(BaseModel):
     @field_validator("label")
     @classmethod
     def _not_blank(cls, value: str) -> str:
-        """`min_length=1` accepts "  ", and a confirmation called "  " names nothing.
-
-        Recorded labels are read back on the page and used to explain a frozen cluster,
-        so an empty-looking one is worse than a rejected request.
-        """
+        """`min_length=1` accepts " ", and a confirmation called " " names nothing."""
         cleaned = value.strip()
         if not cleaned:
             raise ValueError("a confirmation needs a label")
@@ -133,7 +120,7 @@ class ClusterReviewRequest(BaseModel):
 
 
 class ClusterProposal(BaseModel):
-    """One proposal. `frozen` is derived from a confirmation existing, never stored twice."""
+    """One proposal."""
 
     key: str
     core: str

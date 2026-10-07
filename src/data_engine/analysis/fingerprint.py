@@ -1,38 +1,4 @@
-"""Behavioural fingerprints: redundancy from signals ingest already computed (ADR 0032).
-
-An episode's fingerprint is assembled entirely from what ``analyze()`` computed at ingest
-(ADR 0018) and ``record_episode_quality`` persisted: the motion trace, the per-dimension
-motion character, and the temporal fractions. Nothing here reads an artifact, opens a frame,
-or imports a numerical library.
-
-The industry answer to "are these two episodes the same behaviour recorded twice" is an
-embedding: SemDeDup removes pairs above a cosine-similarity threshold in a pretrained model's
-space, and FiftyOne Brain computes near-duplicates, uniqueness and representativeness the same
-way. That is closed to this engine by decision, not by accident - the runtime dependency set
-has no numerical library at all, frames are never in memory (an artifact is the Parquet file
-or the bag), and ADR 0020 rejected a learned, non-reproducible verdict in a path a human is
-asked to trust.
-
-What is traded away is detection power; what is bought is that curation becomes a pure
-function of what ingest already wrote. Three consequences follow, and they are the reason this
-module exists rather than a batch job:
-
-- **Deterministic.** The same catalog produces byte-identical reports, so a report can be
-  compared between two builds and cited the way a build hash is.
-- **Explainable.** A pair is not "similar"; it is close because the weighted mean of the
-  components *both episodes have* was small, and the report names which component dominated.
-- **Free.** No model pass, no GPU, no artifact read, no new dependency, and it is available the
-  moment an episode exists rather than after someone remembers to run a job.
-
-The measure is deliberately narrow. ``shape`` compares the motion trace resampled onto a
-normalised time axis, so it is insensitive to duration and to a constant scale factor;
-``dynamics`` compares per-dimension normalised motion, so units and robot scale cancel;
-``temporal`` compares stall and gap *fractions*, not durations. An episode ingested without a
-clock has no trace and therefore no shape, and it says so: the distance is a weighted mean over
-the components both sides have, renormalised by the weights present, never a sum with a missing
-component scored as zero - that would make "we could not compare this" indistinguishable from
-"these are identical".
-"""
+"""Behavioural fingerprints: redundancy from signals ingest already computed (ADR 0032)."""
 
 from __future__ import annotations
 
@@ -56,41 +22,16 @@ __all__ = [
     "redundancy_report",
 ]
 
-#: Points the motion trace is resampled to. The trace itself holds up to 240 points
-#: (`quality.TRACE_POINTS`); 32 is enough to separate a smooth reach from a stutter without
-#: making the pairwise comparison the dominant cost of a report over thousands of episodes.
 SHAPE_POINTS = 32
 
-#: Component weights. Shape dominates because it is the only component that sees the episode
-#: as a curve rather than as a summary; temporal character is the weakest evidence on its own
-#: (two unrelated takes can stall similarly) and is weighted accordingly. The weights matter
-#: only relatively - the distance is renormalised over whichever components are present.
 COMPONENT_WEIGHTS: dict[str, float] = {"shape": 0.5, "dynamics": 0.35, "temporal": 0.15}
 
-#: Calibrated, not chosen. `scripts/fingerprint_calibration.py` plants re-recordings and
-#: measures the sweep; at 0.04 it reports pairwise precision 0.906 with recall 0.400 against
-#: 0.095 precision at the 0.10 this shipped with first (EXP-0019). The operating point is
-#: chosen for precision: a false merge asserts that two episodes are one behaviour and hides
-#: the distinct one, while a missed duplicate only leaves redundancy the operator can still
-#: see. Re-run that script if `episode_quality` ever changes shape.
 DEFAULT_THRESHOLD = 0.04
 
-#: The most episodes one report will score. The pairwise scan is the cost, and it is
-#: superlinear: measured on a throwaway catalog of planted re-recordings (EXP-0019), the whole
-#: read-plus-score is 142 ms at 300 episodes, 218 ms at 500, 618 ms at 1 000 and 1 815 ms at
-#: 2 000 - enough that the 2 000 this shipped with first would have been a two-second page for
-#: the largest builds. 500 keeps the page inside a quarter second. Those figures are the
-#: *worst* case for the algorithm (almost every episode distinct, so almost every kept episode
-#: is still a representative to compare against); a genuinely redundant build collapses early
-#: and costs less. A truncated report says so rather than quietly reporting a fraction of a
-#: build as if it were the whole.
 MAX_EPISODES = 500
 
 _EPSILON = 1e-9
 
-#: Which verdict makes the better representative of a group. A clean demonstration is the one
-#: worth keeping when its group is collapsed, so `smooth` sorts first; an unjudged episode is
-#: never preferred over a judged one.
 _VERDICT_RANK: dict[str, int] = {"smooth": 0, "moderate": 1, "jerky": 2, "unknown": 3}
 
 
@@ -107,20 +48,14 @@ class Fingerprint:
     stall_ratio: float
     gap_ratio: float
     shape: tuple[float, ...]
-    """The motion trace on a normalised `[0, 1]` time axis, divided by its own mean. Empty
-    when the episode was ingested without a clock - the trace's x axis would be fiction."""
+    """The motion trace on a normalised `[0, 1]` time axis, divided by its own mean. """
 
     dynamics: tuple[tuple[str, float, float], ...]
     """`(field, norm_delta_std, mean_abs_delta_norm)` per judged dimension, sorted by field."""
 
     @property
     def comparable(self) -> bool:
-        """Whether this episode can be compared to another at all.
-
-        Temporal fractions alone are not evidence: two unrelated takes stall similarly all the
-        time. A fingerprint with neither a trace nor any judged dimension is reported as
-        incomparable rather than scored against everything else and called distinct by default.
-        """
+        """Whether this episode can be compared to another at all."""
         return bool(self.shape) or bool(self.dynamics)
 
 
@@ -161,11 +96,7 @@ class RedundancyGroup:
 
 @dataclass(frozen=True, slots=True)
 class RedundancyReport:
-    """What a set of episodes looks like once near-duplicates are collapsed.
-
-    Read-only by construction: nothing is deleted, quarantined or excluded. The report is an
-    input to a curation decision, and the decision belongs to the operator.
-    """
+    """What a set of episodes looks like once near-duplicates are collapsed."""
 
     threshold: float
     episode_count: int
@@ -176,9 +107,9 @@ class RedundancyReport:
 
     @property
     def distinct_count(self) -> int:
-        """How many behaviours the set holds: kept representatives, plus episodes that could
-        not be compared to anything (counting those as distinct is the honest direction - we
-        have no evidence they repeat)."""
+        """How many behaviours the set holds: kept representatives, plus episodes that could not be
+        compared to anything (counting those as distinct is the honest direction).
+        """
         return self.episode_count - self.redundant_count
 
     @property
@@ -208,13 +139,7 @@ class RedundancyReport:
 
 
 def fingerprint(row: Mapping[str, Any]) -> Fingerprint:
-    """Build one fingerprint from an `episode_fingerprint_inputs` row (ADR 0032).
-
-    Never raises on a malformed row: a missing or non-finite signal is recorded as an absent
-    one, the same way `analyze()` refuses to let one bad value poison a dataset statistic
-    (ADR 0023). A fingerprint that cannot be built is a fingerprint with fewer components, and
-    the report says so by comparing on what is left.
-    """
+    """Build one fingerprint from an `episode_fingerprint_inputs` row (ADR 0032)."""
     episode_id = str(row.get("id") or "")
     task = str(row.get("task") or "").strip()
     return Fingerprint(
@@ -230,12 +155,7 @@ def fingerprint(row: Mapping[str, Any]) -> Fingerprint:
 
 
 def distance(first: Fingerprint, second: Fingerprint) -> float | None:
-    """Weighted mean of the components both episodes have, or `None` when they share none.
-
-    The renormalisation is the point. A component one side is missing is left out of both the
-    numerator and the denominator, so an episode without a clock is compared on dynamics and
-    temporal character alone rather than being pushed away from everything by a phantom zero.
-    """
+    """Weighted mean of the components both episodes have, or `None` when they share none."""
     parts = _parts(first, second)
     return None if parts is None else _score(parts)
 
@@ -246,25 +166,7 @@ def redundancy_report(
     threshold: float = DEFAULT_THRESHOLD,
     max_episodes: int = MAX_EPISODES,
 ) -> RedundancyReport:
-    """Collapse near-duplicates in one deterministic pass.
-
-    The shape is SemDeDup's - walk the items, keep one, attach anything close to a kept one -
-    with two changes that make it this engine's rather than that paper's. The walk order is an
-    explainable quality rank ("keep the best take": verdict, then less stalling, then more
-    judged dimensions, then id) instead of a model score; and the *reason* a pair was collapsed
-    travels with it, so an operator can disagree with the report without re-deriving it.
-
-    Input order is preserved for truncation only: a caller passing a build's members gets the
-    first `max_episodes` in membership order and `truncated=True`, rather than a silently
-    sampled subset.
-
-    The pairwise scan is the cost, so `_match` abandons a pair as soon as one component alone
-    is enough to exceed the threshold. That is a *sound* shortcut - it can only skip pairs
-    whose weighted mean is already above the threshold - and it pays off exactly where it is
-    needed: a catalog of genuinely distinct episodes prunes almost everything after the two
-    cheapest components, while a catalog full of duplicates collapses early and therefore has
-    few representatives left to compare against.
-    """
+    """Collapse near-duplicates in one deterministic pass."""
     ranked = [fingerprint(row) for row in episodes]
     truncated = len(ranked) > max_episodes
     if truncated:
@@ -326,10 +228,6 @@ def _dynamics_map(item: Fingerprint) -> dict[str, tuple[float, float]]:
     return {name: (nstd, mad) for name, nstd, mad in item.dynamics}
 
 
-#: Sum of the component weights. The early exits below bound the distance with a single
-#: component against this total rather than against the weights present, because a pair's
-#: comparable components are a subset of all of them and the subset's weight can only be
-#: smaller - which makes the bound conservative and therefore sound whatever the weights are.
 _TOTAL_WEIGHT = sum(COMPONENT_WEIGHTS.values())
 
 
@@ -339,17 +237,7 @@ def _match(
     representative_dynamics: Mapping[str, tuple[float, float]],
     threshold: float,
 ) -> tuple[float, str] | None:
-    """`(distance, dominant component)` when the pair is within `threshold`, else `None`.
-
-    Components are computed cheapest first - two fractions, then the per-dimension overlap,
-    then the 32-point shape - and any one of them alone exceeding the threshold ends the pair,
-    because a weighted mean is at least each component's own weighted share of it. The shape
-    loop carries the same test inside the vector, so a pair that diverges early is abandoned
-    before the remaining points are read.
-
-    Semantics are identical to `distance()`, and the tests pin that: the shortcut is an
-    optimisation, never a second definition of the measure.
-    """
+    """`(distance, dominant component)` when the pair is within `threshold`, else `None`."""
     budget = threshold * _TOTAL_WEIGHT
     weighted = 0.0
     present = 0.0
@@ -418,8 +306,9 @@ def _rank_key(item: Fingerprint) -> tuple[int, float, int, str]:
 
 
 def _parts(first: Fingerprint, second: Fingerprint) -> dict[str, float] | None:
-    """Per-component distances over what two fingerprints have in common, or `None` when that
-    is nothing worth comparing on."""
+    """Per-component distances over what two fingerprints have in common, or `None` when that is
+    nothing worth comparing on.
+    """
     parts: dict[str, float] = {}
     if first.shape and second.shape:
         parts["shape"] = _mean_abs(first.shape, second.shape)
@@ -458,13 +347,7 @@ def _mean_abs(left: Sequence[float], right: Sequence[float]) -> float:
 
 
 def _fraction(value: Any) -> float:
-    """A fraction, or 0.0 for anything that is not a finite number.
-
-    A non-finite value reaching a comparison would make every distance involving it a NaN and
-    every `<= threshold` test false, which is the failure ADR 0023 exists to prevent one layer
-    up. Here it is 0.0 and the component carries no information, which is visible in the
-    report rather than silently poisoning it.
-    """
+    """A fraction, or 0.0 for anything that is not a finite number."""
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return 0.0
     number = float(value)
@@ -479,13 +362,7 @@ def _count(value: Any) -> int:
 
 
 def _dynamics(raw: Any) -> tuple[tuple[str, float, float], ...]:
-    """Per-judged-dimension motion character, keyed by the dimension's own field name.
-
-    Discrete dimensions are dropped: a binary gripper's normalised delta is raw noise, and
-    ADR 0018 already excludes it from the verdict for the same reason. `field_name` is
-    `analysis.quality`'s own rule (the ADR 0018 amendment) rather than a second copy of it, so
-    a change to what a dimension's name *is* cannot make the two disagree.
-    """
+    """Per-judged-dimension motion character, keyed by the dimension's own field name."""
     if not isinstance(raw, Sequence):
         return ()
     collected: dict[str, tuple[float, float]] = {}
@@ -505,19 +382,7 @@ def _dynamics(raw: Any) -> tuple[tuple[str, float, float], ...]:
 
 
 def _shape(raw: Any) -> tuple[float, ...]:
-    """The motion trace resampled onto a normalised time axis and divided by its own mean.
-
-    Two properties are wanted and both come from the normalisation. Dividing by the episode's
-    own *magnitude* makes the curve scale-free, so the same motion performed faster or slower,
-    or with a different amount of overall travel, produces the same vector. Resampling onto
-    `t / t_max` makes it duration-free, so a 6 s demonstration and a 60 s one of the same shape
-    compare.
-
-    The normaliser is the mean of the *absolute* values, not the mean: `quality._trace`
-    produces a non-negative signal (it sums absolute per-dimension deltas), where the two are
-    the same number, but a caller handing this a zero-mean series would otherwise divide by a
-    near-zero denominator and get a vector of enormous, meaningless spikes.
-    """
+    """The motion trace resampled onto a normalised time axis and divided by its own mean."""
     points = _points(raw)
     if len(points) < 2:
         return ()
@@ -525,10 +390,6 @@ def _shape(raw: Any) -> tuple[float, ...]:
     span = points[-1][0] - start
     if span <= _EPSILON:
         return ()
-    # The time index is built once and walked, not rebuilt per sample point. It is the only
-    # per-episode cost in the module (everything else is pairwise), and the rebuild is not
-    # free: 500 traces of 240 points took 89 ms with the per-point rebuild and 40 ms with the
-    # index hoisted, so hoisting buys about 50 ms of a 500-episode report's scoring pass.
     times = [point[0] for point in points]
     sampled = tuple(
         _interpolate(points, times, start + span * index / (SHAPE_POINTS - 1))
@@ -536,8 +397,6 @@ def _shape(raw: Any) -> tuple[float, ...]:
     )
     magnitude = sum(abs(value) for value in sampled) / len(sampled)
     if magnitude <= _EPSILON:
-        # An episode whose trace is uniformly zero has no shape; a vector of zeros would have
-        # a distance of zero to every other flat episode, which is a false duplicate.
         return ()
     return tuple(value / magnitude for value in sampled)
 

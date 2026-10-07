@@ -324,9 +324,6 @@ def sample_note() -> str:
     return f'<p class="de-warn">{escape(sample_data.SAMPLE_NOTE)}</p>'
 
 
-# ------------------------------------------------------------------ detail view
-
-
 def detail_tiles(proposal: Mapping[str, Any]) -> str:
     """Identity, volume, and freeze state for one proposal, in the health style."""
     label = str(proposal.get("label", ""))

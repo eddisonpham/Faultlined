@@ -1,18 +1,3 @@
-/*
- * Faultlined client runtime. One file, no dependencies, no build step (ADR 0014).
- *
- * Everything here is progressive enhancement: the server renders a complete,
- * readable page, and this script only makes it live. With JavaScript disabled
- * every number still shows and every control is a real form submission.
- *
- * Two jobs, in the order they matter when something breaks: keep the data fresh
- * without hammering the server, and never let a network failure look like a
- * healthy quiet system. A stale read and a calm read are different states and
- * must not render the same way. The rest is bench-instrument convenience.
- *
- * Not here: anything that decides what the user sees as *data*. Rendering
- * belongs to the server (web/pages.py), so there is one renderer, not two.
- */
 (function () {
   "use strict";
 
@@ -22,8 +7,6 @@
   function $(sel, root) { return (root || doc).querySelector(sel); }
   function $$(sel, root) { return Array.prototype.slice.call((root || doc).querySelectorAll(sel)); }
 
-  /* ------------------------------------------------------------------ theme */
-
   var THEMES = ["vt220", "amber", "github-dark", "monochrome"];
   var THEME_KEY = "faultlined.theme";
 
@@ -32,24 +15,9 @@
   }
 
   function storeTheme(name) {
-    try { window.localStorage.setItem(THEME_KEY, name); } catch (e) { /* private mode */ }
+    try { window.localStorage.setItem(THEME_KEY, name); } catch (e) { }
   }
 
-  /*
-   * Theme switching has to swap the *stylesheet*, not just an attribute: each
-   * theme is a separate vendored file. So we pre-load the candidate and only
-   * commit once the new sheet is actually parsed, which means a missing theme
-   * file leaves the working theme in place instead of blanking the page.
-   *
-   * The probe must be removed once it has done its job. It is appended to the
-   * end of <head>, which is *after* faultlined.css, and a stylesheet left
-   * there wins the cascade over our own sheet: the amber and vt220 themes put a
-   * phosphor `text-shadow` on every readout, so the probe silently switched the
-   * vendor glow back on for the whole session and it was reported as a glow
-   * that a theme change made worse. The glow is off by a rule in
-   * faultlined.css, and that rule only holds while exactly one theme sheet is
-   * loaded before it.
-   */
   function applyTheme(name) {
     if (THEMES.indexOf(name) < 0) return;
     var link = $('link[data-de-theme]');
@@ -81,8 +49,6 @@
     if (stored && THEMES.indexOf(stored) >= 0) applyTheme(stored);
   }
 
-  /* ------------------------------------------------------------------ clock */
-
   function initClock() {
     var el = $("[data-clock]");
     if (!el) return;
@@ -94,11 +60,6 @@
     window.setInterval(tick, 1000);
   }
 
-  /*
-   * The deadline countdown. The server already rendered the remaining budget;
-   * this only keeps it moving between polls so a long-running job does not look
-   * frozen. Purely presentational - the server still owns the timeout.
-   */
   function initDeadlines() {
     var els = $$("[data-deadline]");
     if (!els.length) return;
@@ -116,27 +77,11 @@
       });
     };
     render();
-    // One interval for the page, re-pointed at the current nodes. This runs
-    // again after every poll write, and a fresh setInterval per call would
-    // leave the old ones ticking over detached nodes forever.
+
     if (deadlineTimer) window.clearInterval(deadlineTimer);
     deadlineTimer = window.setInterval(render, 15000);
   }
 
-  /* ------------------------------------------------------------------- poll */
-
-  /*
-   * Failure policy:
-   *
-   *   - One failed request is not news. Two in a row is: raise the banner,
-   *     back off, and mark the clock stale so nobody reads frozen numbers as
-   *     current.
-   *   - Backoff is exponential with a ceiling; a server that is down should not
-   *     be hammered at the page's own cadence. A success resets it.
-   *   - A 4xx other than 408/429 will never fix itself. Reload once, then stop.
-   *   - The last good render is never discarded. An empty panel is a lie about
-   *     the data, and worse than an obviously stale one.
-   */
   function initPoll(root) {
     var url = root.getAttribute("data-poll");
     var base = Number(root.getAttribute("data-poll-ms")) || 5000;
@@ -150,15 +95,13 @@
     var failures = 0;
     var lastGood = Date.now();
     var stopped = false;
-    /* The exact bytes of the fragment currently on screen. Seeded from the
-       server-rendered DOM so the first poll is compared like every other one. */
+
     var shown = root.innerHTML;
 
     function setLed(state, label) {
       if (!led) return;
       led.setAttribute("data-state", state);
-      // Only surfaced when it is news. A permanently-visible "live" badge
-      // stopped being a status indicator and became a logo.
+
       if (state === "ok") led.setAttribute("hidden", "");
       else led.removeAttribute("hidden");
       var text = $("[data-led-text]");
@@ -191,8 +134,7 @@
     }
 
     function tick() {
-      // A hidden tab is not a reason to keep the network warm, and a page
-      // restored from the background is usually minutes stale.
+
       if (doc.hidden) {
         setLed("paused", "paused");
         schedule(base);
@@ -204,8 +146,7 @@
         var offline = "Browser reports no network connection. Showing the last good render.";
         showBanner(offline);
         setStale(true);
-        // Announced too: the banner is a visual hazard stripe, and a screen
-        // reader user has no other way to learn the numbers on screen are old.
+
         announce(offline);
         schedule(Math.min(base * Math.pow(2, failures - 1), 60000));
         return;
@@ -222,20 +163,14 @@
         })
         .then(function (html) {
           if (html === null || html === "") return;
-          /* Write only when the payload genuinely differs, comparing against
-             the last payload applied rather than `root.innerHTML`: the browser
-             re-serialises the DOM, so that comparison is never equal and the
-             guard would never fire. */
+
           if (html !== shown) {
             root.innerHTML = html;
             shown = html;
-            // Re-derive what the replaced nodes owned: countdowns and stagger
-            // indices. Only a write invalidates them, so a poll that changed
-            // nothing does not walk the DOM to recompute identical values.
+
             initDeadlines();
             stagger();
-            // A hairline colour lift, not an opacity dip, so "updated" stays
-            // distinguishable from "something is wrong".
+
             root.setAttribute("data-changed", "");
             window.setTimeout(function () {
               root.removeAttribute("data-changed");
@@ -247,9 +182,7 @@
           hideBanner();
           setLed("ok", "live");
           setStale(false);
-          // Announce the recovery, not the success: a page that has been quietly
-          // wrong for a minute needs to say it is right again, otherwise the
-          // operator cannot tell the difference between "fixed" and "never broke".
+
           if (wasBroken) announce("Live updates restored.");
           schedule(base);
         })
@@ -277,8 +210,6 @@
         });
     }
 
-    // Coming back to the tab is a request for current data, not a reason to
-    // wait out the remaining backoff.
     doc.addEventListener("visibilitychange", function () {
       if (!doc.hidden && Date.now() - lastGood > base) {
         if (timer) window.clearTimeout(timer);
@@ -308,14 +239,6 @@
     schedule(base);
   }
 
-  /* -------------------------------------------------------------- shortcuts */
-
-  /*
-   * Number keys jump to a section. The hint is already printed next to each nav
-   * link, so the shortcut is discoverable without a help modal. Guarded against
-   * firing inside a form control, which is where a user typing "3" must get a
-   * "3".
-   */
   function isTyping(el) {
     if (!el) return false;
     var tag = (el.tagName || "").toLowerCase();
@@ -339,20 +262,13 @@
     });
   }
 
-  /* ------------------------------------------------------------------ copy */
-
-  /*
-   * Click any id/hash/meter to copy it. Episode ids and content hashes are the
-   * things a user actually pastes into a bug report, and selecting a truncated
-   * one by hand is a reliable way to paste the wrong 12 characters.
-   */
   function initCopy() {
     doc.addEventListener("click", function (event) {
       var target = event.target.closest ? event.target.closest("[data-copy]") : null;
       if (!target) return;
       var text = target.getAttribute("data-copy");
       if (!text) return;
-      if (event.shiftKey) return; // shift-click still selects the text
+      if (event.shiftKey) return;
       var done = function () {
         var original = target.getAttribute("title") || "";
         target.setAttribute("title", "copied");
@@ -362,10 +278,9 @@
         }, 900);
       };
       if (window.navigator.clipboard && window.isSecureContext) {
-        window.navigator.clipboard.writeText(text).then(done, function () { /* denied */ });
+        window.navigator.clipboard.writeText(text).then(done, function () { });
       } else {
-        // http:// on a LAN address is not a secure context, and this app is
-        // expected to be reached that way.
+
         var scratch = doc.createElement("textarea");
         scratch.value = text;
         scratch.setAttribute("readonly", "");
@@ -373,28 +288,12 @@
         scratch.style.opacity = "0";
         doc.body.appendChild(scratch);
         scratch.select();
-        try { doc.execCommand("copy"); done(); } catch (e) { /* nothing to do */ }
+        try { doc.execCommand("copy"); done(); } catch (e) { }
         scratch.remove();
       }
     });
-  }/* ---------------------------------------------------------- page transition */
+  }
 
-  /*
-   * A cross-fade between pages, on the Material 3 emphasized pair. Deliberately
-   * not a slide: a horizontal slide implies the new page is spatially to the
-   * right of the old one, and a fade says "the content changed" and nothing more.
-   *
-   * The class is added to <body> and the navigation is then allowed to proceed.
-   * A same-document link, a modified click, or a cancelled navigation all leave
-   * the class behind, so the page can never end up invisible; `pageshow` and a
-   * short timer are the backstops.
-   *
-   * This is the only thing that moves during a navigation. There is no progress
-   * rule, no sweep, no spinner: the document is server-rendered, so anything
-   * drawn during the wait is decoration drawn over a page that is already
-   * correct, and it was reported as a glow. The browser's own load state is the
-   * progress indicator, and it is the honest one.
-   */
   function initTransition() {
     var reduce = window.matchMedia("(prefers-reduced-motion: reduce)");
     doc.addEventListener(
@@ -416,7 +315,7 @@
       },
       true
     );
-    // Any way the transition ends other than a fresh document, un-hide.
+
     window.addEventListener("pageshow", function () {
       doc.body.classList.remove("de-leaving");
     });
@@ -427,14 +326,6 @@
     }, 400);
   }
 
-  /* ------------------------------------------------------------------ boot */
-
-  /*
-   * Stagger the panel entrance. The index is applied here rather than in the
-   * templates so adding a panel cannot silently reset the order, and so the
-   * stagger is capped - a page with twenty panels should not take a second to
-   * finish arriving.
-   */
   function stagger() {
     var panels = $$(".de-section");
     var cap = 8;
@@ -446,10 +337,7 @@
   function boot() {
     initTheme();
     stagger();
-    // The entrance animation is gated on html:not([data-booted]). Flip it after
-    // the first frame so the entrance plays once and never again - without it
-    // every poll would replay it, because a poll replaces the elements and a
-    // new element restarts its animation.
+
     window.requestAnimationFrame(function () {
       window.requestAnimationFrame(function () {
         doc.documentElement.setAttribute("data-booted", "");

@@ -1,19 +1,4 @@
-"""Server-rendered UI for the MVP Status / Jobs / Artifacts slice.
-
-Per ADR 0014 this is server-rendered HTML with vanilla-JS polling: no framework,
-no bundler, no build step, and no JavaScript dependency. The terminal/instrument
-vocabulary comes from a vendored stylesheet (see vendor/terminal-ui/NOTICE.md);
-this module owns layout, semantics, and escaping.
-
-Polling re-requests the same page with ``X-Fragment: 1`` and swaps the returned
-HTML. The alternative, re-rendering JSON in JavaScript, would mean writing every
-row twice and two renderers eventually disagreeing.
-
-Every page function here must survive being handed a half-populated model. The
-data comes from a live catalog that can be mid-ingest, and a page that 500s
-because a row lacks a field is worse than one that renders a dash. See
-``agents/architecture/frontend.md``.
-"""
+"""Server-rendered UI for the MVP Status / Jobs / Artifacts slice."""
 
 from __future__ import annotations
 
@@ -32,12 +17,9 @@ THEME_URL = "/ui/vendor/terminal-ui/theme-{name}.css"
 LAYOUT_URL = "/ui/faultlined.css"
 APP_JS_URL = "/ui/app.js"
 
-# Upstream ships more themes; these four are vendored. See vendor/terminal-ui/NOTICE.md.
 THEMES = ("vt220", "amber", "github-dark", "monochrome")
 DEFAULT_THEME = "vt220"
 
-# (href, label, shortcut, group). Grouping follows operator work, not code
-# modules; keep destinations distinct until frequency data justifies merging them.
 NAV_LINKS = (
     ("/ui", "Status", "1", "workspace"),
     ("/ui/episodes", "Episodes", "4", "curate"),
@@ -60,8 +42,6 @@ NAV_GROUPS = (("curate", "Curate"), ("operate", "Operate"), ("catalog", "Catalog
 FONT_URL = "/ui/vendor/departure-mono/DepartureMono-Regular.woff2"
 FONT_PATH = HERE / "vendor" / "departure-mono" / "DepartureMono-Regular.woff2"
 
-# Curation views on the Episodes page; the vocabulary and its SQL predicates live
-# in data_engine.curation so the API, the catalog, and a saved slice cannot drift.
 from data_engine.curation import EPISODE_FLAGS, EPISODE_STATES  # noqa: E402
 from data_engine.web.charts import (  # noqa: E402
     PAD_LEFT,
@@ -86,10 +66,8 @@ JOB_STATES = (
     "timed_out",
 )
 ACTIVE_STATES = ("queued", "running", "retrying", "cancel_requested")
-# States a cancel request can still act on (ADR 0015: terminal jobs are immutable).
 CANCELLABLE_STATES = ("queued", "running", "retrying")
 
-# Progress a job is expected to pass through, for the detail strip.
 STRIP_STEPS = ("queued", "running", "succeeded")
 
 
@@ -102,7 +80,7 @@ def font_bytes() -> bytes:
 
 
 def app_script() -> str:
-    """The client runtime. Read per request like the CSS, so an edit is live."""
+    """The client runtime."""
     return (HERE / "app.js").read_text(encoding="utf-8")
 
 
@@ -111,12 +89,7 @@ def layout_css() -> str:
 
 
 def theme_or_default(name: str | None) -> str:
-    """Resolve an untrusted ``?theme=`` value to a vendored theme name.
-
-    Public because the error handlers need it: a 500 page has to be rendered in
-    the theme the operator had selected, and an unknown name must fall back
-    rather than emit a ``<link>`` to a stylesheet that does not exist.
-    """
+    """Resolve an untrusted ``?theme=`` value to a vendored theme name."""
     return name if name in THEMES else DEFAULT_THEME
 
 
@@ -165,11 +138,7 @@ def _nav(active: str, theme: str) -> str:
 
 
 def _banner() -> str:
-    """Failure strip. Server-rendered hidden; app.js reveals it.
-
-    The single most important error state in this UI: a poll that silently
-    fails leaves yesterday's numbers on screen looking authoritative.
-    """
+    """Failure strip."""
     return (
         '<div class="de-banner" data-banner data-visible="0" role="alert">'
         '<span class="de-banner-mark" aria-hidden="true">!</span>'
@@ -180,21 +149,14 @@ def _banner() -> str:
 
 
 def _poll_attrs(url: str | None, ms: int) -> str:
-    """Attributes app.js reads to drive a panel. Empty string disables polling."""
+    """Attributes app.js reads to drive a panel."""
     if not url:
         return ""
     return f' data-poll="{escape(url)}" data-poll-ms="{ms}"'
 
 
 def _live(url: str | None, ms: int, html: str) -> str:
-    """Wrap the volatile part of a page in the region app.js replaces.
-
-    Deliberately the *innermost* element rather than ``<main>``: a poll that
-    replaces the whole main region would also wipe the filter forms and the
-    panel headings around it, so a filtered Jobs page would quietly lose its
-    filter after three seconds. The fragment returned by the route must be
-    byte-identical in shape to what sits inside this element.
-    """
+    """Wrap the volatile part of a page in the region app.js replaces."""
     return f'<div class="de-live"{_poll_attrs(url, ms)}>{html}</div>'
 
 
@@ -204,7 +166,7 @@ def _page(
     body: str,
     theme: str,
 ) -> str:
-    """Assemble a full document. ``body`` is the already-composed page content."""
+    """Assemble a full document."""
     subtitle = _SUBTITLES.get(active, "")
     sub = f'<p class="de-sub">{escape(subtitle)}</p>' if subtitle else ""
     return (
@@ -218,8 +180,6 @@ def _page(
         f'<link rel="stylesheet" href="{LAYOUT_URL}">'
         f'<script src="{APP_JS_URL}" defer></script>'
         "</head>"
-        # fine-use-app is the vendored hook the CRT themes hang their scanline
-        # and background off, so the shell carries it rather than <body>.
         f'<body><a class="de-skip fine-use-focusable" href="#main">Skip to content</a>'
         f'<div class="de-shell fine-use-app">{_nav(active, theme)}'
         f"{_banner()}"
@@ -233,16 +193,7 @@ def _page(
 
 
 def error_page(status: int, detail: str, theme: str | None = None) -> str:
-    """A failure the operator has to read, rendered in the same instrument skin.
-
-    A raw JSON 500 on a page the browser navigated to is a dead end; this says
-    what happened, gives the correlation id to quote, and offers a way back.
-
-    ``theme`` is resolved through the same allowlist as every other page, so a
-    caller cannot emit a ``<link>`` to a stylesheet that does not exist. The
-    error path is the last thing standing between a bad query string and a page
-    that renders with no stylesheet at all.
-    """
+    """A failure the operator has to read, rendered in the same instrument skin."""
     return _page(
         f"Error {status}",
         "",
@@ -259,11 +210,6 @@ def error_page(status: int, detail: str, theme: str | None = None) -> str:
     )
 
 
-# One line of context per section, so the operator knows what a panel is and how
-# fresh it is without leaving the page. Deliberately describes the *work*, never
-# the transport: no route names, no verbs, no endpoint paths. The browser surface
-# is an operator console, and a route template rendered as a heading tells the
-# reader nothing they can act on while disclosing the shape of the surface.
 _SUBTITLES = {
     "/ui": "live telemetry // poll 3s",
     "/ui/jobs": "queue and run history // newest first",
@@ -283,11 +229,8 @@ _SUBTITLES = {
 }
 
 
-# ---------------------------------------------------------------- primitives
-
-
 def _readouts(pairs: list[tuple[str, str, str]]) -> str:
-    """A row of instrument readouts. ``pairs`` is (legend, value-html, unit)."""
+    """A row of instrument readouts."""
     cells = "".join(
         f'<div class="de-readout block-item"><dt>{escape(label)}</dt>'
         f'<dd class="current-value">{value}<small>{escape(unit)}</small></dd></div>'
@@ -297,11 +240,7 @@ def _readouts(pairs: list[tuple[str, str, str]]) -> str:
 
 
 def _meter(fraction: float, width: int = 24) -> str:
-    """ASCII meter, e.g. [#########.............] 38%.
-
-    Kept as text rather than a styled div: it survives a print, a screen reader,
-    and a stylesheet that failed to load, and it needs no ARIA to be legible.
-    """
+    """ASCII meter, e.g. [#########.............] 38%."""
     filled = max(0, min(width, round(fraction * width)))
     return (
         f'<span class="de-meter" role="img" '
@@ -312,25 +251,14 @@ def _meter(fraction: float, width: int = 24) -> str:
 
 
 def _copyable(value: str, shown: str | None = None) -> str:
-    """An identifier the operator can click to copy in full.
-
-    Tables truncate ids to keep columns narrow, and a truncated id pasted into
-    a bug report is worse than no id. Shift-click still selects the text.
-    """
+    """An identifier the operator can click to copy in full."""
     full = escape(str(value))
     text = escape(str(shown if shown is not None else value))
     return f'<code class="de-copy" data-copy="{full}" title="click to copy">{text}</code>'
 
 
 def _episode_dots(items: list[dict[str, Any]], key: str, *, width: int = 720) -> str:
-    """One labelled, linked dot per episode on a shared scale.
-
-    The previous revision was a bare `<circle>` per episode with no axis, so a
-    reader could count the dots and nothing else. Every dot here is a link to the
-    episode, carries its value in a `<title>`, and sits on an axis whose bounds
-    are computed from the data by `web.charts` - including the automatic switch
-    to a log axis, which is what keeps a wide spread from flattening into a line.
-    """
+    """One labelled, linked dot per episode on a shared scale."""
     if not items:
         return _empty("no scored episodes", "ingest something to populate this")
     values = [float(item.get(key) or 0.0) for item in items]
@@ -386,12 +314,7 @@ def _verdict_badge(verdict: Any) -> str:
 
 
 def _svg_open(width: int, height: int, label: str, extra: str = "") -> str:
-    """Scope-screen frame.
-
-    ``role="img"`` with a real label rather than a decorative trace: a
-    sparkline is data, and a screen reader should be told it is a chart rather
-    than skip an empty element.
-    """
+    """Scope-screen frame."""
     return (
         f'<svg class="de-chart{extra}" viewBox="0 0 {width} {height}" '
         f'preserveAspectRatio="none" role="img" aria-label="{escape(label)}">'
@@ -467,14 +390,7 @@ def _state_badge(state: str) -> str:
 
 
 def download_links(page_path: str, query: str = "") -> str:
-    """CSV/JSONL links that reproduce exactly the filtered view (ADR 0030).
-
-    The link is the page's own URL with ``format`` added - the same query string
-    the table was rendered with - so the downloaded rows are the rows on screen.
-    The route resolves it to the shared serializer (a redirect the browser
-    follows silently), which also keeps the transport out of the operator's
-    view. The response's own ``Content-Disposition`` names the file.
-    """
+    """CSV/JSONL links that reproduce exactly the filtered view (ADR 0030)."""
     href = f"{page_path}{query}{'&' if query else '?'}"
     links = " · ".join(
         f'<a class="fine-use-focusable" href="{escape(href)}format={fmt}">{fmt}</a>'
@@ -484,18 +400,7 @@ def download_links(page_path: str, query: str = "") -> str:
 
 
 def _table(caption: str, headers: str, rows: str, extra: str = "", empty: str | None = None) -> str:
-    """A data table with a real caption, inside a scroll container.
-
-    The caption is visually hidden but present: a table of job states with no
-    accessible name is a grid of anonymous cells to a screen reader, and this
-    UI is meant to be usable without sight.
-
-    The wrapper is what stops a wide table from pushing a horizontal scrollbar
-    onto the whole page. The Episodes table is ten columns and does overflow at
-    laptop width; without this the entire document scrolls sideways, including
-    the nav. ``tabindex="0"`` makes the scroll region keyboard-reachable, which
-    is required or a keyboard user cannot pan it at all.
-    """
+    """A data table with a real caption, inside a scroll container."""
     if not rows:
         return _empty(empty if empty is not None else caption)
     return (
@@ -509,17 +414,7 @@ def _table(caption: str, headers: str, rows: str, extra: str = "", empty: str | 
 
 
 def _empty(what: str, hint: str = "", link: tuple[str, str] | None = None) -> str:
-    """Empty state.
-
-    Says *what is absent* and, where there is one, *what would make it appear*.
-    A bare blank panel reads as a broken page; "// no jobs recorded" reads as a
-    fact about the system.
-
-    `link` is a (label, href) pair rendered as real markup. It is a separate
-    argument rather than a flag on `hint` because `hint` is escaped: a hint that
-    quietly stopped escaping would be a hole, and one that escaped an author's
-    <a> would be a broken link. Two arguments, two rules, no third way.
-    """
+    """Empty state."""
     tail = f" // {escape(hint)}" if hint else ""
     if link:
         label, href = link
@@ -537,15 +432,10 @@ def _section(title: str, body: str, label: str = "") -> str:
 
 
 def _text(value: Any) -> str:
-    """A plain string, never None. Used where a helper is chained onto the result."""
+    """A plain string, never None."""
     return "" if value is None else str(value)
 
 
-# ------------------------------------------------------------------ ingest form
-
-# The two shapes an ingest can take, in the words a person would use. The
-# underlying job types are `ingest` (an episode in the request) and
-# `ingest_source` (a path on disk); those names are for the code.
 _INGEST_KINDS = (
     ("episode", "an episode"),
     ("path", "a dataset on disk"),
@@ -556,9 +446,6 @@ _INGEST_STEPS = (
     ("Or point at a path", "A LeRobot dataset directory. The format is detected on read."),
     ("Watch it land", "Jobs shows the queue. Episodes shows what was registered."),
 )
-
-
-# --------------------------------------------------------------- form pieces
 
 
 def form_notice(error: str = "") -> str:
@@ -612,15 +499,7 @@ def _ingest_form(
     error: str = "",
     values: dict[str, str] | None = None,
 ) -> str:
-    """The only way data enters the system, and the first thing a new user sees.
-
-    A plain form POST, so it works with scripting off - consistent with every
-    other control here, and the reason it needs no JavaScript to be usable.
-
-    Errors are rendered inline next to the control that caused them rather than
-    as a page-level failure. A form that discards what you typed and shows a
-    stack trace somewhere else is indistinguishable from the form being broken.
-    """
+    """The only way data enters the system, and the first thing a new user sees."""
     vals = _form_values(values)
     kind = vals.get("kind", "episode")
     if kind not in dict(_INGEST_KINDS):
@@ -677,25 +556,8 @@ def _ingest_form(
     )
 
 
-# -------------------------------------------------- the rest of the loop
-#
-# The loop the product exists to close is ingest, validate, build, export, slice. Each
-# of these forms posts to the same `/ui/jobs` (or `/ui/slices`) router as the JSON API,
-# through the same Pydantic models, so the browser cannot queue a job the API would
-# refuse - and a refusal re-renders the page that owns the form with the values intact.
-
-
 def validate_form(error: str = "", values: dict[str, str] | None = None, theme: str = "") -> str:
-    """Check episodes already in the catalog against a policy (FR-002).
-
-    `enabled_rules` is deliberately not a field. The API accepts a rule subset, but
-    `rules_for` intersects it with the rule registry, so one typo would silently switch
-    a check off. Omitting it means every registered rule runs, which is what an operator
-    asking "is this data any good" is asking for.
-
-    The theme travels in the body so the redirect after a successful submit lands on the
-    job page in the theme the operator was using.
-    """
+    """Check episodes already in the catalog against a policy (FR-002)."""
     vals = _form_values(values)
     return _section(
         "Validate episodes",
@@ -732,11 +594,7 @@ def validate_form(error: str = "", values: dict[str, str] | None = None, theme: 
 
 
 def build_form(error: str = "", values: dict[str, str] | None = None, theme: str = "") -> str:
-    """Assemble a named, content-addressed build (FR-006).
-
-    An empty selection is the API's own documented default - every episode that passed
-    validation - so the common case is one field.
-    """
+    """Assemble a named, content-addressed build (FR-006)."""
     vals = _form_values(values)
     return _section(
         "Build a dataset",
@@ -768,11 +626,7 @@ def build_form(error: str = "", values: dict[str, str] | None = None, theme: str
 def export_form(
     build_hash: str, error: str = "", values: dict[str, str] | None = None, theme: str = ""
 ) -> str:
-    """Write this build out as a LeRobot v3 dataset on disk (ADR 0025).
-
-    The hash is carried hidden rather than typed: it is the address of the page this
-    form is on, so the export cannot be pointed at the wrong build by a typo.
-    """
+    """Write this build out as a LeRobot v3 dataset on disk (ADR 0025)."""
     vals = _form_values(values)
     return _section(
         "Export this build",
@@ -842,14 +696,6 @@ def _pretty(value: Any) -> str:
         return str(value)
 
 
-# The clock, the poller and the deadline countdown all live in web/app.js now.
-# Keeping them here meant every page carried its own copy of the same three
-# functions, and a fix to the failure banner had to be made nine times.
-
-
-# ---------------------------------------------------------------- status
-
-
 def status_page(model: dict[str, Any], theme: str) -> str:
     return _page("Status", "/ui", _live("/ui", 3000, _status_body(model)), theme)
 
@@ -900,15 +746,6 @@ def _status_body(model: dict[str, Any]) -> str:
         f"peak {peak}",
     )
 
-    # The form is the *only* way data enters the system, so on a system that has
-    # never run it is the most important panel on the page - not an empty-state
-    # apology appended below three readouts. It disappears the moment there is
-    # anything to look at, because after that it is a distraction from the work.
-    #
-    # ...except when the last submission was rejected. A failure has to reopen
-    # the form even on a populated system, because the error is rendered inside
-    # it: gating on emptiness alone means someone who mistypes a field on a busy
-    # system gets a 200 with no explanation and no way to correct it.
     onboarding = ""
     ingest_error = str(model.get("ingest_error") or "")
     if ingest_error or (total_jobs == 0 and episodes == 0):
@@ -918,9 +755,6 @@ def _status_body(model: dict[str, Any]) -> str:
         )
 
     return readouts + onboarding + queue
-
-
-# ---------------------------------------------------------------- jobs
 
 
 def jobs_page(model: dict[str, Any], state_filter: str | None, theme: str) -> str:
@@ -994,9 +828,6 @@ def _jobs_body(model: dict[str, Any]) -> str:
     )
 
 
-# ---------------------------------------------------------------- job detail
-
-
 def _strip(state: str) -> str:
     if state in ("failed", "timed_out", "canceled"):
         steps = ("queued", "running", state)
@@ -1032,11 +863,7 @@ def _deadline(job: dict[str, Any], now: datetime | None = None) -> str:
 
 
 def _cancel_action(job: dict[str, Any], theme: str) -> str:
-    """A cancel control for live jobs only.
-
-    The button is a form post to the UI route, not JavaScript: the action must work
-    with scripting off, and the API route stays the single source of truth.
-    """
+    """A cancel control for live jobs only."""
     state = str(job.get("state"))
     if state not in CANCELLABLE_STATES:
         note = "cancel unavailable" if state in ACTIVE_STATES else "terminal state"
@@ -1176,14 +1003,8 @@ def job_detail_page(
     blocks.append(_produced_section(produced))
     episode = (job.get("result") or {}).get("episode_id")
     if episode:
-        # A link to the episode's own page, not to a raw document. Handing the
-        # operator a JSON blob is a developer affordance wearing an operator's
-        # clothes; the page it registers on is the thing they came to look at.
         blocks.append(f'<p><a href="/ui/episodes/{escape(str(episode))}">// open episode</a></p>')
     return _page("Job " + str(job.get("id"))[:8], "/ui/jobs", "".join(blocks), theme)
-
-
-# ---------------------------------------------------------------- artifacts
 
 
 def artifacts_page(model: dict[str, Any], theme: str) -> str:
@@ -1225,9 +1046,6 @@ def _artifacts_body(model: dict[str, Any]) -> str:
     )
 
 
-# ---------------------------------------------------------------- metrics
-
-
 def _ms(value: Any) -> str:
     try:
         return f"{float(value) * 1000:.1f}"
@@ -1235,12 +1053,6 @@ def _ms(value: Any) -> str:
         return "-"
 
 
-# Traces worth a sparkline: what a data engine's operator watches. Anything not
-# present in the window simply does not render.
-#: (metric key, operator label, axis unit, drilldown target). The key is an
-#: internal name and the label is what the operator reads. The unit goes on the
-#: axis because a duration axis with no unit is a number nobody can act on, and
-#: the target is where an operator goes once the plot has told them to look.
 TRACE_SERIES = (
     ("api_request_duration_seconds", "request handling", "s", "/ui/jobs"),
     ("jobs_run_time_seconds", "job run time", "s", "/ui/jobs"),
@@ -1249,29 +1061,17 @@ TRACE_SERIES = (
     ("jobs_queue_depth", "queue depth", "jobs", "/ui/jobs"),
 )
 
-#: Plot geometry, mirrored from `web.charts` so the x tick labels land on the
-#: same pixels the renderer draws into.
 _PLOT_WIDTH = 720
 
 
 def _series_plot(buckets: list[dict[str, Any]], *, label: str, unit: str, href: str) -> str:
-    """One ADR 0017 series as a real plot: axis, unit, and a peak you can follow.
-
-    The previous revision drew a 44-pixel polyline with no axis and no scale, so
-    a latency spike and a latency improvement were the same squiggle and neither
-    could be located in time. Samples are indexed rather than timestamped because
-    the buckets are already ordered and evenly spaced; the x axis carries the
-    real clock times, and the caption names the peak with its event count so the
-    reader can decide whether it is worth following.
-    """
+    """One ADR 0017 series as a real plot: axis, unit, and a peak you can follow."""
     if not buckets:
         return line_chart([], label=label, caption="no buckets in window")
     values = [float(bucket.get("v") or 0.0) for bucket in buckets]
     peak = max(range(len(values)), key=lambda i: values[i])
     span = max(len(buckets) - 1, 1)
     usable = _PLOT_WIDTH - PAD_LEFT - PAD_RIGHT
-    # Clamped, because a single-bucket window has no middle or last index to
-    # point at and an out-of-range subscript is how a chart takes down a page.
     x_ticks = [
         (PAD_LEFT + index / span * usable, _bucket_time(buckets[index]))
         for index in sorted({0, span // 2, span})
@@ -1356,9 +1156,6 @@ def _metrics_body(model: dict[str, Any]) -> str:
     if not traces:
         traces = _empty("no series in window", "metrics are written as the engine runs")
 
-    # Rows are the operation as a reader would name it. The underlying route
-    # stays an internal detail: it is a stable label, but it is a label for the
-    # code, not for the person deciding whether this system is healthy.
     api_rows = "".join(
         "<tr>"
         f"<td>{escape(_operation(s['labels'].get('route', '-')))}</td>"
@@ -1434,15 +1231,6 @@ def _p95(summaries: list[dict[str, Any]]) -> str:
     return _ms(max(float(s["p95"]) for s in summaries))
 
 
-# A route template is a label for the code. An operator reading a latency table
-# wants to know which *operation* is slow, and "episode listing" answers that
-# where "/api/v1/episodes" only restates the file layout.
-#
-# The lookup is (path fragment -> operation name) and it is matched against the
-# whole template, not just the last segment, because the last segment is often
-# the part that varies: "/api/v1/monitoring/tick" ends in "tick". Anything
-# unmapped degrades to its last segment with separators tidied, never to the raw
-# template, so a newly added route cannot leak its shape into the UI by omission.
 _OPERATIONS = (
     ("/health", "health check"),
     ("/monitoring/tick", "monitoring window"),
@@ -1473,13 +1261,9 @@ def _operation(route: str) -> str:
     for fragment, name in _OPERATIONS:
         if fragment in lowered:
             return name
-    # Unmapped: the last concrete segment, tidied. No slashes, no braces.
     segments = [seg for seg in lowered.split("/") if seg and not seg.startswith("{")]
     tail = segments[-1] if segments else "unknown"
     return tail.replace("-", " ").replace("_", " ")
-
-
-# ---------------------------------------------------------------- failures
 
 
 def failures_page(model: dict[str, Any], theme: str) -> str:
@@ -1568,16 +1352,8 @@ def _failures_body(model: dict[str, Any]) -> str:
     )
 
 
-# ---------------------------------------------------------------- incidents
-
-
 def incidents_page(model: dict[str, Any], theme: str) -> str:
-    """The notifier's queue: what it would interrupt you for, and what it would not.
-
-    The notify/queue split is the whole point of the page, so it is stated visually
-    rather than buried in a column: an incident that would wake someone is separated
-    from one you would simply find tomorrow.
-    """
+    """The notifier's queue: what it would interrupt you for, and what it would not."""
     return _page(
         "Incidents",
         "/ui/incidents",
@@ -1657,7 +1433,7 @@ def _incidents_body(model: dict[str, Any]) -> str:
 
 
 def incident_row_html(row: dict[str, Any]) -> str:
-    """One incident row. Public because the escaping is worth testing directly."""
+    """One incident row."""
     severity = str(row.get("severity") or "info")
     status = str(row.get("status") or "open")
     channel = str(row.get("notify_class") or "queue")
@@ -1667,8 +1443,6 @@ def incident_row_html(row: dict[str, Any]) -> str:
         if notifying
         else '<span class="text-comment">queue</span>'
     )
-    # A left edge on the row, so the two kinds of incident are separable at a
-    # glance without reading the Channel column.
     row_class = ' class="de-notify"' if notifying else ""
     return (
         f"<tr{row_class}>"
@@ -1685,17 +1459,10 @@ def incident_row_html(row: dict[str, Any]) -> str:
 
 
 def _health_strip(health: dict[str, Any]) -> str:
-    """The monitor's own vitals.
-
-    Shown on the same page as its output on purpose: a monitor that has silently
-    stopped looks exactly like a monitor with nothing to report, and only one of
-    those is healthy.
-    """
+    """The monitor's own vitals."""
     if not health:
         return ""
     last = str(health.get("last_tick_at") or "never")
-    # `None` is not "not blind": it means no tick has run anywhere yet, and
-    # rendering that as "no" would be the same false negative (as "never" above).
     blind_flag = health.get("blind")
     blind = "unknown" if blind_flag is None else ("YES" if blind_flag else "no")
     readouts = _readouts(
@@ -1712,8 +1479,6 @@ def _health_strip(health: dict[str, Any]) -> str:
         ]
     )
     return _section("Monitor health", readouts, "is the notifier itself alive")
-
-    # ---------------------------------------------------------------- slices
 
 
 def slices_page(
@@ -1754,10 +1519,6 @@ def _slices_body(model: dict[str, Any]) -> str:
         f"<td><code>{escape(str((s.get('filter_config') or {}).get('state') or 'any'))}"
         f" / {escape(str((s.get('filter_config') or {}).get('flag') or 'any'))}</code></td>"
         f"<td>{_when(s.get('updated_at'))}</td>"
-        # A manifest is the build input: a machine-readable list of the exact
-        # episodes this slice resolves to. Downloading one is a legitimate
-        # operator action, so the link stays - but it is a download of a named
-        # artifact, not a hand-off to a raw endpoint path.
         f'<td><a href="/api/v1/slices/{escape(str(s.get("id")))}/manifest" download>'
         "// download manifest</a></td>"
         "</tr>"
@@ -1772,13 +1533,7 @@ def _slices_body(model: dict[str, Any]) -> str:
 
 
 def slice_impact_page(impact: dict[str, Any], theme: str) -> str:
-    """What this slice drops versus the whole dataset, and why.
-
-    The why is grounded in the quality signals the filter actually tests -
-    verdict, stall ratio, state - and each side carries its own medians, so
-    "this slice is smoother than what it dropped" is readable off the page
-    instead of inferred from a member count.
-    """
+    """What this slice drops versus the whole dataset, and why."""
     filters = impact.get("filters") or {}
     kept = impact.get("kept") or {}
     dropped = impact.get("dropped") or {}
@@ -1870,12 +1625,6 @@ def slice_impact_page(impact: dict[str, Any], theme: str) -> str:
         )
     )
     return _page("Slice " + str(impact.get("name") or "")[:24], "/ui/slices", body, theme)
-
-
-# ---------------------------------------------------------------- episodes
-
-
-# ----------------------------------------------------------------- clusters
 
 
 def clusters_page(model: dict[str, Any], theme: str, *, error: str = "") -> str:
@@ -2005,20 +1754,13 @@ def cluster_detail_fragment(proposal: dict[str, Any], members: list[dict[str, An
     return detail_body(proposal, members)
 
 
-# ---------------------------------------------------------------- vocabulary (ADR 0029)
-
-
 def vocabulary_page(model: dict[str, Any], theme: str) -> str:
     return _page("Vocabulary", "/ui/vocabulary", vocabulary_fragment(model), theme)
 
 
 def vocabulary_fragment(model: dict[str, Any]) -> str:
-    """The triage queue, ranked by how much it is costing: candidates first,
-    then the raw queue, then the vocabulary itself, then what was done to it.
-
-    Deliberately not a polled region: this is a work queue driven by operator
-    actions, every action reloads the page, and a queue that reorders itself
-    under the cursor is worse than one that waits for a refresh.
+    """The triage queue, ranked by how much it is costing: candidates first, then the raw queue,
+    then the vocabulary itself, then what was done to it.
     """
     health = model.get("health") or {}
     entries = model.get("entries") or []
@@ -2403,7 +2145,6 @@ def _episodes_body(model: dict[str, Any]) -> str:
 def _score(value: Any) -> str:
     if value is None:
         return "-"
-    # Published channel stats can be per-dimension lists; show the head, not the list.
     if isinstance(value, list | tuple):
         return _score(value[0]) + ("&hellip;" if len(value) > 1 else "")
     try:
@@ -2427,9 +2168,6 @@ def _bounded(value: Any, ceiling: float = 1.0) -> float:
         return max(0.0, min(ceiling, float(value)))
     except TypeError, ValueError:
         return 0.0
-
-
-# ---------------------------------------------------------------- episode detail
 
 
 def _validation_section(validations: list[dict[str, Any]] | None) -> str:
@@ -2580,13 +2318,7 @@ def _quality_section(quality: dict[str, Any] | None) -> str:
 
 
 def _motion_trace(quality: dict[str, Any]) -> str:
-    """The motion score over time, with recording gaps drawn as holes.
-
-    Runs come from `analyze` already bounded and already split at dropouts; the
-    only work here is to put a `None` break between them so `line_chart` draws
-    separate segments. Nothing reconnects across a hole, and the hole keeps its
-    measured width because x is mapped by value, not by index.
-    """
+    """The motion score over time, with recording gaps drawn as holes."""
     runs = quality.get("motion_trace") or []
     points = [(float(t), float(v)) for run in runs for t, v in run]
     if not points:
@@ -2608,8 +2340,6 @@ def _motion_trace(quality: dict[str, Any]) -> str:
     if hi - lo > 4:
         ticks.insert(1, (tick((lo + hi) / 2), f"{(lo + hi) / 2:.0f} s"))
     caption = f"{len(points)} points in {len(runs)} run(s)"
-    # Count-agnostic wording on purpose: one gap and five read the same, and a
-    # caption that conjugates itself is a caption that eventually gets it wrong.
     if len(runs) > 1:
         caption += "; gaps are recording dropouts, not stillness"
     else:
@@ -2621,9 +2351,6 @@ def _motion_trace(quality: dict[str, Any]) -> str:
         x_ticks=ticks,
         caption=caption,
     )
-
-
-# ---------------------------------------------------------------- insights
 
 
 def insights_page(model: dict[str, Any], theme: str) -> str:
@@ -2662,13 +2389,6 @@ def _insights_body(model: dict[str, Any]) -> str:
         f"mean {_score(length.get('mean'))}",
     )
 
-    # Plotted on `jerk_score`, not `movement_score`. The raw score is an L2 norm
-    # in the source's own units, so the driving fixture (millimetres) reads
-    # 1.0e8 beside arm joints in radians at 0.02 and every arm episode collapses
-    # onto the floor of the axis. `jerk_score` is the same motion divided by
-    # each dimension's range, so the five episodes of the reference run land in
-    # a 4x band instead of a 4-billion-x one and the chart can be read. The raw
-    # score is still in the table below, labelled with its unit.
     speed = model.get("speed_distribution", [])
     speed_section = _section(
         "Motion, comparable across datasets",
@@ -2700,9 +2420,6 @@ def _insights_body(model: dict[str, Any]) -> str:
         "one row per episode",
     )
 
-    # Recording reliability, rolled up. Nothing in the pipeline counts this: a
-    # dataset assembled half from gappy recordings is a dataset with holes, and
-    # per-episode verdicts are not a number anyone can hold in their head.
     integrity_counts = model.get("integrity") or {}
     gapped = int(integrity_counts.get("gapped", 0))
     scored = sum(int(v) for v in integrity_counts.values())

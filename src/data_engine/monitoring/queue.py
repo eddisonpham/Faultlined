@@ -1,29 +1,4 @@
-"""Triage: fingerprinting, dedup, cooldown, and the hard alert budget.
-
-This is where most of the system's precision comes from. Precision is a property
-of the whole pipeline rather than of any single rule, and a detector that fires
-correctly fifty times a minute still destroys the channel. So every signal passes
-through here, and a signal that cannot earn its place is dropped with a recorded
-reason — never silently, because a suppressed signal nobody can audit is
-indistinguishable from a bug.
-
-The gates, in order:
-
-1. **Evidence gate.** A signal with an empty evidence bundle is rejected. The
-   promise is that no incident exists which cannot cite the numbers behind it, and
-   this is where that promise is enforced rather than trusted to each rule.
-2. **Severity gate.** Below ``min_severity`` is not an incident.
-3. **Dedup.** One fingerprint means one open incident, no matter how many rules or
-   ticks noticed the same fault. A repeat is a *bump*: the counter and the
-   timestamp move, a new row does not appear.
-4. **Cooldown.** A resolved incident that re-fires inside the cooldown is
-   suppressed, so a flapping fault cannot manufacture a stream of rows. This is
-   also the measurement behind the time-to-acknowledge proxy: the gap before a
-   recurrence opens a genuinely new incident.
-5. **Budget.** Past ``budget_per_window`` new incidents, the window degrades to
-   log-only and *says so*. A monitor that quietly floods is indistinguishable from
-   one that has stopped working.
-"""
+"""Triage: fingerprinting, dedup, cooldown, and the hard alert budget."""
 
 from __future__ import annotations
 
@@ -83,9 +58,6 @@ class TriageOutcome:
     reason: str = ""
 
 
-#: Evidence keys that identify *which* fault fired and are therefore part of the
-#: fingerprint. Numbers are excluded on purpose: they change every tick, and
-#: including them would make dedup impossible.
 _STABLE_EVIDENCE_KEYS: frozenset[str] = frozenset(
     {"source", "reason_code", "job_type", "profile_name"}
 )
@@ -119,7 +91,7 @@ def decide(
     open_incidents: Mapping[str, ExistingIncident],
     budget_used: int = 0,
 ) -> list[TriageOutcome]:
-    """Route signals to open/bump/suppress. Order is preserved for stable reports."""
+    """Route signals to open/bump/suppress."""
     outcomes: list[TriageOutcome] = []
     budget = budget_used
     for signal in signals:

@@ -1,10 +1,4 @@
-"""Format dispatch by sniffing, so a new format is a registration, not an edit.
-
-`api.md` §reader protocol promises that "adding a format (ROS 2 bag later) means adding
-one reader + tests — no core changes". This module is the single place where that promise
-is kept, and it is deliberately boring: ordered readers, first sniff wins, no plugin
-discovery and no entry-point machinery for a platform that has two formats.
-"""
+"""Format dispatch by sniffing, so a new format is a registration, not an edit."""
 
 from __future__ import annotations
 
@@ -26,7 +20,7 @@ def reader_for(path: Path) -> EpisodeReader | None:
 
 
 def read_episode(path: Path, *, episode_key: str | None = None) -> EpisodeExtraction:
-    """Sniff, then read. Raises `ReaderError` naming the formats that were tried."""
+    """Sniff, then read."""
     reader = reader_for(path)
     if reader is None:
         tried = ", ".join(r.format for r in READERS) or "none"

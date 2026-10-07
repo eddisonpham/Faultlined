@@ -1,26 +1,4 @@
-"""LeRobot dataset reader, covering both the v2.x and v3.0 on-disk layouts.
-
-Why one reader and not two: `codebase_version` in `meta/info.json` is the *only*
-discriminator the format itself defines, and the two layouts are structurally
-different, not cosmetically different.
-
-    v2.1   data/chunk-{episode_chunk:03d}/episode_{episode_index:06d}.parquet
-           episodes indexed in meta/episodes.jsonl, stats in meta/episodes_stats.jsonl
-
-    v3.0   data/chunk-{chunk_index:03d}/file-{file_index:03d}.parquet
-           episodes indexed in meta/episodes/chunk-*/file-*.parquet, sliced by the
-           dataset_from_index / dataset_to_index row range, with per-episode stats as
-           stats/<feature>/{min,max,mean,std,count} columns
-
-A v3 episode is a *row range*, not a file. Those indices are global across the whole
-dataset, so slicing one file needs the file's starting row subtracted - see
-`_file_offset`. Getting that wrong returns well-formed frames from the wrong episode,
-which is the worst failure mode available here, so an inconsistent index is a hard
-error rather than a best guess.
-
-Both layouts are implemented against real Hub artifacts; the fixtures are named in
-`agents/research/technology-matrix.md` (re-verification pass 2026-09-29).
-"""
+"""LeRobot dataset reader, covering both the v2.x and v3.0 on-disk layouts."""
 
 from __future__ import annotations
 
@@ -38,12 +16,10 @@ INFO_RELATIVE_PATH = Path("meta") / "info.json"
 SUPPORTED_VERSIONS = ("v2.0", "v2.1", "v3.0")
 V2_CHUNKS_SIZE = 1000
 
-# Columns the engine interprets directly; anything else is a feature column.
 _STRUCTURAL_COLUMNS = frozenset(
     {"timestamp", "frame_index", "episode_index", "index", "task_index", "next.done"}
 )
 
-# (chunk_index, file_index) -> first global row of that data file, for v3 datasets.
 _FileRef = tuple[int, int]
 
 
@@ -82,8 +58,6 @@ class LeRobotReader:
             source=source,
             table=table,
         )
-
-    # ------------------------------------------------------------------ metadata
 
     def _read_info(self, root: Path) -> dict[str, Any]:
         target = root / INFO_RELATIVE_PATH
@@ -139,7 +113,7 @@ class LeRobotReader:
 
     @staticmethod
     def _select(index: dict[int, dict[str, Any]], episode_key: str | None) -> tuple[int, Any]:
-        """Pick the requested episode, or the first one. Never guesses silently."""
+        """Pick the requested episode, or the first one."""
         if episode_key is None:
             first = min(index)
             return first, index[first]
@@ -147,8 +121,6 @@ class LeRobotReader:
         if wanted not in index:
             raise ReaderError(f"episode {wanted} is not in the dataset (have {sorted(index)})")
         return wanted, index[wanted]
-
-    # -------------------------------------------------------------------- layout
 
     def _locate(self, root: Path, version: str, record: dict[str, Any]) -> Path:
         if version.startswith("v2"):
@@ -201,8 +173,6 @@ class LeRobotReader:
             )
         return table.slice(local_start, local_stop - local_start)
 
-    # ---------------------------------------------------------------- extraction
-
     def _to_extraction(
         self,
         *,
@@ -248,17 +218,8 @@ class LeRobotReader:
         )
 
 
-# --------------------------------------------------------------------- helpers
-
-
 def _file_offset(record: dict[str, Any], index: dict[int, Any]) -> int:
-    """Global row index at which this episode's data file begins.
-
-    v3 concatenates every data file into one logical table, so `dataset_from_index`
-    is dataset-global. The start of a file is the sum of the lengths of every episode
-    stored in an *earlier* file. Episodes are ordered by (chunk_index, file_index),
-    which is the order the files are written in.
-    """
+    """Global row index at which this episode's data file begins."""
     mine = _file_ref(record)
     per_file: dict[_FileRef, int] = {}
     for other in index.values():
@@ -312,12 +273,7 @@ def _as_float(value: Any) -> float | None:
 
 
 def _series(table: pa.Table) -> dict[str, list[float]]:
-    """Per-dimension frame series for quality analysis (ADR 0018).
-
-    List-typed feature columns expand into `name[i]` dims. Structural columns,
-    byte-string image columns, and columns whose rows disagree on width yield
-    nothing — a quality signal must never fail an ingest.
-    """
+    """Per-dimension frame series for quality analysis (ADR 0018)."""
     out: dict[str, list[float]] = {}
     for name in table.schema.names:
         if name in _STRUCTURAL_COLUMNS:
@@ -342,13 +298,7 @@ def _column(table: pa.Table, name: str) -> list[float]:
 
 
 def _channels(table: pa.Table, record: dict[str, Any]) -> tuple[ChannelStats, ...]:
-    """Per-feature stats, preferring the format's own published values.
-
-    v3 stores per-episode stats as `stats/<feature>/<agg>` columns; v2 keeps them in
-    `meta/episodes_stats.jsonl`, which this reader does not yet join. When nothing is
-    published the values are computed from the slice, so the contract also holds for
-    hand-made datasets.
-    """
+    """Per-feature stats, preferring the format's own published values."""
     published = {
         name: values
         for name, values in _published_stats(record).items()
@@ -359,8 +309,6 @@ def _channels(table: pa.Table, record: dict[str, Any]) -> tuple[ChannelStats, ..
         for name in table.schema.names
         if name not in _STRUCTURAL_COLUMNS
     ]
-    # Features the episode index describes but the data file does not carry (video
-    # shards, mostly) are still reported: their absence is itself a fact.
     found.extend(
         ChannelStats(
             name=name,

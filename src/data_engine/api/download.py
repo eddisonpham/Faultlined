@@ -1,15 +1,4 @@
-"""Streamed CSV/JSONL downloads of the existing list reads (ADR 0030).
-
-An export is the same read with a different serializer: rows are pulled from the
-catalog cursor one page at a time and serialized as they go, so no download ever
-materializes the full result set in memory. There is no export service and no
-materialized export artifact; the CSV a table downloads is byte-for-byte the
-view it was rendered from, and its header is the response model's field order,
-so a CSV cannot drift from the JSON contract.
-
-The first row is pulled eagerly so catalog failures surface as a normal JSON
-error instead of a half-written file; everything after it streams.
-"""
+"""Streamed CSV/JSONL downloads of the existing list reads (ADR 0030)."""
 
 from __future__ import annotations
 
@@ -25,21 +14,12 @@ from fastapi import HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-#: Supported download serializations. A CSV is a contract too.
 DOWNLOAD_FORMATS = ("csv", "jsonl")
 
-#: One catalog round trip per page.
 PAGE_SIZE = 500
 
-#: Hard ceiling on a single download. A streaming export that can never end is
-#: an outage with a progress bar; the ceiling is generous (a 500-wide page table
-#: shows 50) and the JSON view's cursor remains available for more.
 MAX_EXPORT_ROWS = 50_000
 
-#: An upper cursor far in the future. A read whose default ordering is not
-#: cursor-stable (the episode flag rankings reorder by signal) pages
-#: consistently when every page - including the first - goes through the cursor
-#: path, so such a read starts its download from here.
 CURSOR_START = datetime(9999, 12, 31, tzinfo=UTC)
 
 Fetch = Callable[..., list[dict[str, Any]]]
@@ -69,7 +49,7 @@ def _jsonable(value: Any) -> Any:
 
 
 def _cell(value: Any) -> str:
-    """One CSV cell. Structured values become their JSON form, kept in one cell."""
+    """One CSV cell."""
     if value is None:
         return ""
     if isinstance(value, bool):
@@ -88,12 +68,7 @@ def _csv_line(values: Sequence[str]) -> str:
 
 
 def paged_rows(fetch: Fetch) -> Iterator[dict[str, Any]]:
-    """Walk a newest-first cursor read to exhaustion, one page at a time.
-
-    The cursor is the page's last ``created_at`` - the field every list read
-    pages on. A read without one exports its first page and stops rather than
-    looping on a cursor that never moves.
-    """
+    """Walk a newest-first cursor read to exhaustion, one page at a time."""
     before: datetime | None = None
     emitted = 0
     while emitted < MAX_EXPORT_ROWS:
@@ -121,12 +96,7 @@ def download_response(
     rows: Iterable[dict[str, Any]],
     item_model: type[BaseModel] | None = None,
 ) -> StreamingResponse:
-    """Serialize rows as ``fmt`` and stream them as a file download.
-
-    ``item_model`` normalizes each raw catalog row through the same Pydantic
-    model the JSON route validates with, so a CSV row and a JSON item are the
-    same values in the same shapes - what you see is what you get.
-    """
+    """Serialize rows as ``fmt`` and stream them as a file download."""
     filename = f"{stem}-{datetime.now(UTC).date().isoformat()}.{'csv' if fmt == 'csv' else 'jsonl'}"
     media_type = (
         "text/csv; charset=utf-8" if fmt == "csv" else "application/x-ndjson; charset=utf-8"
@@ -151,8 +121,6 @@ def download_response(
         )
 
     iterator = iter(normalized())
-    # Pulled before the response starts streaming, so a catalog failure raises
-    # here (a normal JSON error) rather than halfway through a partial file.
     first = next(iterator, None)
 
     def lines() -> Iterator[str]:

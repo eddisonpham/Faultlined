@@ -1,19 +1,4 @@
-"""Schema and data-flow page (ADR 0024).
-
-Draws the catalog that is running: an entity graph built from the real foreign
-keys, a per-table column list with live row counts, and the path data takes
-through the system. All of it comes from `catalog.introspect`, so none of it
-can drift from the code - there is no diagram in the repository to fall out of
-date.
-
-The graph is a **layered** layout, not a force-directed one, and that is a
-deliberate choice. Fourteen tables with twenty-odd foreign keys have a natural
-direction - `episodes` owns quality, validation, lineage and slices; `builds`
-own artifacts - and a spring layout would scramble that into a hairball whose
-only virtue is that it looks like a tool. Layers are assigned by walking the
-foreign-key graph back to the tables that reference nothing, so the layering is
-derived rather than hand-listed, and an edge always points downward.
-"""
+"""Schema and data-flow page (ADR 0024)."""
 
 from __future__ import annotations
 
@@ -23,9 +8,6 @@ from typing import Any
 
 __all__ = ["graph_svg", "schema_fragment", "schema_page", "table_detail"]
 
-#: The ingest and build paths, stated as the operator would describe them. The
-#: table names are the real ones; if a table is renamed this page says so in a
-#: test rather than rendering a path that does not exist.
 FLOW: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("ingest", ("jobs", "episodes", "episode_quality", "artifacts")),
     ("validate", ("jobs", "validation_profiles", "validation_results", "episodes")),
@@ -42,13 +24,7 @@ _PAD = 16.0
 
 
 def _layers(tables: Sequence[dict[str, Any]], keys: Sequence[dict[str, Any]]) -> dict[str, int]:
-    """Assign each table a layer: 0 references nothing, n references layer < n.
-
-    Derived by walking the real foreign keys, not listed by hand, so a new table
-    lands somewhere sensible without anyone updating this module. Cycles (which
-    the schema does not have, but a future one might) fall back to layer 0
-    rather than looping forever.
-    """
+    """Assign each table a layer: 0 references nothing, n references layer < n."""
     references: dict[str, set[str]] = {str(table["name"]): set() for table in tables}
     for key in keys:
         source = str(key["source"])
@@ -154,12 +130,7 @@ def graph_svg(model: dict[str, Any]) -> str:
 
 
 def flow_svg(model: dict[str, Any]) -> str:
-    """The path data takes, as labelled chains over the tables that exist.
-
-    A step naming a table the catalog does not have is dropped rather than
-    drawn, and the caption says so: a flow diagram with a step that 500s when
-    clicked is worse than one that admits it is behind.
-    """
+    """The path data takes, as labelled chains over the tables that exist."""
     present = {str(table["name"]) for table in model.get("tables") or []}
     chains = [(name, [step for step in steps if step in present]) for name, steps in FLOW]
     chains = [(name, steps) for name, steps in chains if len(steps) > 1]

@@ -1,30 +1,4 @@
-"""Live schema introspection for the `/ui/schema` page (ADR 0024).
-
-Reads the catalog that is actually running rather than a diagram somebody
-maintained. That is the whole point: a hand-written schema picture is a
-snapshot of what was true the day it was drawn, it never shows the column that
-was added last month without a migration, and nobody notices it has drifted
-until it is load-bearing. These queries cannot drift, because they are the
-database asking about itself.
-
-Three things are read, all from `pg_catalog`:
-
-- **columns** — name, type, nullability, default, and whether the column is a
-  primary key. Enough to answer "what is in here" without a second query per
-  table.
-- **foreign keys** — the real constraints, which is what turns a list of
-  fourteen tables into a graph an operator can navigate.
-- **row counts** — live, from a per-table count. The catalog is local-scale by
-  design (ADR 0005), so an exact count is cheap and far more useful than the
-  `reltuples` estimate PostgreSQL keeps, which is deliberately approximate and
-  would put `0` or `-1` on a page whose entire purpose is to say what is in
-  here.
-
-`describe()` returns a plain dict and never raises for a missing catalog: an
-operator opening this page with the database down gets an explicit "catalog
-unreachable" state, because a schema view that 500s is worse than no schema
-view.
-"""
+"""Live schema introspection for the `/ui/schema` page (ADR 0024)."""
 
 from __future__ import annotations
 
@@ -75,8 +49,7 @@ ORDER BY tc.table_name, kcu.column_name
 
 
 class ColumnInfo:
-    """One column. A plain class rather than a dataclass: it never leaves the
-    process and a frozen dataclass here would be ceremony."""
+    """One column."""
 
     __slots__ = ("data_type", "default", "name", "nullable", "position", "primary")
 
@@ -136,11 +109,7 @@ class TableInfo:
 
 
 def describe(settings: Settings | None = None) -> dict[str, Any]:
-    """The live catalog shape: tables, columns, keys, row counts.
-
-    Returns `{"reachable": False, ...}` rather than raising when the catalog
-    cannot be reached, so the page can say so in its own words.
-    """
+    """The live catalog shape: tables, columns, keys, row counts."""
     try:
         with connect(settings) as connection:
             tables: dict[str, TableInfo] = {}
@@ -152,21 +121,11 @@ def describe(settings: Settings | None = None) -> dict[str, Any]:
             for row in connection.execute(_FOREIGN_KEYS_SQL).fetchall():
                 key = ForeignKey(row)
                 foreign_keys.append(key)
-                # `source` holds the foreign key, `target` the table it points
-                # at. "Referenced by" belongs to the *target*: `episodes` is
-                # referenced by `episode_quality`, not the other way round, and
-                # reading that backwards tells an operator which side owns the
-                # relationship - which is the only reason the column exists.
                 if key.target in tables and key.source not in tables[key.target].referenced_by:
                     tables[key.target].referenced_by.append(key.source)
 
             for name, table in tables.items():
-                # Identifiers come from information_schema, not from a request, so
-                # they cannot carry an injection. The quoting is belt and braces
-                # against a table named `order` or `user`.
                 counted = connection.execute(f'SELECT count(*) AS n FROM "{name}"').fetchone()
-                # `count(*)` is bigint, which psycopg hands back as a Python int;
-                # the row type is `object` because dict rows are untyped.
                 table.row_count = cast(int, counted["n"]) if counted else 0
     except Exception as error:
         return {

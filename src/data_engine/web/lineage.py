@@ -1,21 +1,4 @@
-"""Lineage as a graph (ADR 0007, drawn in ADR 0024).
-
-The product's thesis is that a training set can be traced back to the exact
-bytes and the exact code that produced it. Until now that answer existed only as
-JSON: `/api/v1/episodes/{id}/builds` and `/api/v1/builds/{hash}` return it
-correctly, and a human had to read it. A DAG is what lineage *is* - episodes
-flow into a build, the build's policy and commit fix what came out - so drawing
-it as a graph is not decoration, it is the same answer in the shape the question
-was asked in.
-
-Three columns, left to right, because the data moves one way:
-
-    episodes  ->  build  ->  artifacts
-
-Every node is a link. The graph is the navigation, not a picture next to a
-table: clicking a node is the same action as reading its row, and there is no
-second representation that can disagree with the first.
-"""
+"""Lineage as a graph (ADR 0007, drawn in ADR 0024)."""
 
 from __future__ import annotations
 
@@ -36,12 +19,7 @@ def _short(value: Any, keep: int = 10) -> str:
 
 
 def lineage_svg(build: dict[str, Any]) -> str:
-    """Episodes, the build, and the artifacts, as one left-to-right graph.
-
-    A build with more episodes than fit is truncated in the drawing and says so
-    in the caption: a hundred stacked nodes is not a graph, it is a column of
-    text pretending to be one. The full membership is in the table below it.
-    """
+    """Episodes, the build, and the artifacts, as one left-to-right graph."""
     episodes = build.get("episodes") or []
     manifest = build.get("manifest") or {}
     members = manifest.get("episodes") if isinstance(manifest, dict) else None
@@ -174,13 +152,7 @@ def _members_table(build: dict[str, Any]) -> str:
 
 
 def _redundancy_section(build: dict[str, Any]) -> str:
-    """Which members are the same behaviour recorded twice (ADR 0032).
-
-    Read-only, and it says so: a report that proposed collapses without stating that nothing
-    has been removed would read as a decision already taken. The reason travels with every
-    row, because the whole justification for a deterministic fingerprint over a model's
-    embedding space is that an operator can disagree with it by reading it.
-    """
+    """Which members are the same behaviour recorded twice (ADR 0032)."""
     from data_engine.web.pages import _meter, _readouts, _section
 
     report = build.get("redundancy")
@@ -260,13 +232,7 @@ def _redundancy_section(build: dict[str, Any]) -> str:
 
 
 def _coverage_section(build: dict[str, Any]) -> str:
-    """What this build holds on each axis, and what the catalog holds instead (ADR 0033).
-
-    The gap column is the point of the section. A distribution alone describes the build; the set
-    difference against the catalog is the only part an operator can act on, and for tasks it is
-    read from the vocabulary, so a label the operator named and never recorded appears here as
-    missing rather than not existing.
-    """
+    """What this build holds on each axis, and what the catalog holds instead (ADR 0033)."""
     from data_engine.web.pages import _meter, _readouts, _section
 
     report = build.get("coverage")
@@ -446,7 +412,5 @@ def lineage_page(
 
     body = _detail_body(build)
     if build:
-        # The export form is only offered for a build that exists: an export is a
-        # projection of an immutable manifest, and this page is the manifest.
         body += export_form(str(build.get("hash") or ""), error, values, theme)
     return _page(f"Build {str(build.get('name') or '')[:24]}", "/ui/builds", body, theme)

@@ -68,7 +68,7 @@ def class_size_view(proposals: Sequence[Proposal]) -> str:
 
 
 def health_table(proposals: ProposalSet) -> str:
-    """The numbers first. A reviewer should not have to infer health from the view."""
+    """The numbers first."""
     health = proposals.health()
     cells = [
         ("task strings", health["tasks"]),

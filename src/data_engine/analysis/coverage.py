@@ -1,35 +1,4 @@
-"""What a build contains, and what it lacks (ADR 0033).
-
-The industry measures dataset diversity once, offline, in a paper: the AgiBot/Shanghai study
-(arXiv:2507.06219) decomposes it into task, embodiment and expert and spends its budget separating
-them; OXE and DROID publish counts; dataset cards and Croissant carry a publisher's *claim*; Dataset
-Cartography needs a model trained several times over the data. None of them answers the question an
-operator has in front of a build they are about to export: **what does this contain, and what does
-it lack?**
-
-Here the three axes that study separated are columns the catalog already holds. A task string
-normalised against a human-approved vocabulary (ADR 0029), a robot, a format, and a quality verdict
-are all persisted per episode at ingest, so coverage is an aggregation of rows rather than a study.
-This module is the pure half - the aggregation query lives in the catalog and the surface in the API
-and the build page, exactly as ADR 0032 split the fingerprint.
-
-Four properties are deliberate, and they are the reason this is a report and not a score:
-
-- **Gaps, not a number.** A diversity index ("this build is 0.62 diverse") cannot be acted on. The
-  actionable object is a set difference: the values the reference set holds and the build does not.
-  This is the one thing none of the surveyed systems publishes.
-- **Two references, and both are reported.** The *catalog* ("you curated out every episode of the
-  other robot") and, for tasks, the operator's own *vocabulary* ("you named `fold the cloth` and
-  there is no episode for it anywhere"). The second is why task gaps come from the vocabulary rather
-  than from the episodes: a gap has to be expressible before it has been filled.
-- **Bounded by construction.** `VALUE_LIMIT` values per axis and `GAP_LIMIT` gaps per axis, each
-  with an explicit truncation flag and the true total, so the payload is bounded by the axes
-  rather than by the episode count. `quality/summary` already ships 2.2 MiB at 10k episodes
-  (EXP-0015) and this surface is not allowed to become the same problem.
-- **It advises; it does not gate.** No coverage figure enters a build's identity and no build is
-  refused for a gap. A build missing a task is a fact about the build; whether that matters belongs
-  to the operator.
-"""
+"""What a build contains, and what it lacks (ADR 0033)."""
 
 from __future__ import annotations
 
@@ -48,16 +17,10 @@ __all__ = [
     "coverage_report",
 ]
 
-#: The most distinct values one axis reports in a build's distribution. A build whose task list is
-#: longer than this is summarised rather than dumped, and says so.
 VALUE_LIMIT = 20
 
-#: The most gaps one axis reports. The full count travels beside the list, so a truncated gap list
-#: reads as "at least this many" rather than as the whole answer.
 GAP_LIMIT = 20
 
-#: The axes, in report order, with the label the surface uses. Every one is an attribute the catalog
-#: already persists; ADR 0033 decision 2 forbids deriving a new one here.
 AXES: tuple[tuple[str, str], ...] = (
     ("task", "Task"),
     ("robot", "Embodiment"),
@@ -65,8 +28,6 @@ AXES: tuple[tuple[str, str], ...] = (
     ("verdict", "Verdict"),
 )
 
-#: The axis whose gaps come from the operator's vocabulary instead of from the catalog's values
-#: (ADR 0033 decision 4). Every other axis reports the catalog's values that the build left out.
 _VOCABULARY_AXIS = "task"
 
 
@@ -77,8 +38,7 @@ class CoverageValue:
     value: str
     count: int
     share: float
-    """`count / episode_count`, or 0.0 for an empty build. Reported so a large build and a small one
-    read comparably, and so a value that is 1 of 400 is visibly not 1 of 2."""
+    """`count / episode_count`, or 0.0 for an empty build. """
 
     def to_dict(self) -> dict[str, Any]:
         return {"value": self.value, "count": self.count, "share": self.share}
@@ -91,13 +51,13 @@ class CoverageAxis:
     name: str
     label: str
     present: int
-    """Distinct values the build holds, before `VALUE_LIMIT` truncation. Zero for an empty build."""
+    """Distinct values the build holds, before `VALUE_LIMIT` truncation. """
 
     values: tuple[CoverageValue, ...]
     gaps: tuple[str, ...]
     """Values the reference set holds and the build does not, alphabetical, truncated to
-    `GAP_LIMIT`. For the task axis these are vocabulary labels, so a label with no episode anywhere
-    is a gap here (ADR 0033 decision 4)."""
+    `GAP_LIMIT`.
+    """
 
     missing: int
     """How many gaps there are before truncation, so a capped list says "at least"."""
@@ -119,11 +79,7 @@ class CoverageAxis:
 
 @dataclass(frozen=True, slots=True)
 class CoverageReport:
-    """What one build contains, measured against the catalog it was drawn from (ADR 0033).
-
-    Read-only by construction, and it says so: nothing here is removed from the build, nothing is
-    refused, and no coverage figure takes part in the build's identity.
-    """
+    """What one build contains, measured against the catalog it was drawn from (ADR 0033)."""
 
     build_hash: str
     episode_count: int
@@ -137,11 +93,7 @@ class CoverageReport:
 
     @property
     def coverage_ratio(self) -> float:
-        """Share of the catalog's episode population this build accounts for.
-
-        Not a diversity measure and not claimed as one: it is the one scalar here that is a ratio of
-        two counted things, and it is what makes an empty build obviously empty.
-        """
+        """Share of the catalog's episode population this build accounts for."""
         if not self.catalog_size:
             return 0.0
         return self.episode_count / self.catalog_size
@@ -172,13 +124,7 @@ def coverage_report(
     value_limit: int = VALUE_LIMIT,
     gap_limit: int = GAP_LIMIT,
 ) -> CoverageReport:
-    """Fold one `build_coverage_inputs` result into the report a surface renders.
-
-    Never raises on a malformed input: a missing or non-numeric count is read as zero, so a
-    broken query result degrades to a report that says it has nothing rather than to a 500. The
-    alternative - propagating the failure - would make the coverage section of a build page dark
-    for a reason the operator cannot see, which is the failure ADR 0023 prevents a layer down.
-    """
+    """Fold one `build_coverage_inputs` result into the report a surface renders."""
     episode_count = _count(inputs.get("episode_count"))
     catalog_size = _count(inputs.get("catalog_size"))
     rows = _rows(inputs.get("values"))
@@ -226,25 +172,14 @@ def coverage_report(
 
 
 def _ordered(rows: Sequence[Mapping[str, Any]], limit: int) -> list[Mapping[str, Any]]:
-    """The build's distribution: present values only, most-common first, ties by value.
-
-    The order is part of the report rather than an accident of the query planner, because two runs
-    over one catalog have to produce the same bytes for the report to be citable the way a build
-    hash is. The query already ranks this way; re-sorting here means a caller that hands rows over
-    in any order still gets the same report.
-    """
+    """The build's distribution: present values only, most-common first, ties by value."""
     present = [row for row in rows if _count(row.get("build_count")) > 0]
     present.sort(key=lambda row: (-_count(row.get("build_count")), str(row.get("value") or "")))
     return present[: max(limit, 0)]
 
 
 def _catalog_gaps(rows: Sequence[Mapping[str, Any]], limit: int) -> tuple[tuple[str, ...], int]:
-    """Values the catalog holds and the build does not, and how many there were before the cap.
-
-    The total comes from the query's window count, not from the rows handed over: the query caps the
-    rows it returns, so counting them would report "no gaps" for the axes whose gap list was the one
-    that got cut - a silent under-report, which is the failure this whole surface exists to avoid.
-    """
+    """Values the catalog holds and the build does not, and how many there were before the cap."""
     gaps = sorted(
         str(row.get("value") or "")
         for row in rows
@@ -254,12 +189,7 @@ def _catalog_gaps(rows: Sequence[Mapping[str, Any]], limit: int) -> tuple[tuple[
 
 
 def _vocabulary_gaps(vocabulary: Mapping[str, Any], limit: int) -> tuple[tuple[str, ...], int]:
-    """The task axis's gaps: vocabulary entries with no episode in this build.
-
-    Read from the vocabulary rather than from the episodes because an entry with no episode anywhere
-    is still a gap, and because it bounds the list by what the operator has named rather than by
-    what happens to be stored.
-    """
+    """The task axis's gaps: vocabulary entries with no episode in this build."""
     entries = vocabulary.get("gaps")
     labels = [
         str(entry.get("label") or "")
@@ -287,11 +217,7 @@ def _rows(raw: Any) -> list[Mapping[str, Any]]:
 
 
 def _count(value: Any) -> int:
-    """A count, or 0 for anything that is not a finite number (ADR 0023's rule, one layer down).
-
-    `Decimal` is in the list because that is what PostgreSQL returns for `sum()` over a `bigint`,
-    which is how the first run of this feature reported every total as zero.
-    """
+    """A count, or 0 for anything that is not a finite number (ADR 0023's rule, one layer down)."""
     if isinstance(value, bool) or not isinstance(value, (int, float, Decimal)):
         return 0
     number = float(value)

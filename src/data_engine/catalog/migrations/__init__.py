@@ -1,28 +1,4 @@
-"""Versioned forward-only catalog migrations (ADR 0028).
-
-The schema has always been built by `initialize_schema` - idempotent DDL on
-every process start. That stays. This module adds what idempotent DDL cannot
-express: a recorded version, changes that run once (backfills, renames,
-destructive steps), and the ability to say which database is behind or ahead.
-
-Design, in one paragraph: migrations are explicit Python objects in one ordered
-tuple (`version`, `name`, `apply(connection)`), not files discovered by
-scanning, so mypy sees the registry and nothing runs that nobody imported. Each
-applied version is recorded in `schema_migrations` inside the same transaction
-as the change, so a crashed runner leaves no version behind unapplied work.
-`pg_advisory_xact_lock` serializes concurrent runners (a worker and an operator
-both migrating at startup must not race). Forward-only: a rollback is the
-restore drill, which is already the procedure this project practices.
-
-The shipped registry holds the baseline and the real migrations added since
-(0002: the task-vocabulary backfill, ADR 0029). The baseline is the existing
-idempotent DDL: `initialize_schema` keeps running on every start and records
-`0001` after it succeeds, so a database that has only ever been started by the
-code already reads as baseline-applied and `de migrate` runs only real pending
-work. Tests inject synthetic migrations through the `migrations=` parameter to
-prove once-only semantics without committing a fake migration to make the
-mechanism look used.
-"""
+"""Versioned forward-only catalog migrations (ADR 0028)."""
 
 from __future__ import annotations
 
@@ -35,9 +11,7 @@ from data_engine.catalog.database import run_schema_ddl
 from data_engine.catalog.migrations.task_vocabulary import TaskVocabularyMigration
 from data_engine.config import Settings
 
-#: Advisory lock key. A literal constant, not a hash: the value only has to be
-#: stable within this project, and a named constant reads better in pg_locks.
-MIGRATION_LOCK_KEY = 0x464C544D  # 'FLTM'
+MIGRATION_LOCK_KEY = 0x464C544D
 
 _TABLE = """
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -51,8 +25,6 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 class Migration(Protocol):
     """One forward-only schema step, applied inside a single transaction."""
 
-    # Read-only properties, so a frozen dataclass satisfies the protocol: an
-    # implementation that cannot renumber itself is exactly the point.
     @property
     def version(self) -> str: ...
 
@@ -73,8 +45,6 @@ class BaselineMigration:
         run_schema_ddl(connection)
 
 
-#: The shipped registry. Ordered by version; the runner refuses duplicates and
-#: gaps are allowed (a renumbered or withdrawn draft must not reorder history).
 REGISTRY: tuple[Migration, ...] = (BaselineMigration(), TaskVocabularyMigration())
 
 
@@ -88,13 +58,7 @@ def applied_versions(connection: Connection[Any]) -> list[str]:
 def compute_pending(
     applied: list[str], migrations: tuple[Migration, ...] = REGISTRY
 ) -> tuple[Migration, ...]:
-    """Migrations not yet recorded, in registry order.
-
-    Pure so the ordering rules are testable without a database: registry order
-    is authoritative (gaps allowed), an applied version skips its migration,
-    and duplicate versions in the registry are a programming error caught here
-    rather than a double-apply at 3am.
-    """
+    """Migrations not yet recorded, in registry order."""
     seen: set[str] = set()
     for migration in migrations:
         if migration.version in seen:
@@ -105,12 +69,7 @@ def compute_pending(
 
 
 def unknown_versions(applied: list[str], migrations: tuple[Migration, ...] = REGISTRY) -> list[str]:
-    """Recorded versions the registry does not know.
-
-    A non-empty result means the database is newer than the code running
-    against it - a downgraded worker, or a restore into the wrong checkout.
-    `upgrade` refuses in that state and `de migrate --status` exits nonzero.
-    """
+    """Recorded versions the registry does not know."""
     known = {migration.version for migration in migrations}
     return [version for version in applied if version not in known]
 
@@ -133,12 +92,7 @@ def upgrade(
     *,
     migrations: tuple[Migration, ...] = REGISTRY,
 ) -> list[str]:
-    """Apply every pending migration, each in one transaction, in registry order.
-
-    Returns the versions applied by this call. Running it twice is a no-op the
-    second time: applied versions are skipped, so the function is safe to call
-    from a startup path as well as `de migrate`.
-    """
+    """Apply every pending migration, each in one transaction, in registry order."""
     from data_engine.catalog.database import connect
 
     applied_by_this_call: list[str] = []
@@ -153,9 +107,6 @@ def upgrade(
                 + " are not in the registry; refusing to migrate"
             )
         for migration in compute_pending(applied, migrations):
-            # One transaction per migration: `connect` yields an autocommit-off
-            # connection, so the commit below covers the change and its version
-            # row together.
             migration.apply(connection)
             connection.execute(
                 "INSERT INTO schema_migrations (version, name) VALUES (%s, %s)",

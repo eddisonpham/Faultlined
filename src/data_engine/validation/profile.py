@@ -1,15 +1,4 @@
-"""Declarative, hash-addressed validation profiles (FR-002; ADR 0016).
-
-A profile is a *policy document*, not code: which channels an episode must have, how long
-it must be, what its frame rate may be. It is validated when it is constructed, so a
-malformed profile cannot be persisted, and it is addressed by the SHA-256 of its canonical
-JSON, so "the same profile" is a fact rather than a name comparison.
-
-JSON rather than YAML is a deliberate departure from `architecture/components.md` §6 and is
-recorded in ADR 0016: LeRobot datasets already ship `meta/*.json`, the platform already
-hashes canonical JSON for idempotency and manifests, and PyYAML would be a dependency
-nothing else in the stack justifies.
-"""
+"""Declarative, hash-addressed validation profiles (FR-002; ADR 0016)."""
 
 from __future__ import annotations
 
@@ -24,7 +13,7 @@ PROFILE_SCHEMA_VERSION = 1
 
 
 class InvalidProfile(ValueError):
-    """A profile is malformed. Rejected at construction, never persisted."""
+    """A profile is malformed."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,12 +34,7 @@ class ValidationProfile:
     """None means every registered rule runs; a set restricts it."""
 
     content_hash: str = field(default="", compare=False)
-    """The profile's content address, set by `profile_from_dict`.
-
-    Populated rather than left blank because a blank address is the failure mode
-    this field exists to prevent: a build manifest that cites a policy by
-    `hash: ""` looks like it pinned the policy and pinned nothing.
-    """
+    """The profile's content address, set by `profile_from_dict`."""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -164,12 +148,7 @@ def profile_from_json(raw: str) -> ValidationProfile:
 
 
 def profile_hash(profile: ValidationProfile) -> str:
-    """Content address: sha256 over the profile's canonical JSON.
-
-    `hash` is excluded from the hashed body, or the address would be a function of
-    itself. The value is stable either way for a given policy, which is the only
-    property anything depends on - but a self-referential hash cannot be checked.
-    """
+    """Content address: sha256 over the profile's canonical JSON."""
     document = {key: value for key, value in profile.to_dict().items() if key != "hash"}
     return hashlib.sha256(canonical_json(document)).hexdigest()
 

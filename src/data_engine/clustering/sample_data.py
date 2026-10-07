@@ -1,17 +1,7 @@
-"""Task strings to propose over when the catalog has nothing to offer.
-
-An empty catalog must not render as an empty page that looks like a working feature, and
-it must not render as *data* either. These are the real LeRobot task sentences the scale
-run harvested (`experiments/clustering/results/real_tasks.json`), with **illustrative**
-episode counts, and the page says so wherever they appear.
-
-Real sentences, invented counts. The clustering over them is genuine; the sizes are not,
-and a reviewer who treats them as catalog statistics would be reading fiction.
-"""
+"""Task strings to propose over when the catalog has nothing to offer."""
 
 from __future__ import annotations
 
-#: `task string -> episode count`. Counts are illustrative: no catalog produced them.
 SAMPLE_TASKS: dict[str, int] = {
     "Push the T-shaped block onto the T-shaped target.": 120,
     "Insert the peg into the socket.": 84,
@@ -61,7 +51,6 @@ SAMPLE_TASKS: dict[str, int] = {
     "pink lego brick into the transparent box": 50,
 }
 
-#: Shown next to any figure drawn from the sample so nobody mistakes it for catalog data.
 SAMPLE_NOTE = "illustrative LeRobot task sentences, not catalog data"
 
 

@@ -1,8 +1,4 @@
-"""Typed settings loaded from process environment variables only (ADR 0002).
-
-The local task runner may import a gitignored .env into its process environment; application
-settings never open .env. Secrets (HF_KEY, database URL) are never logged.
-"""
+"""Typed settings loaded from process environment variables only (ADR 0002)."""
 
 from __future__ import annotations
 
@@ -23,12 +19,11 @@ class Settings(BaseSettings):
     export_root: Path = Path("./var/exports")
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
     log_format: Literal["json", "text"] = "json"
-    worker_slots: str = "auto"  # "auto" or "cpu=N,gpu=N"
+    worker_slots: str = "auto"
     api_host: str = "127.0.0.1"
     api_port: int = Field(default=8000, ge=1, le=65535)
     metrics_path: Path = Path("./var/metrics/runtime.jsonl")
 
-    # No env_prefix for this one: the name is fixed by the secrets convention (ADR 0002).
     hf_key: SecretStr | None = Field(default=None, validation_alias="HF_KEY")
 
     @field_validator("artifact_root")

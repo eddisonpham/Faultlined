@@ -1,26 +1,4 @@
-"""Lay clusters out in two dimensions without a numerical stack.
-
-The Clusters page needs a map: where each cluster sits, and how its boundary runs. That
-requires projecting 256-dimensional hashed token vectors onto a plane, and the engine
-may not depend on numpy - it must stay installable on a laptop with no model weights,
-let alone a numerical stack.
-
-So this is a spectral layout by power iteration, in plain Python, over the cluster-by-
-cluster cosine matrix. Two leading eigenvectors of the centred similarity matrix give the
-axes; each cluster's coordinates are its projections onto them. That is the same idea as
-classical multidimensional scaling without the matrix squaring, which matters: squaring an
-n-by-n matrix costs O(n^3) and a page cannot pay it.
-
-**Bounded on purpose.** `MAX_POINTS` caps what is laid out, and the caller is expected to
-pass the biggest clusters first. A catalog with thousands of task strings would otherwise
-turn a review page into a long-running request; the cap is a page-size decision, not a
-claim about the data.
-
-**What the map is and is not.** Nearby clusters really do share tokens. Axis directions
-carry no meaning, distances are compressed rather than exact, and two runs can differ by a
-rotation or a reflection. Anything that would make a reader trust the axes more than they
-deserve is deliberately absent.
-"""
+"""Lay clusters out in two dimensions without a numerical stack."""
 
 from __future__ import annotations
 
@@ -30,12 +8,8 @@ from dataclasses import dataclass
 
 Point = tuple[float, float]
 
-#: Power iterations per axis. 12 is past the point of visible movement on matrices this
-#: size; more only buys a slower page.
 ITERATIONS = 12
 
-#: Most clusters one page will draw. Beyond this the hulls overlap into a grey blob and
-#: the request takes long enough to be noticed.
 MAX_POINTS = 200
 
 
@@ -44,11 +18,8 @@ class Layout:
     """A 2D projection plus the share of similarity it preserves."""
 
     points: tuple[Point, ...]
-    #: Share of the centred similarity matrix's trace carried by the two axes, 0 to 1.
     explained: float
-    #: Largest absolute coordinate, so the caller can scale without rescanning.
     extent: float
-    #: How many clusters were left out by `MAX_POINTS`.
     dropped: int = 0
 
 
@@ -100,11 +71,7 @@ def _double_centre(matrix: list[list[float]]) -> list[list[float]]:
 
 
 def project(vectors: Sequence[Sequence[float]], *, limit: int = MAX_POINTS) -> Layout:
-    """Project unit vectors onto two dimensions, biggest clusters first.
-
-    Fewer than three distinct points cannot form a boundary, so those cases are laid out
-    on a line rather than returning a map that looks broken.
-    """
+    """Project unit vectors onto two dimensions, biggest clusters first."""
     usable = list(vectors)[:limit]
     dropped = max(0, len(vectors) - len(usable))
     size = len(usable)
@@ -134,12 +101,7 @@ def project(vectors: Sequence[Sequence[float]], *, limit: int = MAX_POINTS) -> L
 
 
 def convex_hull(points: Sequence[Point]) -> list[Point]:
-    """Andrew's monotone chain. Collinear points on an edge are dropped.
-
-    A hull is a claim that everything inside belongs to one cluster, so it has to be the
-    tightest such claim; the naive cross-product test is what makes charts look confident
-    and wrong.
-    """
+    """Andrew's monotone chain."""
     unique = sorted(set(points))
     if len(unique) < 3:
         return unique

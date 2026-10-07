@@ -1,34 +1,3 @@
-/*
- * Faultlined instrument layer.
- *
- * The brief is a bench instrument, not a dashboard: machined bezels, silkscreen
- * legends, status LEDs, an oscilloscope graticule, and hazard striping where
- * something is actually wrong. Everything is drawn with borders, gradients and
- * one vendored font — no images, no icon font, no build step.
- *
- * The colour/type vocabulary (custom properties, tables, badges, ASCII bars)
- * comes from the vendored stylesheet; see vendor/terminal-ui/NOTICE.md. The
- * display face is vendored Departure Mono; see vendor/departure-mono/NOTICE.md.
- *
- * Three rules the rest of this file obeys:
- *
- * 1. **Colour is never the only signal.** Every severity carries a word and a
- *    distinct glyph as well as a hue, because an instrument that relies on red
- *    alone is unusable for a red-green colourblind operator.
- * 2. **No halos.** The vendored themes put a phosphor `text-shadow` on the big
- *    readouts and the headings. It is overridden off at the bottom of this file.
- *    The colours stay - this is a neon terminal, and neon is the point - but a
- *    blurred copy of every number behind the real one reads as decoration, and
- *    on a dense instrument page it costs legibility for a 1990s affectation.
- *    `text-shadow` inherits, so clearing it on the two elements that set it
- *    clears it from every descendant as well. The rule covers motion too: the
- *    page transition dims but never blurs, because a blurred page is the same
- *    glow at full-screen size. The rule covers `backdrop-filter` too: the nav
- *    is opaque rather than blurring the rows that scroll under it.
- * 3. **Motion is opt-in.** Every animation sits behind
- *    `prefers-reduced-motion: no-preference`.
- */
-
 @font-face {
   font-family: "Departure Mono";
   src: url("vendor/departure-mono/DepartureMono-Regular.woff2") format("woff2");
@@ -42,19 +11,14 @@
   --de-mono: ui-monospace, SFMono-Regular, "Cascadia Mono", Consolas, monospace;
   --de-gap: 0.75rem;
   --de-radius: 2px;
-  /* Derived from whatever theme is active, resolved once. */
+
   --de-fg: var(--fine-use-text, #0f0);
   --de-dim: var(--fine-use-comment, #080);
   --de-line: color-mix(in srgb, var(--fine-use-border, #0a0) 45%, transparent);
   --de-faint: color-mix(in srgb, var(--fine-use-border, #0a0) 18%, transparent);
-  /* The status ramp is set per theme further down, not here. */
+
 }
 
-/* ---- type register -------------------------------------------------------- */
-
-/* The pixel face carries the instrument chrome: legends, readouts, meters,
-   clocks, chart chrome. Data stays on the platform monospace stack, which is
-   what makes a column of numbers align. */
 .de-head h1,
 .de-brand,
 .de-section > h2,
@@ -83,8 +47,6 @@ pre.de-json,
   font-family: var(--de-mono);
 }
 
-/* ---- shell ---------------------------------------------------------------- */
-
 body {
   margin: 0;
   background: var(--fine-use-bg, #000);
@@ -92,9 +54,6 @@ body {
   min-height: 100vh;
 }
 
-/* The graticule. A scope screen has a grid behind the trace, and it is the
-   cheapest way to make a flat page read as an instrument. Faint enough to stay
-   behind the data. */
 body::before {
   content: "";
   position: fixed;
@@ -122,8 +81,6 @@ body::before {
   padding: 0 1.25rem 4rem;
 }
 
-/* ---- faceplate nav -------------------------------------------------------- */
-
 .de-nav {
   display: flex;
   align-items: center;
@@ -133,13 +90,7 @@ body::before {
   margin: 0 -1.25rem 1rem;
   padding-inline: 1.25rem;
   border-bottom: 1px solid var(--fine-use-border, #0a0);
-  /* A faceplate is a machined strip: a faint top highlight, a hard bottom edge.
-     Both gradient stops are opaque on purpose. The previous version faded to
-     `transparent` and put a 2px `backdrop-filter` on the nav to compensate, so
-     the content scrolling underneath was blurred into a halo behind the chrome -
-     the same decoration rule 2 rejects everywhere else, in the one place it is
-     hardest to notice. The sticky table header solved the identical problem by
-     being opaque; the nav does the same now. */
+
   background:
     linear-gradient(
       to bottom,
@@ -241,7 +192,7 @@ body::before {
   padding: 0.25rem 0.5rem;
   border: 1px solid transparent;
   border-radius: var(--de-radius);
-  /* The numeric key hint, revealed on focus/hover. Cheap affordance, no JS. */
+
   position: relative;
 }
 
@@ -273,11 +224,6 @@ body::before {
 
 .de-nav .de-spacer { flex: 1; }
 
-/* ---- status LED ----------------------------------------------------------- */
-
-/* A single indicator for the whole page's link health, driven by app.js. Green
-   is steady, amber is retrying, red is failed, grey is unknown. The word is
-   always present in the accessible name so colour is never the only signal. */
 .de-led[hidden] { display: none; }
 
 .de-led {
@@ -332,9 +278,6 @@ body::before {
   cursor: pointer;
 }
 
-/* The theme form holds the select plus its no-JS submit button. The button is
-   screen-reader-only because the select's onchange submits in the normal case;
-   it exists so the control still works with scripting disabled. */
 .de-theme-form {
   display: flex;
   gap: 0.3rem;
@@ -352,11 +295,7 @@ body::before {
   font-size: 0.6rem;
 }
 
-/* Poll region. No visual treatment of its own - it exists so app.js has a
-   stable, innermost element to replace without disturbing page chrome. */
 .de-live { min-height: 1rem; }
-
-/* ---- page header ---------------------------------------------------------- */
 
 .de-head {
   display: flex;
@@ -391,23 +330,16 @@ body::before {
   font-family: var(--de-display);
 }
 
-/* ---- motion --------------------------------------------------------------- */
-
-/* Motion tokens are the published Material Design 3 values, from material-web
-   v0.192 `tokens/versions/v0_192/_md-sys-motion.scss`. Emphasized curves move
-   large surfaces, standard curves small state changes. A cubic-bezier is a
-   timeline, not a simulation; the one genuinely simulated motion here is the
-   navigation sweep, integrated per frame in app.js. */
 :root {
-  /* Material 3, v0.192, emphasized set. */
+
   --de-ease-emphasized: cubic-bezier(0.2, 0, 0, 1);
   --de-ease-emphasized-accelerate: cubic-bezier(0.3, 0, 0.8, 0.15);
   --de-ease-emphasized-decelerate: cubic-bezier(0.05, 0.7, 0.1, 1);
-  /* Material 3, v0.192, standard set. */
+
   --de-ease-standard: cubic-bezier(0.2, 0, 0, 1);
   --de-ease-standard-accelerate: cubic-bezier(0.3, 0, 1, 1);
   --de-ease-standard-decelerate: cubic-bezier(0, 0, 0, 1);
-  /* Material 3 durations, v0.192. */
+
   --de-dur-short2: 100ms;
   --de-dur-short4: 200ms;
   --de-dur-medium2: 300ms;
@@ -415,18 +347,8 @@ body::before {
   --de-dur-long2: 500ms;
 }
 
-/* Panels arrive rather than pop, staggered by depth (`--i`, set by app.js and
-   capped at 8) so a page of six panels does not land as one slab.
-
-   Declared inside the `no-preference` guard, never cancelled by a `reduce`
-   override: opting in is the only direction that cannot be forgotten. */
 @media (prefers-reduced-motion: no-preference) {
-  /* The entrance runs once per document load, gated on [data-booted], which
-     app.js sets on <html> after the first frame. A poll replaces `.de-live`'s
-     innerHTML, and a new element restarts its animation from 0% - so an
-     ungated entrance replays on every cycle and strobes the page.
-     `animation-fill-mode: none` keeps the rule self-cleaning: the animated
-     property reverts to its resting value, so nothing can strand at opacity 0. */
+
   html:not([data-booted]) .de-section,
   html:not([data-booted]) .de-readouts {
     animation: de-arrive var(--de-dur-long2) var(--de-ease-emphasized-decelerate) none;
@@ -436,34 +358,17 @@ body::before {
     animation-delay: calc(var(--i, 0) * 45ms);
   }
 
-  /* A poll that changed nothing must not move. A poll that changed something
-     marks the region, not the page: no opacity dip, no reflow, no blink. */
   .de-live[data-changed] {
     animation: de-refresh var(--de-dur-medium2) var(--de-ease-standard-decelerate) none;
   }
 
-  /* The outgoing page recedes: it dims and shrinks a hair, so the incoming
-     page reads as closer rather than merely different.
-
-     It used to blur by 3px as well. Rule 2 (no halos) is not only about
-     `text-shadow`: on a neon terminal a blurred copy of the entire page is a
-     full-screen glow, and it was reported as exactly that - a phosphor halo
-     that had come back. It only ever appeared on navigation, because a
-     refresh adds no class, which made it look like a rendering bug rather
-     than a style. A dim is enough to say "this is being replaced", so the
-     blur is gone.
-
-     This class was also previously a transition on `opacity` that nothing ever
-     changed, so it did nothing at all: the page snapped and only the bars
-     moved. */
   body.de-leaving {
     opacity: 0.25;
     transform: scale(0.995);
     transition:
       opacity var(--de-dur-short4) var(--de-ease-emphasized-accelerate),
       transform var(--de-dur-short4) var(--de-ease-emphasized-accelerate);
-    /* Promote for the duration: the transform still animates a full-page
-       layer, and without the hint it repaints on every frame. */
+
     will-change: opacity, transform;
   }
 }
@@ -479,19 +384,11 @@ body::before {
   }
 }
 
-/* Deliberately a hairline colour shift rather than an opacity dip. An opacity
-   animation on a region that re-renders is indistinguishable from a flicker;
-   a 6% lift is perceptible as "this updated" and cannot be read as a fault. */
 @keyframes de-refresh {
   0% { color: var(--de-ok); }
   100% { color: inherit; }
 }
 
-/* ---- fault banner --------------------------------------------------------- */
-
-/* Shown by app.js when a poll fails. Hazard striping is the one place the
-   instrument is allowed to shout, because it means the instrument itself is
-   unreliable and the numbers on screen may be stale. */
 .de-banner {
   display: none;
   align-items: center;
@@ -514,8 +411,6 @@ body::before {
 
 .de-banner[data-visible="1"] { display: flex; }
 
-/* A boxed exclamation, drawn not typed: the mark is an aria-hidden decorative
-   glyph so the message text is what a screen reader announces. */
 .de-banner-mark {
   display: inline-grid;
   place-items: center;
@@ -552,11 +447,7 @@ body::before {
   color: var(--fine-use-bg, #000);
 }
 
-/* Staleness: when the last successful poll is old enough to matter, the clock
-   says so instead of quietly implying the numbers are current. */
 .de-clock[data-stale="1"] { color: var(--de-warn); }
-
-/* ---- telemetry readouts --------------------------------------------------- */
 
 .de-readouts {
   display: grid;
@@ -596,10 +487,6 @@ body::before {
   margin-left: 0.25rem;
 }
 
-/* ---- bezel panels --------------------------------------------------------- */
-
-/* A section is a bolted-down plate. The corner marks are the screws; the inset
-   highlight is the machined edge. */
 .de-section {
   position: relative;
   margin-bottom: 1.5rem;
@@ -645,10 +532,6 @@ body::before {
   text-transform: none;
 }
 
-/* ---- ASCII meter ---------------------------------------------------------- */
-
-/* The meter's own box is drawn by the characters, so the cell needs no chrome;
-   `aria-label` carries the same number for a screen reader. */
 .de-meter {
   letter-spacing: 0.02em;
   white-space: pre;
@@ -656,8 +539,6 @@ body::before {
 }
 
 .de-meter .off { color: var(--de-dim); opacity: 0.4; }
-
-/* ---- job state strip ------------------------------------------------------ */
 
 .de-strip {
   display: flex;
@@ -679,18 +560,6 @@ body::before {
 }
 .de-strip .sep { color: var(--de-dim); opacity: 0.6; }
 
-/* ---- tables --------------------------------------------------------------- */
-
-/* Each data plate is its own scroll region, both axes: the Episodes table is
-   ten columns and would otherwise drag the nav sideways.
-
-   The plate is deliberately a scrollport, because `overflow-x: auto` already
-   forces `overflow-y` to compute to `auto`. The column header is sticky against
-   this element, so its `top` is measured from the top of the table - not the
-   page. That is why the offset is 0 and why the header must not be given a
-   nav-relative offset: the nav's height is theme- and viewport-dependent.
-
-   Short tables never reach `max-height`, so nothing about them changes. */
 .de-table-wrap {
   overflow: auto;
   max-height: min(70vh, 44rem);
@@ -698,8 +567,6 @@ body::before {
   scrollbar-color: var(--fine-use-accent, #0c0) transparent;
 }
 
-/* Keyboard users must be able to reach the scroll region, so it takes focus -
-   and when they do, say so. */
 .de-table-wrap:focus-visible {
   outline: 2px solid var(--fine-use-accent, #0c0);
   outline-offset: -2px;
@@ -709,26 +576,13 @@ body::before {
   width: 100%;
   border-collapse: collapse;
   font-size: 0.8rem;
-  /* Long evidence strings would otherwise stretch the plate; wrap instead. */
+
   table-layout: auto;
 }
 
-/* Sticky column headers, pinned *below* the nav.
-
-   The offset is a CSS variable rather than a literal because the nav height
-   depends on the font metrics and the theme. Hard-coding it (it was 2.4rem)
-   pinned the headers 34px above the real nav bottom, so they slid underneath the
-   nav and over the first rows of the table - the header and the data it labels
-   ended up in the same place. `body:has(.de-nav)` sets it from the live value.
-   */
-/* Header and cell share one line-box height and one padding, so a column label
-   and the value beneath it sit on the same line. `--de-cell-pad` and
-   `--de-row-line` are the single source for both, so they cannot drift apart. */
 .de-table {
   --de-cell-pad: 0.45rem 0.6rem;
-  /* One line-box height for the header and the cells, as a length rather than a
-     ratio. A ratio would scale with each cell's own font-size and the header's
-     text would sit a couple of pixels off the baseline of the row beneath it. */
+
   --de-row-line: 1.08rem;
 }
 
@@ -747,9 +601,7 @@ body::before {
   position: sticky;
   top: 0;
   z-index: 2;
-  /* Opaque, and the *panel* surface rather than the page background: the
-     section tint is a translucent mix, so a page-coloured header shows the rows
-     scrolling underneath it. */
+
   background: var(--fine-use-surface, #010);
 }
 
@@ -769,8 +621,6 @@ body::before {
 .de-table .num { text-align: right; }
 .de-table .dim { color: var(--de-dim); }
 
-/* Copyable identifiers: monospace, click to copy, and a visible affordance so
-   the capability is discoverable rather than a secret. */
 .de-copy {
   cursor: copy;
   border-bottom: 1px dotted var(--de-dim);
@@ -778,34 +628,8 @@ body::before {
 
 .de-copy:hover { border-bottom-color: var(--fine-use-accent, #0c0); }
 
-/* ---- status colour: one palette, per theme -------------------------------- */
-
-/*
- * The bug this fixes: `--fine-use-success` in the vendored sheets is a fully
- * saturated #00ff00, and core.css applies it to `.text-success` at full weight.
- * On the Status page that put a single pure-green "ok" in a row of grey numbers
- * and it read as a highlighted button rather than as a reading - a sore thumb.
- * Saturated primaries are for the one thing on screen that must be seen; a
- * status word is not that thing.
- *
- * The fix is a dedicated status ramp per theme, held here rather than in the
- * vendored file (which is pinned and must not be edited). Each ramp is derived
- * from the Okabe-Ito colour-blind-safe set, then pulled down in chroma and
- * nudged toward the theme's own background so the values sit *in* the palette
- * rather than on top of it. Chosen hues:
- *
- *   ok      bluish green  #009E73   cool, unmistakably not the accent hue
- *   warn    orange        #E69F00   the amber every instrument already uses
- *   error   vermillion    #D55E00   red-orange; reads as alarm without neon
- *   info    sky blue      #56B4E9   distinct from ok in both hue and lightness
- *   muted   the theme's own comment colour, for "no value"
- *
- * Every one of these is distinguishable under deuteranopia, protanopia and
- * tritanopia, and none of them is the theme accent, so "a number is coloured"
- * and "this is the interactive accent" stop competing.
- */
 :root {
-  /* Fallbacks for a theme we have not tuned. Mid-lightness, low chroma. */
+
   --de-ok: #7fb3a3;
   --de-warn: #d1a05f;
   --de-err: #cf7f63;
@@ -813,8 +637,6 @@ body::before {
   --de-muted: #6b7280;
 }
 
-/* VT220: a green-phosphor terminal. The status ramp is desaturated toward the
-   phosphor so it belongs, and the accent stays the only saturated green. */
 [data-theme="vt220"] {
   --de-ok: #6fae8f;
   --de-warn: #c9a15c;
@@ -823,8 +645,6 @@ body::before {
   --de-muted: #4d7a4d;
 }
 
-/* Amber CRT: everything is already warm, so the ramp leans warm and the greens
-   are pulled to olive rather than fighting the background. */
 [data-theme="amber"] {
   --de-ok: #9a9a52;
   --de-warn: #c99244;
@@ -833,9 +653,6 @@ body::before {
   --de-muted: #8a6428;
 }
 
-/* GitHub Dark: the only theme with a cool neutral ground, so the ramp can be
-   the most colourful of the four without shouting. Values are the Okabe-Ito
-   hues darkened one step to sit on #0d1117 at AA contrast. */
 [data-theme="github-dark"] {
   --de-ok: #57ab8a;
   --de-warn: #c69026;
@@ -844,9 +661,6 @@ body::before {
   --de-muted: #7d8590;
 }
 
-/* Monochrome: the theme's entire premise is maximum contrast with no hue, so
-   the status ramp is pure luminance. A red alert still has to be findable, and
-   here the *weight* does that work rather than the hue. */
 [data-theme="monochrome"] {
   --de-ok: #b8b8b8;
   --de-warn: #d0d0d0;
@@ -855,33 +669,18 @@ body::before {
   --de-muted: #6e6e6e;
 }
 
-/* Bind the ramp to the semantic classes. This deliberately does NOT touch
-   --fine-use-success and friends: the vendored `.status-*` components keep
-   their own saturated treatment, which is right for a filled chip you are
-   meant to read as a badge. Only inline status *words* get the quiet ramp. */
 .text-success { color: var(--de-ok); }
 .text-warning { color: var(--de-warn); }
 .text-error   { color: var(--de-err); }
 .text-info    { color: var(--de-info); }
 .text-comment { color: var(--de-muted); }
 
-/* ---- severity glyphs ------------------------------------------------------ */
-
-/* Hue is the third signal, not the first. The glyph and the word carry meaning
-   on their own. */
 .text-success::before { content: "\25cf"; margin-right: 0.3em; }
 .text-warning::before { content: "\25b2"; margin-right: 0.3em; }
 .text-error::before { content: "\2715"; margin-right: 0.3em; }
 .text-info::before { content: "\25c6"; margin-right: 0.3em; }
 .text-comment::before { content: "\00b7"; margin-right: 0.3em; }
 
-/* ---- ingest form ---------------------------------------------------------- */
-
-/* The one control that creates data, so it is allowed to be taller and denser
-   than the filter bar. Inputs share the filter bar's face so the page does not
-   grow a second control language, but they keep their typed value in normal case:
-   an uppercase-transformed text field shows the wrong text back to the person
-   who typed it, and `frames` is a number, not a label. */
 .de-ingest {
   display: flex;
   flex-direction: column;
@@ -946,8 +745,6 @@ body::before {
   cursor: pointer;
 }
 
-/* Inverts rather than glows, like every other action here: an inverted block
-   reads the same in all four vendored themes, including the phosphorless ones. */
 .de-submit:hover,
 .de-submit:focus-visible {
   background: transparent;
@@ -965,9 +762,6 @@ body::before {
   margin: 0;
 }
 
-/* A two-line caveat has no business spanning a 1200px panel: the measure would
-   be absurd and the eye would have to travel back to find the start of the next
-   sentence. */
 .de-sub-note { max-width: 60ch; }
 
 .de-steps {
@@ -987,8 +781,6 @@ body::before {
   color: var(--de-fg);
   margin: 0 0 0.6rem;
 }
-
-/* ---- filter bar ----------------------------------------------------------- */
 
 .de-filters {
   display: flex;
@@ -1019,8 +811,6 @@ body::before {
 }
 
 .de-filters label:has(select) { color: var(--de-dim); }
-
-/* ---- misc ----------------------------------------------------------------- */
 
 .de-kv {
   display: grid;
@@ -1077,8 +867,6 @@ pre.de-json {
 
 .de-violations code { color: var(--de-err); }
 
-/* ---- lifecycle actions ---------------------------------------------------- */
-
 .de-attempts { white-space: nowrap; }
 .de-attempts .de-meter { font-size: 0.7rem; opacity: 0.85; }
 
@@ -1105,8 +893,6 @@ pre.de-json {
   cursor: pointer;
 }
 
-/* Hover/focus inverts rather than glows: an inverted block reads unambiguously
-   in every vendored theme, including the ones with no phosphor. */
 .de-cancel:hover,
 .de-cancel:focus-visible {
   background: var(--de-err);
@@ -1127,15 +913,6 @@ pre.de-json {
   to { opacity: 0.25; }
 }
 
-/* ---- oscilloscope charts -------------------------------------------------- */
-
-/* Traces sit on a graticule like a scope screen: dotted grid, phosphor line, no
-   gradients or shadows on the trace itself. The SVGs hold one polyline/rect set
-   and nothing else.
-
-   `width: 100%` with no max-width: an earlier revision capped the trace at 46rem,
-   which left the chart filling 61% of its panel and made the panel look half
-   empty. A scope screen spans its bezel. */
 .de-chart {
   display: block;
   width: 100%;
@@ -1167,10 +944,6 @@ pre.de-json {
 .de-chart-bars rect { fill: var(--fine-use-accent, #0c0); opacity: 0.75; }
 .de-chart-dots circle { fill: var(--fine-use-accent, #0c0); }
 
-/* ---- cross-episode heat matrix -------------------------------------------- */
-
-/* Same reasoning as .de-table-wrap: sixteen dimension columns do not fit a
-   laptop, and the matrix is the one place horizontal scrolling is expected. */
 .de-heat-wrap {
   overflow-x: auto;
   scrollbar-width: thin;
@@ -1199,8 +972,6 @@ pre.de-json {
 }
 
 .de-heat-table td.de-heat[title] { cursor: help; }
-
-/* ---- outlier lists -------------------------------------------------------- */
 
 .de-outlier-grid {
   display: grid;
@@ -1241,8 +1012,6 @@ pre.de-json {
 .de-outliers a { color: var(--fine-use-accent, #0c0); text-decoration: none; }
 .de-outliers a:hover { text-decoration: underline; }
 
-/* ---- incidents: the notifier's queue (ADR 0020) -------------------------- */
-
 .de-digest {
   margin: 0;
   padding: 0.75rem 0.9rem;
@@ -1257,35 +1026,13 @@ pre.de-json {
   overflow-x: auto;
 }
 
-/* The evidence column is prose, not a number: cap it so one long summary cannot
-   push the severity column off the plate. */
 .de-table td.de-evidence {
   max-width: 44ch;
   color: color-mix(in srgb, var(--de-fg) 78%, var(--fine-use-bg, #000));
 }
 
-/* An incident that would interrupt the owner gets a left edge. This is the one
-   place the queue uses a non-textual severity cue, because "wake up" is a
-   different kind of thing from "high" and should look like it. */
 .de-table tr.de-notify td:first-child { box-shadow: inset 3px 0 0 var(--de-warn); }
 
-/* ---- vendored theme hooks ------------------------------------------------- */
-
-/*
- * The vendored themes (see vendor/terminal-ui/NOTICE.md) define their character
- * against a small set of class hooks: .fine-use-component, .current-value,
- * .log-entry, .status-*, .terminal-cursor, .fine-use-focusable. Our markup
- * carries those hooks so the themes actually render - a CRT scanline or a
- * phosphor halo that no element ever targets is a feature that does not exist.
- *
- * What follows is the bridge: our layout rules, narrowed to the properties the
- * vendor sheets also set, so a theme's personality wins and our geometry does
- * not fight it. Kept in one block on purpose - scattering these makes the
- * cascade order between core.css, the theme and this file untrackable.
- */
-
-/* core.css sets font-size on the heading classes; our h1/h2 sizes are the
-   layout, the theme's contribution is the text-shadow glow. */
 .de-head h1.fine-use-h1 {
   font-size: 1.35rem;
   font-weight: 400;
@@ -1293,14 +1040,10 @@ pre.de-json {
   line-height: 1.2;
 }
 .de-section > h2 {
-  /* .fine-use-h2 is not applied to section headings; these are silkscreen
-     legends, not page titles. */
+
   font-size: 0.68rem;
 }
 
-/* The vendored component/table cards add a surface and a 2-3px border. We want
-   their border treatment but not their padding, which would break the readout
-   grid. */
 .fine-use-component {
   padding: 0;
   background-color: transparent;
@@ -1309,14 +1052,10 @@ pre.de-json {
   padding: 0.85rem 1rem 1rem;
 }
 
-/* A readouts cell is a "block" in the VT220 sense: an inset plate. Keep the
-   vendor inset shadow, drop nothing else. */
 .de-readout.block-item {
   background: var(--fine-use-surface);
 }
 
-/* Status chips use the vendored .status-* treatment (solid fill, inverted
-   text) so an amber/vt220 theme lights them up rather than leaving them flat. */
 .de-led.status-online,
 .chip-status-online {
   background-color: var(--fine-use-success);
@@ -1333,8 +1072,6 @@ pre.de-json {
   color: var(--fine-use-bg);
 }
 
-/* The blinking block cursor after the clock. Only VT220 and Amber ship one; the
-   other themes leave the element inert, which is correct rather than broken. */
 .de-clock::after {
   content: "\2588";
   margin-left: 0.35rem;
@@ -1345,16 +1082,11 @@ pre.de-json {
   .de-clock::after { animation: de-blink 1.1s steps(2, start) infinite; }
 }
 
-/* Vendor focus rings are 3px with a halo; ours is 2px. The vendor one is a
-   better target for a keyboard user in a dense table, so keep it. */
 .fine-use-focusable:focus {
   outline: 3px solid var(--fine-use-accent);
   outline-offset: 2px;
 }
 
-/* ---- focus ---------------------------------------------------------------- */
-
-/* One visible focus treatment everywhere. Never removed, only restyled. */
 :focus-visible {
   outline: 2px solid var(--fine-use-accent, #0c0);
   outline-offset: 2px;
@@ -1368,7 +1100,6 @@ pre.de-json {
   outline-offset: 1px;
 }
 
-/* Screen-reader-only text: the live region and the LED's spoken name. */
 .de-sr {
   position: absolute;
   width: 1px;
@@ -1398,22 +1129,6 @@ pre.de-json {
 
 .de-skip:focus { left: 0.5rem; top: 0.5rem; }
 
-/* ---- no navigation indicator --------------------------------------------- */
-
-/*
- * There is deliberately no progress rule, sweep or spinner here. The document
- * is server-rendered, so by the time any script runs the content is already on
- * screen; anything drawn during the wait is decoration drawn over a page that
- * is already correct. It went through three shapes - an in-flow panel that
- * pushed the page down, a centred box that covered it, then a 2px rule - and the
- * rule was still reported as a glow appearing on navigation.
- *
- * The browser's own load state is the progress indicator, and it is the honest
- * one: it is tied to the actual document load rather than to a timer.
- */
-
-/* ---- narrow screens ------------------------------------------------------- */
-
 @media (max-width: 48rem) {
   .de-shell { padding-inline: 0.75rem; }
   .de-nav { margin-inline: -0.75rem; padding-inline: 0.75rem; }
@@ -1426,8 +1141,6 @@ pre.de-json {
   body::before { background-image: none; }
 }
 
-/* ---- print ---------------------------------------------------------------- */
-
 @media print {
   body::before,
   .de-nav,
@@ -1436,12 +1149,6 @@ pre.de-json {
   .de-section { break-inside: avoid; border-color: #999; }
 }
 
-/* ---- plot primitives (ADR 0024) ------------------------------------------- */
-
-/* Distinct from `.de-chart`, the 4.5rem scope-screen trace: a plot carries axis
-   labels and units, so it is taller, keeps its aspect ratio (text must not
-   stretch when the viewBox is scaled), and draws its own graticule instead of
-   inheriting the repeating-gradient one. */
 .de-plot {
   display: block;
   width: 100%;
@@ -1482,8 +1189,6 @@ pre.de-json {
 
 .de-plot-empty .de-tick { fill: var(--de-muted); }
 
-/* The numbers behind every chart, always present, so the page survives a screen
-   reader, a stripped stylesheet and a print. */
 .de-chart-note {
   margin: 0.1rem 0 0;
   color: var(--de-dim);
@@ -1496,13 +1201,9 @@ pre.de-json {
   grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr));
 }
 
-/* Dots are the drilldown: every episode dot is a link to that episode, so the
-   chart is navigation rather than decoration. */
 .de-plot-dots { height: auto; }
 .de-plot-dots .de-point { cursor: pointer; }
 .de-dot-link { fill: none; }
-
-/* ---- schema graph (ADR 0024) ---------------------------------------------- */
 
 .de-graph { min-height: 18rem; }
 
@@ -1534,24 +1235,6 @@ pre.de-json {
   font-size: 9px;
 }
 
-/* ---- no halos (rule 2 above) ------------------------------------------------ */
-
-/* The two rules that produce a glow, from the vendored CRT themes:
- *   [data-theme] .current-value            -> text-shadow: 0 0 8px accent
- *   [data-theme] .fine-use-h1/-h2/-h3,     -> text-shadow: 0 0 3-4px currentColor
- *     .fine-use-text
- * Both are attribute-plus-class, and this file is linked after the theme, so
- * matching their specificity and arriving later is enough to win. Overriding
- * them here rather than editing the vendored sheets keeps third-party code
- * unmodified and makes the decision ours and reviewable.
- *
- * `.current-value` covers the readouts, the unit `<small>` inside them and the
- * `.text-success` / `.text-warning` / `.text-error` spans nested in them,
- * because `text-shadow` is an inherited property - one declaration clears every
- * one of them. `.de-section > h2` is the section legends, which the themes
- * reach through `.fine-use-h2`; those never carry the class, so they are named
- * directly.
- */
 [data-theme] .current-value,
 [data-theme] .fine-use-h1,
 [data-theme] .fine-use-h2,
@@ -1562,8 +1245,6 @@ pre.de-json {
   text-shadow: none;
 }
 
-/* Belt and braces for anything a future theme reaches through a hook we have
- * not enumerated: a shadow on a container is not decoration either. */
 .fine-use-app,
 .de-shell,
 .de-section,
@@ -1571,10 +1252,6 @@ pre.de-json {
   text-shadow: none;
 }
 
-/* ---- cluster proposals (ADR 0026) ----------------------------------------- */
-
-/* Health tiles. Numbers first, prose second: the reader decides whether to keep
-   reading from these before they read a single task string. */
 .de-stat-row {
   display: flex;
   flex-wrap: wrap;
@@ -1621,8 +1298,6 @@ pre.de-json {
 .de-warn { color: var(--de-warn); font-size: 0.7rem; }
 .de-error { color: var(--fine-use-red, var(--de-warn)); font-size: 0.7rem; }
 
-/* Controls sit on one line and wrap; a review page is used with one hand on the
-   keyboard, and a control that wraps to three rows is a control that gets skipped. */
 .de-controls {
   display: flex;
   flex-wrap: wrap;
@@ -1652,8 +1327,6 @@ pre.de-json {
   cursor: pointer;
 }
 
-/* Inverts like every other action here, so it reads the same in all four themes
-   including the phosphorless ones. */
 .de-button:hover,
 .de-button:focus-visible {
   background: transparent;
@@ -1677,8 +1350,6 @@ pre.de-json {
 .de-review-history[open] > summary { color: var(--fine-use-accent, #0c0); }
 .de-advanced > .de-section { margin-top: 0.45rem; }
 
-/* One ranked, full-width volume comparison replaces the uninterpretable point plot.
-   The number/share remains adjacent to the bar so visual and exact values can be checked. */
 .de-class-size {
   box-sizing: border-box;
   width: 100%;
@@ -1748,15 +1419,11 @@ pre.de-json {
   border: 1px solid var(--de-line);
   border-radius: var(--de-radius);
   padding: 0.22rem 0.4rem;
-  /* The label is prefilled with the cluster's core, and a core is longer than a
-     `size` attribute. Flex would otherwise squeeze the field to nothing and the
-     reviewer would be confirming a name they cannot read. */
+
   flex: 0 0 auto;
   width: 17em;
 }
 
-/* Cluster identity: the same colour as the figure, so a row in the table and a
-   boundary on the map are the same thing rather than two vocabularies. */
 .de-dot {
   display: inline-block;
   width: 0.6rem;

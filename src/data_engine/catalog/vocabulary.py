@@ -1,26 +1,4 @@
-"""Catalog storage for the task vocabulary (ADR 0029).
-
-The vocabulary is the source of truth for what a task string means: entries with
-human-approved preferred labels, and mappings from task strings onto them.
-Episodes keep their raw task strings forever; everything here is a *view* over
-them, so no vocabulary edit rewrites the audit trail.
-
-Three properties the shapes below are chosen for:
-
-- **Deterministic creation.** An entry id is `voc_<blake2b(label)>`, so creating
-  is idempotent and the migration-0002 backfill is reproducible. The id names
-  the entry, not the label: a rename keeps it.
-- **A queue that cannot drift.** Unmapped strings are never written anywhere;
-  the queue is a query over episodes minus mappings. A stale queue row is
-  therefore impossible by construction.
-- **Reversible operations.** Merge, split, rename, map and dismiss each record
-  what they moved or replaced in `task_vocabulary_events`, and `undo_event` is a
-  compensating action over that recorded payload - a merge can put a deleted
-  entry back exactly as it was.
-
-Separate from `repository.py` for the same reason `clusters.py` is: a different
-concern with a different lifetime. Table definitions live in `database.py`.
-"""
+"""Catalog storage for the task vocabulary (ADR 0029)."""
 
 from __future__ import annotations
 
@@ -41,17 +19,9 @@ EVENT_KINDS = ("merge", "split", "label", "map", "dismiss")
 
 
 class LabelConflict(ValueError):
-    """A preferred label is already taken by another entry (409 at the API).
-
-    A ValueError subclass so existing ValueError handling still applies, with
-    the specific case named so the API can answer a conflict rather than a
-    validation failure: the request is well-formed, the vocabulary just says no.
-    """
+    """A preferred label is already taken by another entry (409 at the API)."""
 
 
-#: How many episode-task rows a single queue read may consider. The unmapped
-#: queue is bounded by design (ADR 0029 §9: >20% share is a falsifier, not a
-#: backlog), and a bounded read keeps one page's cost independent of history.
 TASK_LIMIT = 5000
 
 
@@ -87,12 +57,7 @@ def create_entry(
     core: str | None = None,
     actor: str = "operator",
 ) -> dict[str, Any]:
-    """Create a vocabulary entry. The id derives from the label, so this is idempotent.
-
-    A second create with the same label returns the existing entry rather than
-    failing: a preferred label names exactly one entry by definition, and the
-    caller who repeated the request meant the same thing.
-    """
+    """Create a vocabulary entry."""
     label = preferred_label.strip()
     if not label:
         raise ValueError("a vocabulary entry needs a preferred label")
@@ -211,7 +176,7 @@ def map_task(
     provenance: str = "confirm",
     actor: str = "operator",
 ) -> dict[str, Any]:
-    """Put a task string under an entry. Re-mapping is allowed: a human can fix a mistake."""
+    """Put a task string under an entry."""
     if provenance == "dismiss":
         raise ValueError("dismiss is not a mapping onto an entry; use dismiss_task")
     with connect(settings) as connection:
@@ -221,8 +186,6 @@ def map_task(
         ).fetchone()
         if exists is None:
             raise KeyError(entry_id)
-        # Read inside the same transaction as the write (and under the lock), or
-        # the recorded `previous` describes a state nobody is in.
         previous_row = connection.execute(
             "SELECT entry_id, provenance FROM task_vocabulary_mappings "
             "WHERE task_string = %s FOR UPDATE",
@@ -278,26 +241,15 @@ def accept_candidate(
     expected_core: str,
     actor: str = "operator",
 ) -> dict[str, Any]:
-    """Apply a reviewed candidate atomically, creating its entry if requested.
-
-    The caller presents and revalidates the suggestion; this transaction checks
-    that each selected string still exists and is still unmapped before writing
-    any entry or mapping, so a stale form or database failure cannot leave half
-    a candidate applied.
-    """
+    """Apply a reviewed candidate atomically, creating its entry if requested."""
     selected = list(dict.fromkeys(task_strings))
     if not selected or len(selected) > 500:
         raise ValueError("a candidate must contain between 1 and 500 task strings")
     label = (new_label or "").strip()
-    # Exactly one target: an existing entry to attach to, or a new label to
-    # create one from. Both or neither is a caller bug, not a judgment call.
     if (entry_id is not None) == bool(label):
         raise ValueError("choose exactly one existing entry or new label")
 
     with connect(settings) as connection:
-        # Serialize against a concurrent map of the same strings before reading
-        # their state, so "still unmapped" is a fact about this transaction and
-        # not a snapshot taken before the other writer committed.
         _lock_strings(connection, selected)
         core_entries = connection.execute(
             "SELECT id FROM task_vocabulary_entries WHERE core = %s ORDER BY id FOR UPDATE",
@@ -371,9 +323,6 @@ def accept_candidate(
             )
 
         target_id = str(entry_row["id"])
-        # The entry a `new_entry` candidate created is recorded on each of its map
-        # events, so undoing the acceptance removes the entry again. An `attach`
-        # candidate creates nothing and records nothing to remove.
         created_entry_id = target_id if entry_id is None else None
         for task in selected:
             connection.execute(
@@ -439,8 +388,6 @@ def dismiss_task(
                 Jsonb(
                     {
                         "task_string": task_string,
-                        # The state this event wrote, so undo can tell whether the
-                        # string is still where it put it before compensating.
                         "entry_id": None,
                         "provenance": "dismiss",
                         "previous": previous,
@@ -454,13 +401,7 @@ def dismiss_task(
 
 
 def map_or_resolve(settings: Settings, task_string: str) -> str:
-    """Ingest-time resolution (ADR 0029 §3). Returns how the string resolved.
-
-    `mapped` - already under an entry. `dismissed` - already judged noise.
-    `auto` - its extracted core matched exactly one entry's core, so it is
-    mapped now (provenance `ingest`). `unmapped` - novel or ambiguous; nothing
-    is written, because the queue is a query and a queue row cannot go stale.
-    """
+    """Ingest-time resolution (ADR 0029 §3)."""
     if not task_string.strip():
         return "dismissed"
     existing = mapping_for(settings, task_string)
@@ -490,12 +431,7 @@ def list_unmapped(
     limit: int = 50,
     after: tuple[int, str] | None = None,
 ) -> list[dict[str, Any]]:
-    """Novel task strings, most fragmenting first. The bounded review queue.
-
-    Ranked by episode count - the operator's next action should remove the most
-    fragmentation - with the string as tiebreak. ``after`` continues from the
-    previous page's last ``(episodes, task)`` pair.
-    """
+    """Novel task strings, most fragmenting first."""
     cursor = ""
     params: list[Any] = []
     if after is not None:
@@ -553,13 +489,7 @@ def unmapped_counts(settings: Settings) -> tuple[int, int, int]:
 
 
 def vocabulary_health(settings: Settings) -> dict[str, Any]:
-    """The numbers the page leads with. Unmapped share is the headline.
-
-    Both shares are published: a string-weighted share hides one very common
-    unmapped string behind many rare mapped ones, and an episode-weighted share
-    hides many rare gaps behind one common mapping. They disagree often enough
-    that reporting one as *the* number would be a lie of presentation.
-    """
+    """The numbers the page leads with."""
     unmapped, dismissed, mapped = unmapped_counts(settings)
     strings = unmapped + dismissed + mapped
     with connect(settings) as connection:
@@ -613,7 +543,7 @@ def vocabulary_health(settings: Settings) -> dict[str, Any]:
 
 
 def update_notes(settings: Settings, *, entry_id: str, notes: str) -> dict[str, Any]:
-    """Edit an entry's notes. Wording, not structure: no event, nothing to undo."""
+    """Edit an entry's notes."""
     if get_entry(settings, entry_id) is None:
         raise KeyError(entry_id)
     with connect(settings) as connection:
@@ -630,7 +560,7 @@ def update_notes(settings: Settings, *, entry_id: str, notes: str) -> dict[str, 
 def rename_entry(
     settings: Settings, *, entry_id: str, preferred_label: str, actor: str = "operator"
 ) -> dict[str, Any]:
-    """Rename an entry. The id does not follow the label - it names the entry (ADR 0029 §2)."""
+    """Rename an entry."""
     label = preferred_label.strip()
     if not label:
         raise ValueError("a vocabulary entry needs a preferred label")
@@ -656,9 +586,6 @@ def rename_entry(
                 (label, entry_id),
             )
         except UniqueViolation as error:
-            # Two operators renamed two entries to the same label at once: the
-            # clash check above cannot see the other transaction, so the unique
-            # index is the real arbiter. Answered as a conflict, not a 500.
             raise LabelConflict(f"preferred label already taken: {label}") from error
         connection.execute(
             """INSERT INTO task_vocabulary_events (kind, payload, created_by)
@@ -684,12 +611,7 @@ def rename_entry(
 def merge_entries(
     settings: Settings, *, source_id: str, target_id: str, actor: str = "operator"
 ) -> dict[str, Any]:
-    """Merge one entry into another. The event records every string it moved.
-
-    The source entry is deleted - its restore lives in the event payload, so an
-    undo puts it back exactly. This is the visibility the old proposals lacked:
-    the merge is an event with a name and a list, not an invisible union.
-    """
+    """Merge one entry into another."""
     if source_id == target_id:
         raise ValueError("an entry cannot merge into itself")
     source = get_entry(settings, source_id)
@@ -737,7 +659,7 @@ def split_entry(
     new_label: str,
     actor: str = "operator",
 ) -> dict[str, Any]:
-    """Split some strings out of an entry into a new one. Recorded, reversible."""
+    """Split some strings out of an entry into a new one."""
     selected = list(dict.fromkeys(task_strings))
     if not selected:
         raise ValueError("a split must name at least one task string")
@@ -834,13 +756,7 @@ def list_events(settings: Settings, *, limit: int = 20) -> list[dict[str, Any]]:
 
 
 def _drop_unreferenced_entry(connection: Connection[Any], entry_id: str) -> None:
-    """Delete an entry only while nothing maps to it any more.
-
-    Undo runs one event at a time, so a multi-string candidate is undone by its
-    last event; the entry has to survive the earlier ones and disappear on this
-    one. A mapping added after the acceptance is a reason to keep it rather than
-    to delete an entry something else still depends on.
-    """
+    """Delete an entry only while nothing maps to it any more."""
     still_mapped = connection.execute(
         "SELECT 1 FROM task_vocabulary_mappings WHERE entry_id = %s LIMIT 1", (entry_id,)
     ).fetchone()
@@ -849,21 +765,7 @@ def _drop_unreferenced_entry(connection: Connection[Any], entry_id: str) -> None
 
 
 def _lock_strings(connection: Connection[Any], task_strings: Sequence[str]) -> None:
-    """Serialize every writer that touches these task strings, inside one transaction.
-
-    Read-then-write on a mapping is a lost update without this: two writers both
-    read "nothing mapped here", both write, and the second event's recorded
-    `previous` is a lie - so undoing it *deletes* the mapping instead of
-    restoring the placement the other writer just made. An advisory lock keyed on
-    the string itself makes the read and the write one atomic unit. Keys are
-    acquired in one global (sorted) order, so two transactions taking
-    multi-string locks cannot deadlock *on these locks*; the ordering between
-    this phase and the row locks merge/split take is a separate question, and has
-    not been stress-tested.
-
-    Transaction-scoped, so it is released by commit or rollback with no cleanup
-    path of its own to get wrong.
-    """
+    """Serialize every writer that touches these task strings, inside one transaction."""
     keys = sorted(
         {
             int.from_bytes(
@@ -888,11 +790,7 @@ def _entry_exists(connection: Connection[Any], entry_id: str) -> bool:
 
 
 def _mapping_state(connection: Connection[Any], task_string: str) -> tuple[str | None, str] | None:
-    """`(entry_id, provenance)` as it stands now, locked, or None when unmapped.
-
-    `FOR UPDATE` so the check and the compensating write cannot interleave with
-    another writer that is moving the same string at the same moment.
-    """
+    """`(entry_id, provenance)` as it stands now, locked, or None when unmapped."""
     row = connection.execute(
         "SELECT entry_id, provenance FROM task_vocabulary_mappings "
         "WHERE task_string = %s FOR UPDATE",
@@ -905,25 +803,13 @@ def _mapping_state(connection: Connection[Any], task_string: str) -> tuple[str |
 
 
 def _require_applicable(condition: bool, because: str) -> None:
-    """Refuse to compensate an event whose effect has since changed.
-
-    Undo restores the state the event recorded. If that state has moved on - the
-    string was re-mapped, the entry was renamed again, the merged-away entry was
-    recreated - replaying the old payload would silently destroy a newer
-    decision. Refusing (a 409 at the API) makes the conflict the operator's to
-    resolve, rather than a surprise that only shows up in the catalog later.
-    """
+    """Refuse to compensate an event whose effect has since changed."""
     if not condition:
         raise ValueError(f"event no longer applies ({because}); reload and review")
 
 
 def undo_event(settings: Settings, *, event_id: int, actor: str = "operator") -> dict[str, Any]:
-    """Compensating action for one recorded event, restoring exactly what it changed.
-
-    Exact, but only while the state it compensates is still the state it left:
-    an event whose effect has since been superseded is refused rather than
-    replayed over a newer decision.
-    """
+    """Compensating action for one recorded event, restoring exactly what it changed."""
     with connect(settings) as connection:
         event_row = connection.execute(
             """SELECT id, kind, payload, undone_at FROM task_vocabulary_events
@@ -1035,9 +921,6 @@ def undo_event(settings: Settings, *, event_id: int, actor: str = "operator") ->
             previous = cast(dict[str, Any] | None, payload.get("previous"))
             written_provenance = payload.get("provenance")
             if written_provenance is not None:
-                # Events recorded before this check existed carry no written
-                # state; they are compensated as before rather than refused for
-                # a field that was never there.
                 written_entry = payload.get("entry_id")
                 _require_applicable(
                     _mapping_state(connection, task)

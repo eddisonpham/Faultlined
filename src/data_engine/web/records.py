@@ -1,27 +1,4 @@
-"""Benchmarks and Experiments pages (stage 3, `frontend` criterion).
-
-Two record sets that live in the repository rather than in Postgres, so they are
-read from disk as plain JSON/Markdown instead of through a new catalog table:
-
-* **Benchmarks** — the committed baselines under `benchmarks/baselines/` and the
-  per-run records the harness writes to `benchmarks/results/`. A baseline is a
-  *claim* ("this workload measured this on this machine"); a result is an
-  *observation*. Showing them in one table without that distinction is how a
-  6.21 MiB/s number ends up presented as a 50 MB/s one, so they are separate
-  tables and each result is matched to the baseline of the same name.
-* **Experiments** — `agents/experiments/NNNN-*.md`. Each record leads with a
-  `# EXP-NNNN:` title and a bulleted metadata block; those four fields are what
-  the page indexes, and the record's own "Result"/"Verdict" heading is linked
-  rather than paraphrased, so the page cannot drift into telling a different
-  story than the record does.
-
-Nothing here imports `benchmarks.harness` or parses the registry's Markdown
-tables. The harness is a top-level package outside the installed distribution
-(`pyproject`'s `packages` only covers `src/data_engine`), so importing it from
-the web layer would type-check against a module mypy cannot see; and the
-registry's tables are hand-maintained prose, not a format to parse at request
-time. Reading the files as data is the smaller, sturdier dependency.
-"""
+"""Benchmarks and Experiments pages (stage 3, `frontend` criterion)."""
 
 from __future__ import annotations
 
@@ -44,36 +21,19 @@ __all__ = [
     "repo_root",
 ]
 
-#: Results are read newest-first and this many are shown. Every run ever executed
-#: is on disk (the directory is gitignored, not rotated), and a table of 400 rows
-#: is a table nobody reads.
 RESULT_LIMIT = 40
 
-#: A record file's metadata bullets: ``- **Status:** accepted (...)``.
 _META_RE = re.compile(r"^-\s+\*\*([^*]+):\*\*\s*(.+?)\s*$")
-# The id allows one sub-letter (EXP-0010a) because a campaign's legs share one
-# number; the previous forms required the colon right after the digits and the
-# hyphen right after the four digits, which silently dropped every sub-lettered
-# record from /ui/experiments.
 _TITLE_RE = re.compile(r"^#\s+(EXP-\d+[a-z]?):\s*(.+?)\s*$")
 _RECORD_RE = re.compile(r"^(\d{4}[a-z]?)-[a-z0-9][a-z0-9-]*\.md$")
 
 
 def repo_root() -> Path | None:
-    """The checkout root, or None when the app runs from an installed wheel.
-
-    Walked up from this file rather than from the process CWD: `just` recipes
-    run at the repo root, but a service started from anywhere else must still
-    find the records. The marker is the pair of directories only this
-    repository has.
-    """
+    """The checkout root, or None when the app runs from an installed wheel."""
     for candidate in Path(__file__).resolve().parents:
         if (candidate / "benchmarks").is_dir() and (candidate / "agents").is_dir():
             return candidate
     return None
-
-
-# ---------------------------------------------------------------- benchmarks
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,12 +65,7 @@ def _number(value: Any) -> float | None:
 
 
 def _load_json(path: Path) -> dict[str, Any] | None:
-    """One benchmark document, or None when it is missing or unparseable.
-
-    A malformed file is dropped, not raised: a half-written record from a killed
-    `just bench` must not take the page down, and silently omitting it is
-    visible — the run simply is not in the table.
-    """
+    """One benchmark document, or None when it is missing or unparseable."""
     try:
         document = json.loads(path.read_text(encoding="utf-8"))
     except OSError, ValueError:
@@ -188,9 +143,6 @@ def benchmarks_model() -> dict[str, Any]:
     }
 
 
-# ---------------------------------------------------------------- experiments
-
-
 @dataclass(frozen=True, slots=True)
 class Experiment:
     """The four metadata fields every experiment record leads with."""
@@ -231,11 +183,6 @@ def experiment_preview(path: Path, limit: int = 220) -> str:
     if not body:
         return ""
     preview = body if len(body) <= limit else body[: limit - 1].rstrip() + "…"
-    # The operator console never names its own endpoints (the UI rule the
-    # frontend test enforces), and a record preview is rendered into that
-    # console verbatim. A measurement record may of course name what it
-    # measured - so the transport prefix is kept out of the *preview* only,
-    # and the record file itself is untouched.
     return preview.replace("/api/v1/", "/…/").replace("/api/v1", "")
 
 
@@ -249,7 +196,7 @@ def experiments_model() -> dict[str, Any]:
     for path in sorted(directory.glob("*.md")):
         match = _RECORD_RE.match(path.name)
         if match is None:
-            continue  # registry.md, README.md, TEMPLATE.md
+            continue
         try:
             lines = path.read_text(encoding="utf-8").splitlines()
         except OSError:
@@ -279,9 +226,6 @@ def experiments_model() -> dict[str, Any]:
         "experiments": sorted(records, key=lambda record: record.exp_id, reverse=True),
         "error": "",
     }
-
-
-# ---------------------------------------------------------------- rendering
 
 
 def _seconds(value: float | None) -> str:
@@ -315,8 +259,9 @@ def _commit(run: Run) -> str:
 
 
 def _status_badge(status: str) -> str:
-    """`ok` reads as success and anything else as a warning, using terminal-ui's
-    own text-colour classes so the cell follows the active theme."""
+    """`ok` reads as success and anything else as a warning, using terminal-ui's own text-colour
+    classes so the cell follows the active theme.
+    """
     css = {"ok": "success", "baseline": "info", "pass": "success"}.get(status, "warning")
     return f'<span class="text-{css}">{escape(status)}</span>'
 

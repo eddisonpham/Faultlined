@@ -42,27 +42,13 @@ class _JobTimedOut(Exception):
 
 
 class _CancelRequested(Exception):
-    """Raised by the handler when the worker reports cancellation.
-
-    The handler returns normally when it has finished its current unit of work;
-    this exception is the interrupt a forced cancel needs inside a single call.
-    """
+    """Raised by the handler when the worker reports cancellation."""
 
     def __init__(self, job_id: str) -> None:
         super().__init__(f"cancel requested for job {job_id}")
         self.job_id = job_id
 
 
-#: Failures that retrying cannot fix. `architecture/failure-handling.md` F1/F3: a
-#: payload the handler cannot parse, a job type nobody handles, or a source the reader
-#: rejects will fail identically on every attempt, so burning the retry budget only
-#: delays the operator's signal and inflates the failure metrics with noise.
-#: `IdempotencyConflict` belongs here for the same reason and was missing: a profile
-#: name/version that already resolves to different content is a property of the
-#: payload, so all three attempts failed identically while `jobs_failures_total`
-#: counted three failures for one operator mistake. `InvalidProfile` is the same
-#: property stated earlier: a malformed profile document fails at construction on
-#: every attempt (architecture/failure-handling.md F3).
 _TERMINAL_FAILURES: tuple[type[Exception], ...] = (
     ReaderError,
     InvalidJobPayload,
@@ -71,11 +57,6 @@ _TERMINAL_FAILURES: tuple[type[Exception], ...] = (
     InvalidProfile,
     ExportBuildUnknown,
     ExportError,
-    # A database `DataError` (bad text for `jsonb`, a value out of range, a string
-    # too long for a column) is a property of the bytes the job carries, not of
-    # the moment it ran: every attempt produces the identical error. Retrying it
-    # burns the budget crash recovery needs and inflates `jobs_failures_total`
-    # three-fold for one deterministic defect - what EXP-0014 D2 measured.
     psycopg.errors.DataError,
 )
 
@@ -102,36 +83,19 @@ def _failure_reason_code(exc: Exception) -> ReasonCode:
     if isinstance(exc, FileNotFoundError):
         return ReasonCode.IO_ARTIFACT_MISSING
     if isinstance(exc, OSError):
-        # ENOSPC is the kernel naming the failure (failure-handling.md F9); every
-        # other write error is an IO failure the operator can act on, not an
-        # opaque internal error. FileNotFoundError is handled above - it is an
-        # OSError subclass, so the order is load-bearing.
         return ReasonCode.IO_DISK_FULL if exc.errno == errno.ENOSPC else ReasonCode.IO_WRITE_FAILED
     if isinstance(exc, KeyError):
         return ReasonCode.INGEST_PARSE_FAILED
     return ReasonCode.INTERNAL_ERROR
 
 
-#: How much of an exception's own text a job row carries. Long enough to name a
-#: field and its value, short enough that a pathological message cannot bloat the
-#: row or the page that renders it.
 _MAX_ERROR_MESSAGE = 400
-#: `scheme://user:password@host` and `password=...` are the two shapes a credential
-#: takes in an exception string. Neither may reach the job row (CLAUDE.md: secrets).
 _URL_CREDENTIALS = re.compile(r"://[^/\s:@]+:[^/\s@]+@")
 _SECRET_ASSIGNMENT = re.compile(r"(?i)\b(password|passwd|secret|token|api[_-]?key)\s*=\s*\S+")
 
 
 def _error_message(exc: Exception) -> str:
-    """One line of the exception's own text, capped and scrubbed of credentials.
-
-    The job row used to carry the constant string `"job handler failed"` while the
-    reader's real message existed only in logs, so diagnosing a failed ingest meant
-    traceback spelunking instead of reading a job report (EXP-0014 D3). The message
-    is the operator-facing half of the reason code; collapsing whitespace keeps it
-    one line, and truncation stops an exception that embeds a whole document from
-    becoming the row.
-    """
+    """One line of the exception's own text, capped and scrubbed of credentials."""
     text = " ".join(str(exc).split())
     text = _URL_CREDENTIALS.sub("://***:***@", text)
     text = _SECRET_ASSIGNMENT.sub(lambda match: f"{match.group(1)}=***", text)
@@ -141,9 +105,10 @@ def _error_message(exc: Exception) -> str:
 
 
 def _failure_payload(exc: Exception, reason_code: ReasonCode) -> dict[str, Any]:
-    """What is persisted on the job row when a handler fails, and rendered by the
-    job report and `/ui/jobs/{id}`: the exception type, its own sanitized message,
-    and the stable reason code the API contract already promises."""
+    """What is persisted on the job row when a handler fails, and rendered by the job report and
+    `/ui/jobs/{id}`: the exception type, its own sanitized message, and the stable reason code
+    the API contract already promises.
+    """
     return {
         "type": type(exc).__name__,
         "message": _error_message(exc),
@@ -176,15 +141,7 @@ class IngestWorker:
         self.metrics = metrics or RuntimeMetrics()
 
     def _run_handler(self, job: dict[str, Any], job_type: str) -> dict[str, Any]:
-        """Dispatch one claimed job to its handler.
-
-        Two ingest shapes share the job pipeline on purpose: an episode in the payload
-        (synthetic) and a dataset path (real formats). They differ only in where the
-        bytes come from, and splitting them into separate workers would double the
-        process management for no isolation benefit. Validate and build are a third and
-        fourth shape on the same reasoning: both name a selection of episodes already
-        in the catalog rather than carrying bytes, and both are retried as one unit.
-        """
+        """Dispatch one claimed job to its handler."""
         payload = job["payload"]
         if job_type == JobType.INGEST_SOURCE:
             source = payload.get("source")
@@ -212,20 +169,7 @@ class IngestWorker:
     def _selection(
         self, payload: dict[str, Any], *, field: str, state: str | None = None
     ) -> list[str]:
-        """The episodes a job names, or every episode in `state` if it names none.
-
-        One rule for validate and build, so "empty means everything" cannot mean
-        two different things in two handlers - but *whose* everything is not the
-        same for the two, and this is where that difference lives. A build defaults
-        to the episodes that passed validation, because `BuildPayload` promises a
-        failing episode is excluded rather than silently included, and that promise
-        is only kept if the default selection filters on state. Validate passes
-        `state=None` and sees everything, which is the point of validating.
-
-        A singular `episode_id` is also accepted: it is what the single-episode
-        validate contract has always used, and rejecting it would break every
-        existing caller to no end.
-        """
+        """The episodes a job names, or every episode in `state` if it names none."""
         singular = payload.get("episode_id")
         if isinstance(singular, str) and singular:
             return [singular]
@@ -239,12 +183,7 @@ class IngestWorker:
         return [str(row["id"]) for row in self.catalog.list_episodes(limit=10_000, state=state)]
 
     def _validate(self, payload: dict[str, Any]) -> dict[str, Any]:
-        """Record validation results for episodes already in the catalog (FR-002).
-
-        A selection rather than a single id: validating a bulk ingest is one
-        logical operation with one retry budget, and splitting it into a job per
-        episode buys nothing but a queue.
-        """
+        """Record validation results for episodes already in the catalog (FR-002)."""
         profile = payload.get("profile")
         if not isinstance(profile, dict) or not profile:
             raise InvalidJobPayload("payload.profile must be a profile document")
@@ -265,9 +204,6 @@ class IngestWorker:
                 }
             )
         passed = [row for row in outcomes if row["passed"]]
-        # A job that inspected nothing has not succeeded at anything; saying so
-        # is the difference between "validation passed" and "there was nothing
-        # to validate".
         if not outcomes:
             raise InvalidJobPayload("no episodes to validate: the catalog is empty")
         return {
@@ -290,9 +226,6 @@ class IngestWorker:
         found = {str(row["id"]) for row in episodes}
         missing = [episode_id for episode_id in selected if episode_id not in found]
         if missing:
-            # Naming an episode that does not exist is a caller error, not an
-            # empty selection: silently building over the subset that resolved
-            # would produce a dataset that is quietly missing what was asked for.
             raise InvalidJobPayload(f"unknown episode id(s): {', '.join(sorted(missing)[:5])}")
 
         profile_document = None
@@ -321,15 +254,7 @@ class IngestWorker:
         }
 
     def _export(self, payload: dict[str, Any], *, job_id: str) -> dict[str, Any]:
-        """Materialise a build as a LeRobot v3 dataset on disk (ADR 0025).
-
-        The build hash is the address: an export that already exists there is a
-        verified no-op, so a retried job converges instead of duplicating work.
-        Membership comes from the build's own rows, then full episode rows are
-        fetched for the artifact hashes and metadata the layout needs - a
-        member that has left the catalog is a caller-visible error, not a
-        silently smaller dataset.
-        """
+        """Materialise a build as a LeRobot v3 dataset on disk (ADR 0025)."""
         build_hash = payload.get("build_hash")
         if not isinstance(build_hash, str) or not build_hash.strip():
             raise InvalidJobPayload("payload.build_hash must be a non-empty build hash")
@@ -348,18 +273,10 @@ class IngestWorker:
                 f"build members no longer in the catalog: {', '.join(missing[:5])}"
             )
         exporter = BuildExporter(self.settings.export_root, self.artifacts)
-        # ExportError (malformed build, undecodable artifact) propagates as
-        # itself: deterministic on every attempt, so it is terminal, and its
-        # own reason codes say EXPORT_* rather than INGEST_*.
         return {**exporter.export(build, member_rows), "job_id": job_id}
 
     def _code_commit(self) -> str:
-        """The commit that produced a build, when the checkout can name one.
-
-        Best effort by design: a build made from a tarball or an installed wheel
-        has no commit, and an empty string is an honest "unknown" where a
-        fabricated one would poison provenance.
-        """
+        """The commit that produced a build, when the checkout can name one."""
         try:
             head = Path(__file__).resolve().parents[3] / ".git" / "HEAD"
             if head.exists():
@@ -389,15 +306,7 @@ class IngestWorker:
         *,
         terminal: bool = False,
     ) -> dict[str, Any] | None:
-        """Decide between retrying and failing, honouring attempts and cancellation.
-
-        `terminal` is set for failures that a later attempt cannot fix (see
-        `_TERMINAL_FAILURES`); those skip the retry branch entirely rather than
-        consuming the budget one identical failure at a time.
-
-        Returns the updated job row, or None when the job went back to the queue and a
-        later attempt will pick it up.
-        """
+        """Decide between retrying and failing, honouring attempts and cancellation."""
         job_id = str(job["id"])
         job_type = str(job["type"])
         if self.catalog.is_cancel_requested(job_id):
@@ -410,8 +319,6 @@ class IngestWorker:
         if not terminal and attempts < max_attempts:
             self.catalog.finish_job(job_id, JobState.RETRYING, error=error)
             self.catalog.requeue_for_retry(job_id)
-            # `attempts` is 1-based here: claim_job already incremented it, so this is
-            # the attempt that just failed, not the one that will run next.
             self.metrics.job_retry(job_type=job_type, attempt=attempts)
             logger.warning(
                 "job scheduled for retry",
@@ -467,15 +374,7 @@ class IngestWorker:
             self._respect_deadline(job)
             self._checkpoint(job, started)
             result = self._run_handler(job, job_type)
-            # A handler that started on time and overruns the wall-clock budget
-            # is time out here, before its late completion is accepted.
             self._respect_running_deadline(job)
-            # Not every job produces an episode: a validate job reports over a
-            # selection and a build reports over a dataset. This used to index
-            # `result["episode_id"]` unconditionally, so any job type whose result
-            # was not shaped like an ingest result raised KeyError on success and
-            # was recorded as a failure - a job that did its whole job and was
-            # then marked broken for saying so in a different shape.
             episode_id = str(result.get("episode_id") or "")
             completed = self.catalog.finish_job(str(job["id"]), JobState.SUCCEEDED, result=result)
             stage_seconds = time.perf_counter() - started
@@ -496,13 +395,8 @@ class IngestWorker:
             )
             return completed
         except _JobTimedOut:
-            # The job was never handed to the handler; it only expired on the
-            # queue. No handler ran, so no failure is recorded - the deadline
-            # watchdog is the actor, not a handler exception.
             return self.catalog.get_job(str(job["id"]))
         except _CancelRequested:
-            # A coordinator cancel delivered at the checkpoint; settle it as
-            # canceled so the row reflects the interrupt, not the claim state.
             self._settle_failure(
                 job,
                 {
@@ -542,33 +436,18 @@ class IngestWorker:
 
     @property
     def cancel_requested(self) -> bool:
-        """Cancellation status: local flag first, then the catalog.
-
-        The worker cannot page the API directly on a `de worker` process, so the
-        operator sets this flag (or the reaper flips the catalog) and the handler
-        checks it at every checkpoint. The database is the only copy of the truth
-        the worker is allowed to reason from; the local flag mirrors it cheaply.
-        """
+        """Cancellation status: local flag first, then the catalog."""
         return self._cancel_requested or self.catalog.is_cancel_requested(
             str(getattr(self.catalog, "id", "")) or ""
         )
 
     def _checkpoint(self, job: dict[str, Any], _started: float) -> None:
-        """Cancel-check + the only interruption point the worker honors.
-
-        The handler is free to run as long as it likes; this is the single
-        place where a coordinated cancel can stop it.
-        """
+        """Cancel-check + the only interruption point the worker honors."""
         if self.cancel_requested:
             raise _CancelRequested(str(job["id"]))
 
     def _respect_running_deadline(self, job: dict[str, Any]) -> None:
-        """Time an in-flight job out if its wall-clock budget expired mid-run.
-
-        `deadline_at` is set when a job is submitted with a `deadline_seconds`
-        budget; that budget is measured from submission, so a job that runs
-        longer than it was allowed is cleaned up here, not by the handler.
-        """
+        """Time an in-flight job out if its wall-clock budget expired mid-run."""
         deadline = job.get("deadline_at")
         if isinstance(deadline, datetime) and deadline < datetime.now(UTC):
             self.catalog.mark_deadline_expired(str(job["id"]))

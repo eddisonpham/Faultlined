@@ -27,7 +27,7 @@ class _Subject:
 
 @dataclass(frozen=True, slots=True)
 class ValidationResult:
-    """The outcome of one (episode, profile) evaluation. Immutable once recorded."""
+    """The outcome of one (episode, profile) evaluation."""
 
     passed: bool
     reason_codes: tuple[str, ...]
@@ -59,13 +59,7 @@ class ValidationResult:
 
 
 class ValidationService:
-    """Evaluate episodes against profiles; persist the immutable result.
-
-    Re-validation after a profile fix is a *new* result row, not an update
-    (`storage.md` §1): two results for the same episode under different profiles are both
-    true statements about the world, and overwriting would destroy the audit trail that
-    FR-003 asks for.
-    """
+    """Evaluate episodes against profiles; persist the immutable result."""
 
     def __init__(
         self,
@@ -90,7 +84,7 @@ class ValidationService:
         for name, rule in rules_for(profile):
             try:
                 violations.extend(_check(rule, subject))
-            except Exception as exc:  # a rule bug is a failure, not a pass
+            except Exception as exc:
                 violations.append(
                     Violation(
                         ViolationCode.RULE_ERROR,
@@ -130,13 +124,7 @@ class ValidationService:
     def validate_stored_episode(
         self, episode_id: str, profile: ValidationProfile
     ) -> ValidationResult:
-        """Validate an episode already in the catalog, from its stored metadata.
-
-        This is the path FR-003 asks for: re-validating after a profile fix must not
-        re-ingest bytes. Because the reader already summarised the episode at ingest
-        time, validating it is a pure function of the catalog row - no file is opened,
-        and the same profile on the same metadata always gives the same answer.
-        """
+        """Validate an episode already in the catalog, from its stored metadata."""
         episode = self.catalog.get_episode(episode_id)
         if episode is None:
             raise KeyError(episode_id)
@@ -157,12 +145,7 @@ class ValidationService:
 
 
 def extraction_from_metadata(metadata: dict[str, Any]) -> EpisodeExtraction:
-    """Rebuild the summary a reader produced, from the catalog row that stored it.
-
-    Round-trips `EpisodeExtraction.metadata()`. Anything missing degrades to a value
-    that trips a rule rather than raising: an episode with no readable frame count should
-    fail validation, not crash it.
-    """
+    """Rebuild the summary a reader produced, from the catalog row that stored it."""
     stats = metadata.get("channel_stats") or {}
     channels = tuple(
         ChannelStats(

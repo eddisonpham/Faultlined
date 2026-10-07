@@ -1,35 +1,4 @@
-"""Chaos harness (B-016): the monitor evaluated against labeled injected faults.
-
-The ground-truth rule comes from the monitoring plan (§6): **only the operator's
-action space is simulated.** The feature builder, baselines, triage, and
-detectors are the real implementation; an injected fault is real telemetry and
-real catalog state fed through the unmodified tick pipeline. Nothing about the
-feature space is invented, and no accuracy figure exists before a chaos run.
-
-Two components:
-
-- :class:`ChaosMonitor` - the production `MonitorService` with three narrow,
-  explicitly-documented seams for replay: injected telemetry records, an
-  injected queue snapshot, and an injected host sample. Everything downstream
-  of those seams is untouched.
-- :func:`evaluate_window` - one labeled window: feed records, run one tick,
-  return whether the expected label fired (and what fired wrongly).
-
-A window's ``label`` is the expected detector label, spelled exactly as the
-:class:`~data_engine.monitoring.signals.Label` taxonomy spells it; it is
-empty for faults no dedicated rule owns (e.g. a queue burst, whose designed
-detection path is the warm-baseline residual) and for null windows.
-
-Detection latency is measured against ``t_detectable``, not ``t_onset``: a
-fault cannot be detected before the metric window containing it has closed, so
-the harness's synthetic timestamps carry that delay. Measuring against onset
-would report a latency the system physically cannot achieve.
-
-Known bounded gap (plan §6.8, recorded rather than hidden): heartbeat telemetry
-is replayed as records, so a `WORKER_LOST` fault is exercised as *stale*
-heartbeat telemetry, not as the real process dying. The real-kill variant
-belongs to the full fault-injection campaign against `just run`.
-"""
+"""Chaos harness (B-016): the monitor evaluated against labeled injected faults."""
 
 from __future__ import annotations
 
@@ -41,18 +10,8 @@ from data_engine.monitoring.features import ResourceSample
 from data_engine.monitoring.service import MonitorService
 from data_engine.monitoring.signals import Label
 
-#: The heartbeat cadence a healthy single-worker deployment emits.
 HEARTBEAT_INTERVAL_SECONDS = 5.0
 
-#: The host a replayed window is scored against.
-#:
-#: Replay injects telemetry and catalog state, so it has to inject host
-#: resources as well: the real sample is *this machine's* memory and disk, and a
-#: busy box sits within a percentage point of the `RESOURCE_DEGRADED` floor
-#: (`memory_used_ratio > 0.92`). Left unpinned, every window - the null windows
-#: included - carried a phantom host fault, so "clean windows stay silent" held
-#: or not depending on what else was running, and a campaign's precision would
-#: have described the laptop rather than the detectors.
 REPLAY_HOST = ResourceSample(
     cpu_percent=11.0,
     memory_used_bytes=8 * 1024**3,
@@ -83,7 +42,7 @@ class FaultWindow:
     """One labeled fault over one tick window."""
 
     label: str
-    """The expected detector label (e.g. ``WORKER_LOST``); ``""`` for none."""
+    """The expected detector label (e.g. """
 
     onset: datetime
     """When the fault starts in replay time."""
@@ -104,13 +63,7 @@ def heartbeat_records(
     end_at: datetime,
     interval_seconds: float = HEARTBEAT_INTERVAL_SECONDS,
 ) -> list[dict[str, Any]]:
-    """A healthy heartbeat history ending at ``end_at``.
-
-    Heartbeats are emitted *before* the window they close: a worker that died
-    during a window still emitted its beats up to the death, so a `WORKER_LOST`
-    window carries the last beats then silence - which is what the detector's
-    age rule reads.
-    """
+    """A healthy heartbeat history ending at ``end_at``."""
     return [
         _metric_record(
             "workers_heartbeat_age_seconds",
@@ -124,13 +77,7 @@ def heartbeat_records(
 def worker_lost_window(
     *, onset: datetime, window_seconds: float, label: str = Label.WORKER_LOST.value
 ) -> FaultWindow:
-    """Heartbeats stop for real while the queue holds work (plan §6.2).
-
-    The last beat sits far enough below the staleness threshold that at
-    ``detectable_at`` the derived age clears the detector's *strict* inequality
-    with margin: at onset the age reads exactly one threshold, so a tick too
-    early is correctly silent rather than borderline.
-    """
+    """Heartbeats stop for real while the queue holds work (plan §6.2)."""
     stale_for = max(window_seconds, 60.0) * 2 + 60.0
     return FaultWindow(
         label=label,
@@ -147,14 +94,7 @@ def worker_lost_window(
 def queue_backlog_window(
     *, onset: datetime, window_seconds: float, burst: int = 40, label: str = ""
 ) -> FaultWindow:
-    """A burst larger than the single worker can drain (plan §6.2).
-
-    No dedicated rule owns a backlog, so the window's label is empty: its
-    designed detection path is the residual `METRIC_SHIFT` once the queue
-    baselines are warm, and its honest cold-start outcome is silence. The
-    worker is alive - it carries fresh heartbeats, so the window must not be
-    scored as a lost worker or reported blind.
-    """
+    """A burst larger than the single worker can drain (plan §6.2)."""
     return FaultWindow(
         label=label,
         onset=onset,
@@ -168,15 +108,9 @@ def queue_backlog_window(
 
 
 def clean_window(*, onset: datetime, window_seconds: float, warm: bool = True) -> FaultWindow:
-    """A null window: healthy heartbeats, a moving queue, nothing wrong.
-
-    Like every builder, `detectable_at` is the window close; scoring a null
-    window there is the honest "the tick that would have seen this window said
-    nothing".
-    """
+    """A null window: healthy heartbeats, a moving queue, nothing wrong."""
     records = heartbeat_records(count=3, end_at=onset)
     if warm:
-        # Benign progress so the window does not read as "nothing is running".
         records.append(
             _metric_record("episodes_ingested_total", 1.0, at=onset - timedelta(seconds=1))
         )
@@ -193,16 +127,7 @@ def clean_window(*, onset: datetime, window_seconds: float, warm: bool = True) -
 
 
 class ChaosMonitor(MonitorService):
-    """The production monitor with three replay seams and no other overrides.
-
-    `_records` is overridden to return the injected telemetry (the real service
-    reads a JSONL sink; replay hands the records over directly - the sink path
-    itself is exercised by its own tests). `_probe` is overridden only when a
-    window injects a snapshot; otherwise the real probe runs against whatever
-    catalog the service was built with. `_resources` always returns
-    :data:`REPLAY_HOST`, because the host is an input like any other and a
-    replayed window must not be scored against the machine running the replay.
-    """
+    """The production monitor with three replay seams and no other overrides."""
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
@@ -215,8 +140,6 @@ class ChaosMonitor(MonitorService):
         self._chaos_snapshot = window.snapshot
 
     def _records(self, reference: datetime) -> list[dict[str, Any]]:  # noqa: ARG002
-        # `reference` is the override's contract (the service calls it with the
-        # tick time); replay ignores it, so the injected window alone decides.
         return list(self._chaos_records)
 
     def _probe(self, reference: datetime, catalog: Any) -> tuple[dict[str, Any], bool]:
@@ -250,14 +173,7 @@ def evaluate_window(
     *,
     tick_at: datetime | None = None,
 ) -> WindowOutcome:
-    """Run one tick against an armed window and score it.
-
-    The tick time defaults to the window's `detectable_at`: the earliest moment
-    the aggregation window containing the fault has closed. Scoring a fault at
-    its onset would credit detection the pipeline cannot have. The service's
-    clock is pinned to that instant for the tick, so features, sink lag, and
-    latency are all computed against the same time the outcome is scored at.
-    """
+    """Run one tick against an armed window and score it."""
     monitor.inject(window)
     reference = tick_at or window.detectable_at
     monitor._now = reference
@@ -282,14 +198,7 @@ def evaluate_window(
 
 
 def evaluate_sequence(monitor: ChaosMonitor, windows: list[FaultWindow]) -> list[WindowOutcome]:
-    """Run windows back to back on one monitor, in replay order.
-
-    Baselines keep updating through the real `_update_baselines` between
-    windows, so cold-start abstention behaves exactly as in production:
-    statistical rules stay silent until scopes are warm. Windows must be given
-    in increasing `detectable_at` order - a replay that runs backwards would
-    score detection latency against a clock that never existed.
-    """
+    """Run windows back to back on one monitor, in replay order."""
     outcomes: list[WindowOutcome] = []
     previous: datetime | None = None
     for window in windows:

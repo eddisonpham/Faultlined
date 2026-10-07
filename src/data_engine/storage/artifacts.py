@@ -24,14 +24,7 @@ class FileArtifactStore:
         return self._publish(hashlib.sha256(data).hexdigest(), data)
 
     def put_file(self, source: Path, *, chunk_bytes: int = 1 << 20) -> str:
-        """Content-address a file on disk without loading it into memory.
-
-        Real episodes are files, not dicts: a single LeRobot Parquet shard is hundreds
-        of megabytes, so the digest is computed by streaming and the bytes are then
-        copied in chunks. The source is not mutated, and a half-written blob never
-        becomes visible because publication is the same atomic `os.link` as
-        `put_bytes`.
-        """
+        """Content-address a file on disk without loading it into memory."""
         digest = hashlib.sha256()
         size = 0
         with source.open("rb") as handle:
@@ -83,7 +76,7 @@ class FileArtifactStore:
         return digest
 
     def put(self, source: BinaryIO) -> str:
-        """Store a binary stream. Vertical-slice payloads are deliberately small."""
+        """Store a binary stream."""
         return self.put_bytes(source.read())
 
     def get_bytes(self, content_hash: str) -> bytes:

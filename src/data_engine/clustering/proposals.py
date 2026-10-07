@@ -1,22 +1,4 @@
-"""Build cluster proposals from the task strings a catalog actually holds.
-
-A proposal is a *suggestion*, not a decision. It is what the engine believes the task
-vocabulary is right now, and it carries its own health numbers so a reviewer can see the
-two ways this can be wrong:
-
-* **Fragmentation.** One task split across many clusters. Visible as a low cluster count
-  relative to the number of distinct tasks, and as singletons.
-* **Merging.** Unrelated tasks in one cluster. Invisible from inside, which is why a
-  proposal shows the cores it merged and the operator confirms or rejects it.
-
-EXP-2.5-08 is why the health numbers are shown rather than implied: at 1200 strings the
-sentence-embedding pipeline reported a plausible-looking cluster count that was wrong
-in both directions at once (228 impure clusters and 302 singletons).
-
-**Identity.** A proposal's key is a hash of its primary core, so it survives a rebuild
-as long as that core still exists. Confirmations attach to keys, which is why a rebuild
-cannot silently un-freeze a cluster someone curated.
-"""
+"""Build cluster proposals from the task strings a catalog actually holds."""
 
 from __future__ import annotations
 
@@ -31,7 +13,7 @@ from data_engine.clustering.online import OnlineCentroids, cosine, token_vector
 
 
 def proposal_key(core: str) -> str:
-    """Stable identity for a proposal. Same core, same key, in every process."""
+    """Stable identity for a proposal."""
     return hashlib.blake2b(core.encode(), digest_size=8).hexdigest()
 
 
@@ -44,7 +26,6 @@ class Member:
     episodes: int
     verb: str = ""
     colours: tuple[str, ...] = ()
-    #: Cosine distance from the final proposal centroid; a review heuristic, not probability.
     distance: float = 0.0
 
     @property
@@ -62,12 +43,11 @@ class Proposal:
     frozen: bool
     members: tuple[Member, ...]
     centroid: tuple[float, ...] = ()
-    #: Every core the centroid rule merged into this one. More than one means a merge.
     merged_cores: tuple[str, ...] = ()
 
     @property
     def size(self) -> int:
-        """Episodes behind the proposal. What the treemap is proportional to."""
+        """Episodes behind the proposal."""
         return sum(member.episodes for member in self.members)
 
     @property
@@ -101,7 +81,6 @@ class ProposalSet:
     source: str
     tasks: int
     episodes: int
-    #: key -> label, applied on the way in so a rebuild cannot lose them.
     confirmed: int = 0
 
     @property
@@ -129,12 +108,7 @@ class ProposalSet:
         return largest / total
 
     def apply_confirmations(self, labels: Mapping[str, str]) -> int:
-        """Freeze the proposals named in `labels`, keyed by proposal hash.
-
-        Applied after the set is built rather than during it, because a confirmation
-        refers to a *group of task strings* and the proposal that ends up holding them is
-        not known until the grouping has run. Returns how many proposals were frozen.
-        """
+        """Freeze the proposals named in `labels`, keyed by proposal hash."""
         frozen = tuple(
             replace(
                 proposal,
@@ -187,13 +161,7 @@ def build(
     source: str = "catalog",
     order: Sequence[str] | None = None,
 ) -> ProposalSet:
-    """Group `(task string -> episode count)` into proposals.
-
-    `order` fixes the arrival sequence. It matters: an online method is order-sensitive
-    (EXP-2.5-08 measured an adjusted Rand of -0.0005 between two orders of the same
-    strings), so a rebuild must see the same order as the run it replaces unless the
-    caller deliberately changes it.
-    """
+    """Group `(task string -> episode count)` into proposals."""
     lexicon = lexicon or Lexicon()
     ignored = ignored or Ignored()
     sequence = list(order) if order is not None else sorted(tasks)
@@ -201,8 +169,6 @@ def build(
     measured = coverage([extractions[task] for task in sequence])
 
     model = OnlineCentroids(radius=radius, rule=rule)
-    # Cores are clustered, not raw sentences: EXP-2.5-08 measured 533 clusters for 48
-    # classes on sentences and 47 on the extracted cores.
     for task in sequence:
         item = extractions[task]
         if not item.usable:
@@ -237,8 +203,6 @@ def build(
 
     proposals: list[Proposal] = []
     for index, bucket in buckets.items():
-        # The primary core is the one with the most episodes, so a proposal keeps its
-        # identity when the arrival order changes but the membership does not.
         primary = max(bucket.cores, key=lambda core: _weight(bucket.members, core))
         proposals.append(
             Proposal(
@@ -269,13 +233,7 @@ def _weight(members: Sequence[Member], core: str) -> int:
 
 
 def sample_tasks() -> dict[str, int]:
-    """Task strings to propose over when the catalog has nothing to offer.
-
-    An empty catalog must not produce an empty page that looks like a working feature.
-    These are the LeRobot task sentences the scale run harvested, with episode counts
-    that are **illustrative, not measured** - the UI labels them as a sample so nobody
-    reads them as catalog data.
-    """
+    """Task strings to propose over when the catalog has nothing to offer."""
     from data_engine.clustering import sample_data
 
     return sample_data.sample_tasks()

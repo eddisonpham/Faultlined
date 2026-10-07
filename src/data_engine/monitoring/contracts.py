@@ -1,20 +1,4 @@
-"""Completion contracts: the highest-value check in the notifier, and the cheapest.
-
-During unattended curation the operative question is not "did a metric move" but
-**did the thing I asked for happen**. A contract makes that question exact: the
-owner declares an expectation, the run settles, and the two are compared.
-
-That comparison is arithmetic, so it is deterministic, interpretable, and free of
-threshold tuning — which is why it anchors the taxonomy rather than sitting
-alongside it. An anomaly-shaped signal with no contract behind it is, by
-construction, the ambiguous case, and the triage gate treats it accordingly.
-
-Each breach maps to exactly one label so a single fault cannot open two incidents:
-
-* fewer valid episodes than declared -> ``CONTRACT_BREACH`` (critical, notify)
-* valid fraction below the declared floor -> ``PARTIAL_SUCCESS`` (high, queue)
-* deadline passed or duration exceeded -> ``TIME_MISSED`` (medium, queue)
-"""
+"""Completion contracts: the highest-value check in the notifier, and the cheapest."""
 
 from __future__ import annotations
 
@@ -33,7 +17,7 @@ class InvalidExpectation(ValueError):
 
 @dataclass(frozen=True, slots=True)
 class Expectation:
-    """What the owner expects a run to produce. Every field is optional."""
+    """What the owner expects a run to produce."""
 
     expected_episodes: int | None = None
     expected_valid_fraction: float | None = None
@@ -103,7 +87,6 @@ class RunOutcome:
     now: datetime | None = None
 
 
-#: Outcomes a contract can reach. ``pending`` is the only non-terminal value.
 OUTCOME_PENDING = "pending"
 OUTCOME_MET = "met"
 OUTCOME_SHORT = "short"
@@ -112,19 +95,7 @@ OUTCOME_MISSED = "missed"
 
 
 def evaluate(expectation: Expectation, outcome: RunOutcome) -> tuple[str, list[Signal]]:
-    """Compare a declared expectation with an observed outcome.
-
-    Returns ``(outcome, signals)``. The first breach wins, so one fault produces
-    one incident rather than several overlapping ones: a run that is both short
-    and late is reported once, with both facts in its evidence.
-
-    **Episode-count expectations are only checked once the run has settled.** "I
-    expect 200 episodes" is a claim about a *finished* run; a job that is still
-    queued has produced nothing *yet*, and calling that a breach would fire an
-    incident the instant a contract is declared. A run that never settles is a
-    different fault with a different detector (``RUN_STALLED``, via its deadline),
-    so the contract stays quiet about it until the deadline decides the question.
-    """
+    """Compare a declared expectation with an observed outcome."""
     if not expectation.declared_fields():
         return OUTCOME_PENDING, []
     expectation.validate()
@@ -185,8 +156,6 @@ def evaluate(expectation: Expectation, outcome: RunOutcome) -> tuple[str, list[S
         ]
 
     if not outcome.settled:
-        # A deadline is a claim about work that has *not* finished, so it is the
-        # only timing check that applies to a live run.
         now = outcome.now
         if (
             expectation.deadline_at is not None
@@ -209,10 +178,6 @@ def evaluate(expectation: Expectation, outcome: RunOutcome) -> tuple[str, list[S
             ]
         return OUTCOME_PENDING, []
 
-    # A duration budget is a claim about the *finished* run, so it is checked
-    # whether or not the run is still live: a run that took ten times its budget
-    # has missed it, and reporting "met" would be reporting the absence of a
-    # check rather than the presence of a pass.
     if (
         expectation.max_duration_seconds is not None
         and outcome.duration_seconds is not None

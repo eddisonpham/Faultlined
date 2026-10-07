@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class VocabularyEntry(BaseModel):
-    """One curated activity. The id is stable; the label is what a human approved."""
+    """One curated activity."""
 
     id: str
     preferred_label: str
@@ -64,7 +64,7 @@ class VocabularyUnmappedResponse(BaseModel):
 
 
 class VocabularyCandidate(BaseModel):
-    """One ranked suggestion. A suggestion is a queue item, never an action."""
+    """One ranked suggestion."""
 
     kind: Literal["attach", "new_entry"]
     core: str

@@ -33,9 +33,6 @@ from data_engine.jobs.state import (
 from data_engine.observability.metrics import RuntimeMetrics
 from data_engine.validation.profile import ValidationProfile, profile_hash
 
-#: Advisory-lock key for the one monitor tick. Arbitrary but fixed: any process that
-#: wants to be the monitor must use this exact number, and no other lease in the
-#: system may reuse it (see ADR 0031).
 MONITOR_TICK_LOCK_KEY = 4610555735
 
 
@@ -58,12 +55,7 @@ class IdempotencyConflict(ValueError):
 
 
 class SliceNameConflict(ValueError):
-    """A curation slice already exists under that name.
-
-    Distinct from `IdempotencyConflict`: the clash is on the slice's own name, not
-    on a request key, so it gets its own problem code rather than borrowing the
-    idempotency wording.
-    """
+    """A curation slice already exists under that name."""
 
 
 class InvalidTransition(ValueError):
@@ -71,8 +63,9 @@ class InvalidTransition(ValueError):
 
 
 def canonical_json(value: Any) -> bytes:
-    """Re-exported from [data_engine.canonical](../canonical.py); kept here because the
-    idempotency request hash has always been imported from this module."""
+    """Re-exported from [data_engine.canonical](../canonical.py); kept here because the idempotency
+    request hash has always been imported from this module.
+    """
     return _canonical_json(value)
 
 
@@ -87,9 +80,6 @@ def _optional_float(value: Any) -> float | None:
 
 
 def _zscore(value: float | None, stats: dict[str, Any] | None) -> float:
-    # `value is None` is real: an episode can be registered without a frame
-    # count in its metadata, and the quality read for it used to raise
-    # TypeError mid-page. No length, no claim about length.
     mean = (stats or {}).get("mean")
     std = (stats or {}).get("std")
     if value is None or mean is None or not std:
@@ -98,13 +88,7 @@ def _zscore(value: float | None, stats: dict[str, Any] | None) -> float:
 
 
 def _drop_reason_sql(state: str | None, flag: str | None) -> tuple[str, list[Any]]:
-    """First-failed-predicate attribution as one SQL CASE, state before flag.
-
-    The labels are data-derived (`state=quarantined`, `verdict=smooth`) rather
-    than fixed buckets, because "why did this drop" is answered by the episode's
-    own values, not by the filter's vocabulary. `unscored` is its own reason: an
-    episode nobody measured is not the same as an episode that measured badly.
-    """
+    """First-failed-predicate attribution as one SQL CASE, state before flag."""
     branches: list[str] = []
     params: list[Any] = []
     if state:
@@ -124,19 +108,9 @@ def _drop_reason_sql(state: str | None, flag: str | None) -> tuple[str, list[Any
 
 
 def _assemble_quality_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
-    """Fold per-episode quality rows into distributions and outlier lists.
-
-    The length distribution uses each episode's *declared* length, not the number
-    of frames its quality analysis happened to see. An episode with no declared
-    length contributes to no length statistic rather than being counted as zero -
-    it is missing a measurement, not short.
-    """
+    """Fold per-episode quality rows into distributions and outlier lists."""
     measured = [row for row in rows if row.get("frame_count") is not None]
     lengths = [int(row["frame_count"]) for row in measured]
-    # The population stats are computed once: the z-score of every episode is
-    # relative to the same population, so recomputing the mean/std per row made
-    # assembly quadratic - ~18 s at a 10k-episode catalog (EXP-0010c), against
-    # ~20 ms with the stats hoisted. Same numbers, same rounding, one pass.
     length_stats = {"mean": _mean(lengths), "std": _std(lengths)}
     zscores = {
         str(row["episode_id"]): _zscore(row["frame_count"], length_stats) for row in measured
@@ -187,12 +161,6 @@ def _assemble_quality_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "episode_count": len(rows),
         "verdicts": verdicts,
         "length": _length_summary(lengths),
-        # `jerk_score` is mean(|delta|) / the dimension's own range, averaged
-        # over the active dimensions, so it is dimensionless: radians and
-        # millimetres land on the same axis. `movement_score` is the same motion
-        # in raw units, which is what you want when you ask how far a joint
-        # actually travelled and useless when you ask which of two datasets
-        # moved more. Both are published; only one of them is comparable.
         "speed_distribution": [
             {
                 "episode_id": row["episode_id"],
@@ -304,14 +272,7 @@ def _length_summary(lengths: list[int]) -> dict[str, Any]:
 
 
 def _max_timestamp_gap(rows: Sequence[dict[str, Any]]) -> dict[str, Any] | None:
-    """Largest gap between consecutive per-step timestamps, over a bounded sample.
-
-    A camera that drops from 30 Hz to 1 Hz produces perfectly valid episodes that
-    are useless for training, and nothing else in the pipeline notices. The check
-    is deliberately forgiving about metadata shape: episodes whose metadata carries
-    no timestamp series simply do not participate, which is the same abstain-if-
-    absent rule the feature builder follows everywhere else.
-    """
+    """Largest gap between consecutive per-step timestamps, over a bounded sample."""
     best: dict[str, Any] | None = None
     for row in rows:
         metadata = row.get("metadata")
@@ -363,7 +324,6 @@ class PostgresCatalog:
         self, settings: Settings | None = None, *, metrics: RuntimeMetrics | None = None
     ) -> None:
         self.settings = settings
-        # No sink means a no-op recorder: callers opt in to query telemetry.
         self._metrics = metrics or RuntimeMetrics()
 
     def submit_job(
@@ -376,12 +336,7 @@ class PostgresCatalog:
         max_attempts: int = DEFAULT_MAX_ATTEMPTS,
         deadline_seconds: float | None = None,
     ) -> tuple[dict[str, Any], bool]:
-        """Queue a job.
-
-        ``max_attempts`` bounds retries (F6); ``deadline_seconds`` sets a wall-clock
-        budget measured from submission (F6). Both are part of the idempotency
-        request, so replaying with different retry policy is a conflict.
-        """
+        """Queue a job."""
         request = {
             "type": job_type,
             "payload": payload,
@@ -483,11 +438,7 @@ class PostgresCatalog:
         return dict(updated)
 
     def request_cancel(self, job_id: str) -> dict[str, Any]:
-        """Ask a running or queued job to stop (F7: cooperative cancellation).
-
-        Queued jobs cancel outright; running jobs move to `cancel_requested` so the
-        worker can finish its current unit of work and observe the request.
-        """
+        """Ask a running or queued job to stop (F7: cooperative cancellation)."""
         with connect(self.settings) as connection:
             row = connection.execute(
                 "SELECT * FROM jobs WHERE id = %s FOR UPDATE", (job_id,)
@@ -515,10 +466,7 @@ class PostgresCatalog:
         return cast(str, row["state"]) == JobState.CANCEL_REQUESTED.value
 
     def requeue_for_retry(self, job_id: str) -> dict[str, Any]:
-        """Return a failed attempt to the queue (retrying -> queued).
-
-        Only valid while attempts remain; otherwise the job must be marked failed.
-        """
+        """Return a failed attempt to the queue (retrying -> queued)."""
         with connect(self.settings) as connection:
             row = connection.execute(
                 "SELECT * FROM jobs WHERE id = %s FOR UPDATE", (job_id,)
@@ -562,10 +510,7 @@ class PostgresCatalog:
         return dict(updated)
 
     def reap_expired_deadlines(self) -> int:
-        """Time out every non-terminal job whose deadline has passed.
-
-        Run periodically; returns how many jobs were reaped.
-        """
+        """Time out every non-terminal job whose deadline has passed."""
         with connect(self.settings) as connection:
             rows = connection.execute(
                 """UPDATE jobs SET state = %s, finished_at = now(),
@@ -580,25 +525,8 @@ class PostgresCatalog:
         return len(rows)
 
     def reap_orphaned_jobs(self, presumed_dead_seconds: float = ORPHANED_JOB_SECONDS) -> int:
-        """Recycle jobs whose worker died mid-run; returns how many were reclaimed.
-
-        A worker that is killed - container restart, OOM, `just stop` - never runs its
-        own failure path, so the job stays `running` forever: `claim_job` only selects
-        `queued`, and `reap_expired_deadlines` only touches jobs that asked for a
-        deadline. Nothing else recovers it, and a submission without `deadline_seconds`
-        is stranded silently. This is the crash-recovery counterpart to the retry path.
-
-        The window is a presumed-death timeout rather than a lease. A real lease needs
-        the worker to renew it, but the handler is synchronous, so a lease could only be
-        set at claim time and would degenerate into the same constant. The window is
-        deliberately generous: a false reclaim costs a duplicate run, which the
-        content-addressed artifact and build-hash design converges on anyway, while a
-        window that is too tight would reclaim healthy long-running work.
-        """
+        """Recycle jobs whose worker died mid-run; returns how many were reclaimed."""
         with connect(self.settings) as connection:
-            # Two statements, not one CTE: a data-modifying CTE runs concurrently with
-            # the main query and cannot see its own effects on the target table, so the
-            # second half would never observe the rows the first half just updated.
             recycled = connection.execute(
                 """UPDATE jobs
                    SET state = %s, started_at = NULL, finished_at = NULL,
@@ -620,8 +548,6 @@ class PostgresCatalog:
                     "UPDATE jobs SET state = %s WHERE id = ANY(%s)",
                     (JobState.QUEUED.value, [row["id"] for row in recycled]),
                 )
-            # An orphan with no retry budget left can never be claimed again, so it
-            # would sit in `running` forever - the exact stuck state this reaps.
             connection.execute(
                 """UPDATE jobs
                    SET state = %s, finished_at = now(),
@@ -650,13 +576,7 @@ class PostgresCatalog:
         episode_key: str | None = None,
         episode_format: str = "synthetic-json",
     ) -> dict[str, Any]:
-        """Register one episode, idempotently on (source_hash, episode_key).
-
-        A content-addressed source file can hold many episodes: a LeRobot v3 Parquet
-        shard carries every episode in its chunk. So the identity is the pair, not the
-        file hash alone, and re-ingesting the same episode is a no-op rather than a
-        second row.
-        """
+        """Register one episode, idempotently on (source_hash, episode_key)."""
         episode_id = str(uuid.uuid4())
         key = episode_key or ""
         with connect(self.settings) as connection:
@@ -684,13 +604,7 @@ class PostgresCatalog:
             return dict(row)
 
     def register_validation_profile(self, profile: ValidationProfile) -> dict[str, Any]:
-        """Persist a profile under its content address (ADR 0016).
-
-        Idempotent on both the hash and (name, version): two submissions of the same
-        document are the same profile, and a name/version collision with different content
-        is a conflict rather than a silent overwrite, because a build manifest citing a
-        hash must never resolve to two different policies.
-        """
+        """Persist a profile under its content address (ADR 0016)."""
         document = profile.to_dict()
         payload_hash = profile_hash(profile)
         with connect(self.settings) as connection:
@@ -722,12 +636,7 @@ class PostgresCatalog:
         reason_codes: list[str],
         violations: list[dict[str, Any]],
     ) -> dict[str, Any]:
-        """Record an immutable result and move the episode to `valid` or `quarantined`.
-
-        Re-validating the same episode under the same profile replaces the row, because
-        re-running an identical check must not accumulate duplicate "history" of a
-        statement that has not changed. A *different* profile is a new row.
-        """
+        """Record an immutable result and move the episode to `valid` or `quarantined`."""
         state = "valid" if passed else "quarantined"
         with connect(self.settings) as connection:
             row = connection.execute(
@@ -816,12 +725,7 @@ class PostgresCatalog:
         )
 
     def record_build(self, build: Any, *, job_id: str | None = None) -> dict[str, Any]:
-        """Persist a build and its membership, idempotently on the content hash.
-
-        Two builds of the same episodes are the same build, so the second write
-        is a no-op returning the same row rather than a duplicate. Re-ingesting
-        the same selection after a no-op rebuild must not grow the table.
-        """
+        """Persist a build and its membership, idempotently on the content hash."""
         with connect(self.settings) as connection:
             row = connection.execute(
                 """INSERT INTO builds
@@ -841,15 +745,6 @@ class PostgresCatalog:
             ).fetchone()
             if row is None:
                 raise RuntimeError("build upsert returned no row")
-            # Two statements, not two per member. `executemany` pipelines the
-            # rows in one round trip, which is the difference between 2 and 2N
-            # statements: a 50-episode build issued 100 of them, and a real one
-            # would issue 20,000. Same rows, same conflict handling, same
-            # transaction - only the round trips changed.
-            #
-            # Lineage edges as well as the join table: `lineage_edges` is the
-            # graph everything else already queries, and a build that exists in
-            # only one of the two would be invisible to half the traversals.
             members = list(build.episodes)
             connection.cursor().executemany(
                 """INSERT INTO build_episodes
@@ -898,11 +793,7 @@ class PostgresCatalog:
         return [dict(row) for row in rows]
 
     def builds_for_episode(self, episode_id: str) -> list[dict[str, Any]]:
-        """The reverse direction: which builds contain this episode (FR-008).
-
-        The question an operator actually asks is "I deleted this episode - what
-        did that break?", which is a question about one episode, not one build.
-        """
+        """The reverse direction: which builds contain this episode (FR-008)."""
         with connect(self.settings) as connection:
             rows = connection.execute(
                 """SELECT b.hash, b.name, b.episode_count, b.profile_hash,
@@ -916,11 +807,7 @@ class PostgresCatalog:
         return [dict(row) for row in rows]
 
     def get_episodes(self, episode_ids: list[str]) -> list[dict[str, Any]]:
-        """Episodes by id, for a build's selection.
-
-        Order is not preserved: the builder sorts by id, because a manifest whose
-        order depends on a database's return order is not reproducible.
-        """
+        """Episodes by id, for a build's selection."""
         if not episode_ids:
             return []
         with connect(self.settings) as connection:
@@ -930,16 +817,7 @@ class PostgresCatalog:
         return [dict(row) for row in rows]
 
     def episode_fingerprint_inputs(self, episode_ids: list[str]) -> list[dict[str, Any]]:
-        """The signals a behavioural fingerprint is built from, for a set of episodes (ADR 0032).
-
-        One round trip, and only the columns the descriptor reads. `dims` and `motion_trace`
-        are the largest jsonb values this catalog stores, so the projection is deliberate: a
-        report over a build of thousands must not drag every episode's full metadata and
-        validation history along with two columns it will not look at.
-
-        An episode with no `episode_quality` row is absent rather than defaulted - it has never
-        been scored, so it has no fingerprint, and the caller counts what it actually scored.
-        """
+        """The signals a behavioural fingerprint is built from, for a set of episodes (ADR 0032)."""
         if not episode_ids:
             return []
         with connect(self.settings) as connection:
@@ -954,18 +832,7 @@ class PostgresCatalog:
         return [dict(row) for row in rows]
 
     def build_coverage_inputs(self, build_hash: str, *, limit: int = 20) -> dict[str, Any]:
-        """What a build holds and what its catalog holds, per axis (ADR 0033).
-
-        Two statements, both bounded by the number of axis values rather than by the number of
-        episodes: the first expands four persisted attributes onto one row per member per axis and
-        returns the top `limit` build values plus the catalog-only values of the gap axes; the
-        second lists the vocabulary entries with no episode in this build, which is where the
-        *task* gaps come from (a label with no episode anywhere is still a gap).
-
-        The window counts travel with the capped rows, so a truncated report can still say how many
-        values were left out rather than presenting the sample as the whole. Nothing is stored: the
-        report is a query over facts that already exist, so it cannot drift from them.
-        """
+        """What a build holds and what its catalog holds, per axis (ADR 0033)."""
         with connect(self.settings) as connection:
             values = connection.execute(
                 """WITH scoped AS MATERIALIZED (
@@ -1081,11 +948,7 @@ class PostgresCatalog:
         }
 
     def record_episode_quality(self, episode_id: str, quality: dict[str, Any]) -> dict[str, Any]:
-        """Persist the motion-quality summary computed at ingest (ADR 0018).
-
-        A content-addressed episode recomputes identical signals on re-ingest, so
-        the row is replaced rather than accumulated.
-        """
+        """Persist the motion-quality summary computed at ingest (ADR 0018)."""
         with connect(self.settings) as connection:
             row = connection.execute(
                 """INSERT INTO episode_quality
@@ -1134,11 +997,7 @@ class PostgresCatalog:
         return {"episode_id": row["episode_id"], "verdict": str(quality["verdict"])}
 
     def get_episode_quality(self, episode_id: str) -> dict[str, Any] | None:
-        """Quality signals for one episode; length z-score is computed at read time.
-
-        Episode lengths do not change, but the population they are compared against
-        grows, so a stored z-score would quietly go stale.
-        """
+        """Quality signals for one episode; length z-score is computed at read time."""
         with connect(self.settings) as connection:
             row = connection.execute(
                 """SELECT q.episode_id, q.frame_count AS analysed_frames,
@@ -1152,9 +1011,6 @@ class PostgresCatalog:
                    WHERE q.episode_id = %s""",
                 (episode_id,),
             ).fetchone()
-            # The z-score asks "how long is this episode relative to the others",
-            # so both sides are episode lengths. Scoring against analysed-sample
-            # counts would compare a sample against the population.
             stats = connection.execute(
                 """SELECT avg((metadata->>'frame_count')::bigint) AS mean,
                           stddev_samp((metadata->>'frame_count')::bigint) AS std
@@ -1190,17 +1046,7 @@ class PostgresCatalog:
         flag: str | None = None,
         before: datetime | None = None,
     ) -> list[dict[str, Any]]:
-        """Episode page with quality columns for the Episodes UI.
-
-        Flags are curation views: `jerky`/`stalled` filter on quality signals and
-        rank by the signal, `short`/`long` reorder by frame count so the tails of
-        the length distribution surface first. Default is newest first.
-
-        With ``before`` the page is cursor-based on ``created_at`` and ordered
-        newest first regardless of flag ranking: a signal ranking cannot page
-        consistently (page 2 would re-include ranked rows the cursor filter
-        admits), and a download needs every matching row exactly once.
-        """
+        """Episode page with quality columns for the Episodes UI."""
         where, params, order = episode_predicates(state, flag, prefix="e.")
         if before is not None:
             where = [*where, "e.created_at < %s"]
@@ -1233,15 +1079,7 @@ class PostgresCatalog:
         return cast(int, row["total"])
 
     def count_jobs_by_state(self) -> dict[str, int]:
-        """Queue depth per state in one round trip.
-
-        The status and metrics models need every state; asking for them one query
-        at a time cost 8 connections and 8 scans per request - 588 ms of the 599 ms
-        `/api/v1/metrics` took at 10 rps (EXP-0010e). One GROUP BY is the same
-        numbers in one scan. States with no rows are reported as 0 rather than
-        omitted, because "not present" and "zero deep" are the same fact to a
-        queue-depth gauge but not to a JSON consumer indexing by state.
-        """
+        """Queue depth per state in one round trip."""
         with connect(self.settings) as connection:
             rows = connection.execute(
                 "SELECT state, count(*) AS total FROM jobs GROUP BY state"
@@ -1259,11 +1097,7 @@ class PostgresCatalog:
         limit: int = 50,
         before: datetime | None = None,
     ) -> list[dict[str, Any]]:
-        """Newest-first job page, cursor-based on ``created_at``.
-
-        The UI never asks for every row, so this is bounded and returns an optional
-        ``next_before`` cursor for the following page.
-        """
+        """Newest-first job page, cursor-based on ``created_at``."""
         clauses: list[str] = []
         params: list[Any] = []
         if state is not None:
@@ -1350,8 +1184,6 @@ class PostgresCatalog:
     def close(self) -> None:
         """Compatibility no-op; connections are short lived."""
 
-    # ---- episode slices (curated build-ready layer) ----
-
     def list_slices(
         self, *, limit: int = 50, before: datetime | None = None
     ) -> list[dict[str, Any]]:
@@ -1402,11 +1234,7 @@ class PostgresCatalog:
         filter_config: dict[str, Any] | None = None,
         slice_id: str | None = None,
     ) -> dict[str, Any]:
-        """Create or refresh a named slice; idempotent on name.
-
-        Membership is recomputed on the next manifest read, not here, so the create
-        path stays fast and the slice is always correct.
-        """
+        """Create or refresh a named slice; idempotent on name."""
         config = dict(filter_config or {})
         id_ = slice_id or str(uuid.uuid4())
         with connect(self.settings) as connection:
@@ -1467,11 +1295,7 @@ class PostgresCatalog:
         return bool(row)
 
     def slice_manifest(self, slice_id: str, *, limit: int = 100) -> dict[str, Any] | None:
-        """Manifest for a saved slice: what episodes it includes, with identity.
-
-        Membership is recomputed from the filter config at read time so the slice is
-        always correct; the membership row is only an audit trail of inclusion.
-        """
+        """Manifest for a saved slice: what episodes it includes, with identity."""
         slice_ = self.get_slice(slice_id)
         if slice_ is None:
             return None
@@ -1501,9 +1325,6 @@ class PostgresCatalog:
     ) -> list[dict[str, Any]]:
         """Recompute membership from the filter config and register it in the audit trail."""
         rows = self.list_episodes(limit=limit, state=state, flag=flag)
-        # One statement, not one per member. Membership is recomputed on every
-        # read by design, which means this write is on the hot path of every
-        # manifest fetch: a 20-episode slice issued 67 statements.
         with connect(self.settings) as connection:
             connection.cursor().executemany(
                 """INSERT INTO slice_memberships (slice_id, episode_id)
@@ -1514,16 +1335,7 @@ class PostgresCatalog:
         return rows
 
     def slice_impact(self, slice_id: str) -> dict[str, Any] | None:
-        """What the slice keeps and drops versus the whole dataset, and why.
-
-        The kept/dropped split is the *same predicate* `episode_predicates` builds
-        for the manifest - one vocabulary, one truth - so this view cannot
-        disagree with the manifest it explains. Drop reasons attribute each
-        excluded episode to the first predicate it fails (state before flag);
-        `short`/`long` are orderings, not filters, and the result says so instead
-        of manufacturing drops. All aggregation is in SQL: a view that fetched
-        every episode to compute a median would be O(dataset) on a detail page.
-        """
+        """What the slice keeps and drops versus the whole dataset, and why."""
         slice_ = self.get_slice(slice_id)
         if slice_ is None:
             return None
@@ -1593,8 +1405,6 @@ class PostgresCatalog:
             "dropped": dropped,
             "drop_reasons": reasons,
         }
-
-    # ---- validation failures read view ----
 
     def failure_summary(self) -> dict[str, Any] | None:
         """Aggregate of what is failing across episodes and profiles; read-only."""
@@ -1666,18 +1476,10 @@ class PostgresCatalog:
             ).fetchall()
         return [dict(row) for row in rows]
 
-    # ---- monitoring notifier (ADR 0020) ----
-
     def monitoring_snapshot(
         self, *, now: datetime | None = None, clock_sample: int = 200
     ) -> dict[str, Any]:
-        """One round trip of catalog state for one evaluation tick.
-
-        The feature builder is pure, so everything it needs is gathered here and
-        handed over as a plain mapping. Gathering it in a single query matters:
-        seven separate count queries per tick would make the monitor the most
-        expensive thing in the process.
-        """
+        """One round trip of catalog state for one evaluation tick."""
         reference = now or datetime.now(UTC)
         with connect(self.settings) as connection:
             depth_rows = connection.execute(
@@ -1759,16 +1561,7 @@ class PostgresCatalog:
 
     @contextmanager
     def monitor_lease(self) -> Iterator[bool]:
-        """Become this catalog's monitor ticker for the duration of the block.
-
-        Yields ``True`` when this process holds the lease and ``False`` when another
-        worker is already ticking. The monitor's tick is not idempotent - it bumps an
-        incident's occurrence count and observes the baseline book - and running N
-        workers is a supported configuration, so without a lease the counts scale
-        with the number of workers rather than with the number of faults. The lock is
-        session-scoped: it is released when this connection closes, so a worker killed
-        mid-tick cannot hold it against the rest of the pool.
-        """
+        """Become this catalog's monitor ticker for the duration of the block."""
         with connect(self.settings) as connection:
             row = connection.execute(
                 "SELECT pg_try_advisory_lock(%s) AS acquired", (MONITOR_TICK_LOCK_KEY,)
@@ -1794,13 +1587,7 @@ class PostgresCatalog:
         feature_schema_version: int,
         seen_at: datetime,
     ) -> dict[str, Any]:
-        """Create or bump one incident, atomically.
-
-        The partial unique index on ``(fingerprint) WHERE status <> 'resolved'`` is
-        the dedup guarantee, so the conflict target is that index rather than a
-        read-then-write in Python. A crash between the triage decision and the
-        insert cannot therefore open a second row for the same fault.
-        """
+        """Create or bump one incident, atomically."""
         with connect(self.settings) as connection:
             row = connection.execute(
                 """INSERT INTO monitor_incidents
@@ -1893,13 +1680,7 @@ class PostgresCatalog:
         return [dict(row) for row in rows]
 
     def incidents_opened_since(self, since: datetime) -> int:
-        """Distinct incidents opened in the budget window.
-
-        Counts rows by ``first_seen`` and deliberately *not* by ``occurrence_count``:
-        a fault that recurs twenty times is one thing that went wrong, and counting
-        its bumps would mean a long-running incident silently refunds its own budget
-        the more it persists — which is precisely the fault a budget exists to cap.
-        """
+        """Distinct incidents opened in the budget window."""
         with connect(self.settings) as connection:
             row = connection.execute(
                 "SELECT count(*) AS total FROM monitor_incidents WHERE first_seen >= %s",
@@ -1956,11 +1737,7 @@ class PostgresCatalog:
         return [dict(row) for row in rows]
 
     def save_baselines(self, rows: Sequence[dict[str, Any]]) -> int:
-        """Upsert every control limit touched by a tick.
-
-        One statement for the whole set: at ~30 scopes per tick this is a single
-        round trip, and a partially-written baseline set is worse than a stale one.
-        """
+        """Upsert every control limit touched by a tick."""
         if not rows:
             return 0
         payload = [
@@ -2058,11 +1835,7 @@ class PostgresCatalog:
         return [dict(row) for row in rows]
 
     def pending_contract_outcomes(self, *, limit: int = 100) -> list[dict[str, Any]]:
-        """Contracts still pending, with the observed counts needed to evaluate them.
-
-        Episode counts come from the lineage edge written at ingest, so a contract
-        measures the same episodes the build will contain.
-        """
+        """Contracts still pending, with the observed counts needed to evaluate them."""
         produced = """(SELECT count(*) FROM lineage_edges l
                             JOIN episodes e ON e.id = l.from_ref
                            WHERE l.from_type = 'episode' AND l.to_type = 'job'
@@ -2096,9 +1869,6 @@ class PostgresCatalog:
         return dict(row) if row else None
 
 
-# Public operations are wrapped once here so every current and future repository
-# method reports `catalog_query_duration_seconds` without per-method decorator
-# noise. Underscore helpers are internal and stay unwrapped (ADR 0017).
 for _name, _method in list(vars(PostgresCatalog).items()):
     if _name.startswith("_") or not callable(_method):
         continue

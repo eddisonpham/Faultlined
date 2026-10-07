@@ -1,23 +1,4 @@
-"""Deterministic feature vector for the monitoring notifier (ADR 0020).
-
-Pure by construction: no I/O, no clock, no randomness. Every value is a function
-of its inputs, so a recorded window replays to the same vector and detector tests
-need neither a database nor a running platform.
-
-Three invariants exist because breaking each one produces a monitor that fails in
-production rather than in a test:
-
-* **No unbounded labels.** Route templates and job types only. A feature keyed by
-  a job id would create a baseline per job, which never warms up and never means
-  anything. (Same rule as ADR 0017's metric labels.)
-* **Missing is not zero.** An absent sensor yields an *absent feature*, not a
-  ``0.0``. The signals an operator most needs are the ones that go missing, and
-  the metadata that says so is itself observable: ``sensor_availability`` counts
-  how many expected features are present.
-* **Versioned schema.** :data:`FEATURE_SCHEMA_VERSION` is recorded on every
-  incident, so a schema change retires stored baselines explicitly instead of
-  silently mis-scoring history against limits computed for a different meaning.
-"""
+"""Deterministic feature vector for the monitoring notifier (ADR 0020)."""
 
 from __future__ import annotations
 
@@ -31,47 +12,35 @@ from data_engine.observability.aggregate import heartbeat_age_seconds, percentil
 
 FEATURE_SCHEMA_VERSION = 1
 
-# Fixed order and fixed width. A detector indexes by name, but the tuple is the
-# contract: it is what makes "the vector" a well-defined object to assert on.
 FEATURE_NAMES: tuple[str, ...] = (
-    # queue and scheduling
     "queue_depth_queued",
     "queue_depth_running",
     "queue_depth_failed",
     "queue_oldest_age_seconds",
-    # run outcomes
     "job_failure_rate",
     "job_retry_count",
     "job_cancel_count",
     "job_timeout_count",
-    # progress
     "episodes_ingested",
     "artifacts_bytes_written",
     "episodes_per_second",
-    # curation
     "quarantine_rate",
     "verdict_jerky_rate",
     "movement_mean",
     "jerk_mean",
     "stall_mean",
     "frame_count_median",
-    # health
     "heartbeat_age_seconds",
     "catalog_query_p95_seconds",
     "api_request_p95_seconds",
     "api_error_rate",
-    # resources
     "cpu_percent",
     "memory_used_ratio",
     "disk_free_bytes",
-    # monitor's own view
     "sink_lag_seconds",
     "sensor_availability",
 )
 
-# Features that may legitimately be absent, with the count that defines
-# ``sensor_availability``. A sensor that is always present contributes nothing
-# to the count, so the denominator is the set of sensors that *can* go missing.
 _OPTIONAL_SENSORS: frozenset[str] = frozenset(
     {
         "queue_oldest_age_seconds",
@@ -118,14 +87,7 @@ class FeatureInputs:
 
 @dataclass(frozen=True, slots=True)
 class FeatureVector:
-    """One evaluation window.
-
-    ``scopes`` holds per-scope numeric variants (e.g. run time by job type).
-    ``refs`` holds routing identifiers (e.g. which episode had the timestamp gap).
-    Identifiers live here rather than in ``values`` because a feature must be a
-    number: a string in the vector would make a baseline meaningless and would put
-    a high-cardinality value on a path the schema promises is bounded.
-    """
+    """One evaluation window."""
 
     values: Mapping[str, float]
     scopes: Mapping[str, Mapping[str, float]]
@@ -135,11 +97,7 @@ class FeatureVector:
     window_seconds: float = DEFAULT_WINDOW_SECONDS
 
     def value(self, name: str, default: float = 0.0) -> float:
-        """The value, or ``default`` when the sensor was absent.
-
-        Callers that must distinguish "absent" from "zero" check :meth:`has`
-        first; that distinction is the whole point of the missing-is-not-zero rule.
-        """
+        """The value, or ``default`` when the sensor was absent."""
         return float(self.values.get(name, default))
 
     def has(self, name: str) -> bool:
@@ -205,10 +163,6 @@ def _run_features(
     values["job_cancel_count"] = float(len(_values(records, "jobs_cancellations_total")))
     values["job_timeout_count"] = float(len(_values(records, "jobs_timeouts_total")))
 
-    # Run time is scoped by job type: a validation tick and an ingest of a
-    # 200-episode dataset are not the same quantity, and a single global limit
-    # would flag the faster one forever. Per-scope baselines are what make
-    # "this job type is normally slower" pass unflagged (ADR 0020).
     by_type: dict[str, list[float]] = {}
     for record in records:
         if record.get("name") != "jobs_run_time_seconds":
@@ -268,7 +222,6 @@ def _curation_features(
     gap = snapshot.get("max_episode_timestamp_gap_seconds")
     if gap is not None:
         values["max_episode_timestamp_gap_seconds"] = float(gap)
-        # Routing identifiers for the gap, kept out of the numeric vector.
         for key in ("timestamp_gap_scope", "timestamp_gap_source"):
             raw = snapshot.get(key)
             if raw:
@@ -278,9 +231,6 @@ def _curation_features(
 def _health_features(
     records: Sequence[Mapping[str, Any]], values: dict[str, float], now: datetime
 ) -> None:
-    # heartbeat_age_seconds is None when no heartbeat was ever seen. That is a
-    # *feature* (the worker is not reporting at all), not a missing feature, so
-    # the caller decides: see the WORKER_LOST rule in detectors.py.
     age = heartbeat_age_seconds([dict(record) for record in records], now=now)
     if age is not None:
         values["heartbeat_age_seconds"] = age
@@ -316,13 +266,7 @@ def _resource_features(resources: ResourceSample | None, values: dict[str, float
 def _monitor_features(
     records: Sequence[Mapping[str, Any]], inputs: FeatureInputs, values: dict[str, float]
 ) -> None:
-    """The monitor's own view of its inputs.
-
-    ``sink_lag_seconds`` is the gap between the newest metric record and now. It
-    deliberately does not become an incident: a monitor that cannot see should
-    report itself blind on ``/api/v1/monitoring/health`` rather than paging the
-    operator about a platform it is not actually observing.
-    """
+    """The monitor's own view of its inputs."""
     newest = _newest_timestamp(records)
     if newest is not None:
         values["sink_lag_seconds"] = max(0.0, (inputs.now - newest).total_seconds())
@@ -331,8 +275,6 @@ def _monitor_features(
             0.0, (inputs.now - inputs.metrics_path_mtime).total_seconds()
         )
     if not inputs.catalog_reachable:
-        # Every catalog-derived feature is untrustworthy this tick; recording a
-        # zero for them would look like a healthy, empty system.
         for name in ("quarantine_rate", "frame_count_median", "verdict_jerky_rate"):
             values.pop(name, None)
 

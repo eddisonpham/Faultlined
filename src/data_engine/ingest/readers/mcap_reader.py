@@ -1,42 +1,4 @@
-"""MCAP sensor-log reader: one file is one episode.
-
-MCAP is the container Foxglove standardised on and the one `ros2 bag convert` writes,
-so it is the natural input for the raw end of the pipeline (ADR 0006). It is also the
-one raw format with no frame structure at all - a bag is a set of *topics* with
-independent rates, and nothing in the file says "this is an episode". Two decisions
-follow, and both are visible in the output rather than hidden in a default:
-
-- **A file is an episode.** MCAP has no episode index to slice the way a LeRobot v3
-  dataset has, so `episode_key` must either match the file's own key or be absent; a
-  request for `episode_index=3` against a bag is an error naming what the file
-  actually holds, not a silent read of the wrong span (`lerobot.py` takes the same
-  position on an ambiguous key).
-- **Frame rate is the busiest topic's rate.** A bag publishes joint states at 50 Hz and
-  images at 10 Hz; summing them would produce a number nothing downstream can use. The
-  busiest topic is the closest thing MCAP has to a frame rate, and it is reported as
-  such. The rate is measured as *(messages - 1) / span* - intervals between
-  consecutive messages, which is what a 50 Hz stream actually is; `messages / span`
-  reports 50.05 Hz for the same stream because it counts a period that never elapsed.
-- **Motion quality is scored on the busiest topic that has more than one dimension.**
-  A scalar topic (a gripper setpoint, a single setpoint) is excluded from the verdict by
-  `analyze` anyway - discrete and gripper dimensions never judge motion - so preferring
-  it would report `unknown` for logs that do contain the signal. Among candidates the
-  message count wins, then the dimension count, then the topic name, so the choice is
-  reproducible.
-
-Only channels whose `message_encoding` is `json` are decoded into numbers. CDR
-(`ros2msg`) and protobuf payloads are counted and reported but not interpreted: a
-guessed struct layout would put wrong numbers in the catalog, which is worse than an
-honest gap. Their count, rate, and duration are still exact, so channel-presence and
-frame-count rules work on a ROS 2 bag today.
-
-The pass is streaming. Per-channel statistics are running accumulators and the quality
-sample is a decimated window (`_Window`), so peak memory is a function of the number of
-topics, not of the length of the log (`architecture/storage.md` §1). Per-message dimension
-extraction runs a flatten plan compiled once per message shape (`_compile`): rebuilding the
-`path -> number` strings on every message was 51% of ingest (EXP-0004), and a bag's
-messages all share one shape, so the strings only need building once.
-"""
+"""MCAP sensor-log reader: one file is one episode."""
 
 from __future__ import annotations
 
@@ -56,28 +18,18 @@ from data_engine.ingest.readers.base import ChannelStats, EpisodeExtraction, Rea
 MAGIC = b"\x89MCAP0\r\n"
 NANOSECONDS_PER_SECOND = 1_000_000_000
 
-#: Payloads this reader will interpret. Everything else is counted, not decoded.
 DECODABLE_ENCODINGS = frozenset({"json"})
 
-#: Values kept per dimension for motion analysis before the window starts decimating.
 QUALITY_WINDOW = 512
 
-#: Below this many sampled frames there is no interval to measure.
 MIN_QUALITY_FRAMES = 2
 
-#: Metadata keys the engine looks for, in order of preference.
 _ROBOT_KEYS = ("robot_type", "robot")
 _TASK_KEYS = ("task", "task_name")
 
 
 class _Window:
-    """Bounded sample of one dimension, decimated in place as it fills.
-
-    Motion character survives decimation; unbounded memory does not. Halving the
-    values and doubling the stride every time the window overflows bounds peak memory
-    at `2 * QUALITY_WINDOW` floats per dimension while keeping the sample evenly
-    spread over the whole log, which a first-N window would not.
-    """
+    """Bounded sample of one dimension, decimated in place as it fills."""
 
     __slots__ = ("stride", "values")
 
@@ -150,22 +102,7 @@ class _Topic:
         self.widest = 0.0
         """Exact largest interval between consecutive accepted samples, whole log."""
         self.clock: list[float] = []
-        """Log times of the messages that fed the quality window, decimated with it.
-
-        Grown in lockstep with `windows` - one entry appended per accepted message,
-        and trimmed on the same trigger - so the two stay index-aligned and the
-        timestamps describe exactly the frames the verdict was computed from.
-
-        The trim drops the *oldest* half rather than halving by `[::2]`, and the
-        difference is the whole ballgame. Stride-halving is right for the value
-        windows, whose statistics do not care about order or spacing, but it is
-        wrong for a clock: the very first sample survives every halving, so the
-        buffer degenerates into that one ancient timestamp followed by a dense
-        block of recent ones, and the analysis reads the distance between them as
-        a gap. On a clean 50 Hz log that reported a 501-second hole in a
-        600-second recording whose largest real interval was 20 ms. A contiguous
-        recent window at true resolution cannot manufacture a gap.
-        """
+        """Log times of the messages that fed the quality window, decimated with it."""
 
     def stamp(self, log_time: int) -> None:
         if self.messages == 0:
@@ -179,16 +116,7 @@ class _Topic:
         return max((self.last - self.first) / NANOSECONDS_PER_SECOND, 0.0)
 
     def observe(self, payload: Any, log_time: int = 0) -> None:
-        """Accumulate one decoded message.
-
-        The hot path runs the compiled flatten plan (`_compile`) rather than
-        rebuilding the `path -> number` dict on every message: the path strings
-        are built once per shape, and per message the tree is walked once with
-        no allocation beyond the slot buffer. When the shape changes, the walk
-        reports it and the message takes `_observe_dims` - the original dict
-        path, kept both as the fallback and as the oracle the equivalence tests
-        compare the fast path against.
-        """
+        """Accumulate one decoded message."""
         plan = self.plan
         if plan is None or not _run(plan, payload, self.buffer):
             self._replan(payload)
@@ -202,10 +130,6 @@ class _Topic:
                 continue
             seen = True
             if not math.isfinite(value):
-                # Counted, not accumulated: an infinite sample would make every
-                # statistic of the channel infinite and the `jsonb` write reject
-                # the whole episode (EXP-0014 D2). The quality window still sees
-                # it via `_sample_slots`, so `analyze` can report it honestly.
                 self.nonfinite += 1
                 continue
             self.numbers += 1
@@ -238,24 +162,12 @@ class _Topic:
         self._rebind()
 
     def _rebind(self) -> None:
-        """Point the reference names at their slots in the current plan.
-
-        A name that vanished from the shape maps to -1 and makes every later
-        message un-sampleable, which is exactly what the dict path does: the
-        name can never be present again, so the window must stay ragged-free.
-        """
+        """Point the reference names at their slots in the current plan."""
         index = {name: i for i, name in enumerate(self.names)}
         self.ref = tuple(index.get(name, -1) for name in self.reference)
 
     def _sample_slots(self, log_time: int) -> None:
-        """Feed the quality window from the slot buffer.
-
-        The first message that carries numbers fixes the dimension set; later
-        messages are used only if they carry all of it, because `analyze`
-        rejects ragged series and a half-filled window would misreport a gap as
-        a jitter spike. Numeric names beyond the reference set are counted in
-        the channel statistics but do not enter the window.
-        """
+        """Feed the quality window from the slot buffer."""
         buffer = self.buffer
         for slot in self.ref:
             if slot < 0 or buffer[slot] is None:
@@ -267,12 +179,7 @@ class _Topic:
         self._decimate_clock(log_time)
 
     def _observe_dims(self, dims: dict[str, float], log_time: int = 0) -> None:
-        """The dict-shaped path: identical semantics to the plan, no plan needed.
-
-        Used for payloads whose shape the compiled plan cannot express, and by
-        the equivalence tests as the reference behaviour the fast path must
-        reproduce exactly.
-        """
+        """The dict-shaped path: identical semantics to the plan, no plan needed."""
         if not dims:
             return
         for value in dims.values():
@@ -300,9 +207,6 @@ class _Topic:
     def _decimate_clock(self, log_time: int) -> None:
         stamp = log_time / 1e9
         if self.clock:
-            # Measured on the raw stream, before any trimming, so `widest` is the
-            # exact largest interval of the whole log in constant memory - the one
-            # thing a bounded window cannot recover.
             self.widest = max(self.widest, stamp - self.clock[-1])
         self.clock.append(stamp)
         if len(self.clock) > 2 * QUALITY_WINDOW:
@@ -318,7 +222,6 @@ class _Topic:
     def stats(self) -> ChannelStats:
         count = self.numbers
         mean = self.total / count if count else None
-        # Population sigma, matching the LeRobot reader's computed statistics.
         spread = math.sqrt(max(0.0, self.squares / count - mean**2)) if mean is not None else None
         return ChannelStats(
             name=self.topic,
@@ -354,7 +257,7 @@ class McapReader:
     format = "mcap"
 
     def sniff(self, path: Path) -> bool:
-        """True for a file whose first bytes are the MCAP magic. Never raises."""
+        """True for a file whose first bytes are the MCAP magic."""
         try:
             with path.open("rb") as stream:
                 return stream.read(len(MAGIC)) == MAGIC
@@ -482,13 +385,7 @@ def _scorable(topics: dict[int, _Topic]) -> _Topic | None:
 
 
 def _to_float(value: int | float) -> float | None:
-    """`float()`, but an unrepresentable number is unmeasurable, not fatal.
-
-    JSON happily parses a 400-digit integer and `float()` raises OverflowError
-    on it. Letting one such leaf fail the whole episode read is the same defect
-    class as the sqrt overflow in `analyze` (ADR 0023): the formula is not the
-    data. The leaf is dropped instead.
-    """
+    """`float()`, but an unrepresentable number is unmeasurable, not fatal."""
     try:
         return float(value)
     except OverflowError:
@@ -496,13 +393,7 @@ def _to_float(value: int | float) -> float | None:
 
 
 def _compile(value: Any, prefix: str, names: list[str]) -> tuple[Any, ...]:
-    """Compile a flatten plan for one message shape; names are built once, ever.
-
-    Mirrors `_dimensions` exactly - same traversal order, same path strings -
-    so the fast path and the fallback cannot disagree about what a dimension is
-    called. Nodes: `("d", keys, children)`, `("l", length, children)`,
-    `("v", slot)` where `slot` indexes `names`.
-    """
+    """Compile a flatten plan for one message shape; names are built once, ever."""
     if isinstance(value, dict):
         keys = tuple(value)
         return (
@@ -524,14 +415,7 @@ def _compile(value: Any, prefix: str, names: list[str]) -> tuple[Any, ...]:
 
 
 def _run(node: tuple[Any, ...], value: Any, slots: list[float | None]) -> bool:
-    """Fill `slots` per the plan. False means the shape moved; replan and retry.
-
-    The container checks are load-bearing in one unusual way: a dict whose keys
-    arrive in a different order reports a changed shape even though the key set
-    matches. That is deliberate - the dict path accumulates statistics in
-    traversal order, and floats do not add associatively, so honouring the new
-    order (by replanning) is what keeps both paths bit-identical.
-    """
+    """Fill `slots` per the plan."""
     kind = node[0]
     if kind == "d":
         if not isinstance(value, dict) or len(value) != len(node[2]):
@@ -569,13 +453,7 @@ def _run(node: tuple[Any, ...], value: Any, slots: list[float | None]) -> bool:
 
 
 def _dimensions(value: Any, prefix: str = "") -> dict[str, float]:
-    """Flatten a decoded JSON message into `path -> number`.
-
-    Non-numeric leaves are dropped rather than failing the message: a joint-state
-    message carries a `name` list of strings next to its positions, and refusing to
-    score it because of that would throw away the signal. A message with no number
-    in it at all flattens to the empty dict.
-    """
+    """Flatten a decoded JSON message into `path -> number`."""
     if value is None or isinstance(value, bool):
         return {}
     if isinstance(value, int | float):
@@ -605,12 +483,7 @@ def _loads(data: bytes) -> Any:
 
 
 def _metadata_facts(reader: Any) -> tuple[dict[str, str], list[dict[str, str]]]:
-    """Flat `key -> value` facts, and the records they came from.
-
-    MCAP carries no field for "which robot" or "what task"; it has `Metadata` records
-    for exactly this. First value wins in file order, so a file with two records
-    declaring the same key is read the same way every time.
-    """
+    """Flat `key -> value` facts, and the records they came from."""
     facts: dict[str, str] = {}
     records: list[dict[str, str]] = []
     for record in reader.iter_metadata():

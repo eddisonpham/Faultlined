@@ -26,11 +26,6 @@ class SyntheticEpisode(BaseModel):
         count = len(self.timestamps)
         if len(self.observations) != count or len(self.actions) != count:
             raise ValueError("timestamps, observations, and actions must have equal lengths")
-        # Equal *length* of the outer lists is not enough. A ragged row validated
-        # cleanly and then killed the ingest job with an IndexError inside the
-        # series builder, which the worker classified as a retryable
-        # INTERNAL_ERROR and spent three attempts on. The payload was bad; the
-        # contract is where bad payloads are supposed to stop.
         for name, rows in (("observations", self.observations), ("actions", self.actions)):
             widths = {len(row) for row in rows}
             if len(widths) > 1:
@@ -50,10 +45,10 @@ class SourceIngestPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     source: str = Field(min_length=1, max_length=1024)
-    """Path to a dataset directory or file. Resolved by a reader via sniffing."""
+    """Path to a dataset directory or file. """
 
     episode_key: str | None = Field(default=None, max_length=128)
-    """Which episode inside the source, e.g. `episode_index=7`. First one if omitted."""
+    """Which episode inside the source, e.g. """
 
 
 class _JobPolicy(BaseModel):
@@ -81,17 +76,7 @@ class SubmitSourceJobRequest(_JobPolicy):
 
 
 class ValidatePayload(BaseModel):
-    """Which episodes to check, against which policy.
-
-    An empty `episode_ids` means "everything currently ingested" - the common
-    case after a bulk ingest, and an explicit statement rather than a default
-    that silently changes meaning if a caller forgets the field.
-
-    The policy travels as a whole document, not a name to look up. A job is a
-    self-contained, retryable record: if the profile is edited between the
-    submission and the attempt, the job must still validate against what was
-    asked for, not against whatever the name resolves to now.
-    """
+    """Which episodes to check, against which policy."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -100,13 +85,7 @@ class ValidatePayload(BaseModel):
 
 
 class BuildPayload(BaseModel):
-    """A dataset build over a named selection of episodes (FR-006).
-
-    Empty `episode_ids` means "every episode that passed validation" - the
-    selection a first build almost always wants, and the one that is safe to
-    default to because a failing episode is excluded rather than silently
-    included.
-    """
+    """A dataset build over a named selection of episodes (FR-006)."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -129,14 +108,6 @@ class SubmitBuildJobRequest(_JobPolicy):
     payload: BuildPayload
 
 
-#: A build's identity is `bld_` + the SHA-256 of its own manifest
-#: (`builds/service.py::build_hash`), so it is 68 characters long. This field used to
-#: cap the string at 64, which rejected every hash the API itself publishes: `POST
-#: /api/v1/jobs` with the `hash` from `GET /api/v1/builds`, from `/ui/builds/{hash}`,
-#: or from a build job's own result answered 422, and the only value the cap admitted
-#: (a bare 64-hex digest) failed as `ExportBuildUnknown`, because the catalog keys
-#: builds by the prefixed form. The pattern states the identity rather than
-#: approximating its length, so a client can paste what the API gave it.
 BUILD_HASH_PATTERN = r"^bld_[0-9a-f]{64}$"
 _BUILD_HASH = re.compile(BUILD_HASH_PATTERN)
 
@@ -149,12 +120,7 @@ class ExportPayload(BaseModel):
     @field_validator("build_hash", mode="before")
     @classmethod
     def _say_what_a_build_hash_is(cls, value: Any) -> Any:
-        """Name the shape before the regex does.
-
-        `mode="before"` on purpose: the pattern constraint runs first otherwise and
-        answers with the pattern itself, which is a fine contract and a poor
-        explanation. The pattern stays for OpenAPI and for non-string inputs.
-        """
+        """Name the shape before the regex does."""
         if isinstance(value, str) and not _BUILD_HASH.fullmatch(value):
             raise ValueError(
                 "a build hash is `bld_` followed by 64 hex characters, exactly as "
@@ -217,13 +183,7 @@ class RedundancyGroupResponse(BaseModel):
 
 
 class BuildRedundancyResponse(BaseModel):
-    """Near-duplicate structure of a build's membership (ADR 0032).
-
-    Read-only: the report proposes which episodes are the same behaviour recorded twice and
-    never removes one. `incomparable` lists the episodes that carry no signal to compare on
-    (no clock, no judged dimension) - they are counted as distinct, which is the honest
-    direction, and they are named so the count is not mistaken for a measurement.
-    """
+    """Near-duplicate structure of a build's membership (ADR 0032)."""
 
     build_hash: str
     method: str
@@ -248,13 +208,7 @@ class CoverageValueResponse(BaseModel):
 
 
 class CoverageAxisResponse(BaseModel):
-    """One axis of a build's coverage: what the build holds, and what it lacks (ADR 0033).
-
-    `missing` is the number of gaps before `gaps` was truncated, so a capped list reads as "at
-    least this many" rather than as the whole answer. The task axis's gaps are vocabulary
-    labels, so a label with no episode anywhere is a gap; every other axis's gaps are the
-    catalog's values the build left out.
-    """
+    """One axis of a build's coverage: what the build holds, and what it lacks (ADR 0033)."""
 
     axis: str
     label: str
@@ -266,12 +220,7 @@ class CoverageAxisResponse(BaseModel):
 
 
 class BuildCoverageResponse(BaseModel):
-    """What one build contains, measured against the catalog it was drawn from (ADR 0033).
-
-    Bounded by construction: the payload is bounded by the axes and their limits, never by the
-    episode count. Read-only - no coverage figure takes part in a build's identity and no build
-    is refused for a gap.
-    """
+    """What one build contains, measured against the catalog it was drawn from (ADR 0033)."""
 
     build_hash: str
     method: str
@@ -332,14 +281,7 @@ class EpisodeSummary(BaseModel):
     """The episode's own length, as the reader declared it."""
 
     analysed_frames: int | None = None
-    """How many frames the quality verdict was actually computed over.
-
-    Equal to `frame_count` for a reader that holds the whole episode, and much
-    smaller for a streaming one. The two were the same column until a bag read
-    1024 frames of 72 600 and the catalog reported the episode as 816 frames long,
-    so both numbers are published rather than one silently standing in for the
-    other.
-    """
+    """How many frames the quality verdict was actually computed over."""
 
     movement_score: float | None = None
     jerk_score: float | None = None
@@ -487,8 +429,7 @@ class EpisodeQualityResponse(BaseModel):
     worst_dim: str | None = None
     judged_dims: int = 0
     motion_trace: list[list[list[float]]] = []
-    """Runs of `[seconds since start, motion score]` points. A break between
-    runs is a recording gap; the chart draws it as a hole, never as motion."""
+    """Runs of `[seconds since start, motion score]` points. """
 
 
 class QualitySummaryResponse(BaseModel):
@@ -498,9 +439,7 @@ class QualitySummaryResponse(BaseModel):
     verdicts: dict[str, int]
     length: dict[str, Any]
     speed_distribution: list[dict[str, Any]]
-    """One row per episode. `jerk_score` is dimensionless and therefore
-    comparable across datasets; `movement_score` is the same motion in raw
-    units, which is meaningful per dataset and meaningless between them."""
+    """One row per episode. """
 
     integrity: dict[str, int] = {}
     """How many episodes recorded continuously, and how many dropped frames."""
@@ -548,9 +487,6 @@ class MetricsResponse(BaseModel):
     worker_heartbeat_age_seconds: float | None = None
 
 
-# ---- curated slices (curated build-ready layer) ----
-
-
 class SliceCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -595,14 +531,7 @@ class SliceManifestResponse(EpisodeExportResponse):
 
 
 class SliceImpactResponse(BaseModel):
-    """What a curation slice keeps and drops versus the whole dataset, and why.
-
-    `kept` and `dropped` partition the dataset and carry the same quality
-    signals for each side, so "this slice is smoother than what it dropped" is
-    a readable claim rather than an inference. `drop_reasons` attributes each
-    dropped episode to the first predicate it failed; `reorders_only` is the
-    honest zero: `short`/`long` order the view and exclude nothing.
-    """
+    """What a curation slice keeps and drops versus the whole dataset, and why."""
 
     slice_id: str
     name: str | None = None
@@ -612,9 +541,6 @@ class SliceImpactResponse(BaseModel):
     kept: dict[str, Any]
     dropped: dict[str, Any]
     drop_reasons: list[dict[str, Any]] = []
-
-
-# ---- validation failures read view ----
 
 
 class FailureSummaryResponse(BaseModel):
@@ -639,14 +565,7 @@ class FailingEpisodeRow(BaseModel):
     """The episode's own length, as the reader declared it."""
 
     analysed_frames: int | None = None
-    """How many frames the quality verdict was actually computed over.
-
-    Equal to `frame_count` for a reader that holds the whole episode, and much
-    smaller for a streaming one. The two were the same column until a bag read
-    1024 frames of 72 600 and the catalog reported the episode as 816 frames long,
-    so both numbers are published rather than one silently standing in for the
-    other.
-    """
+    """How many frames the quality verdict was actually computed over."""
 
     movement_score: float | None = None
     jerk_score: float | None = None
@@ -664,11 +583,8 @@ class FailingEpisodesResponse(BaseModel):
     items: list[FailingEpisodeRow]
 
 
-# ---- monitoring notifier (ADR 0020) ----
-
-
 class IncidentPayload(BaseModel):
-    """One incident. ``evidence`` is never empty: triage rejects uncited signals."""
+    """One incident."""
 
     id: str
     fingerprint: str
@@ -701,7 +617,7 @@ class IncidentSummaryResponse(BaseModel):
 
 
 class ContractRequest(BaseModel):
-    """A declared expectation for one run. Every field is optional; all absent = no-op."""
+    """A declared expectation for one run."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -730,13 +646,14 @@ class ContractListResponse(BaseModel):
 
 
 class MonitoringHealthResponse(BaseModel):
-    """The monitor's own state. A monitor that silently stops is the worst outcome."""
+    """The monitor's own state."""
 
     feature_schema_version: int
     last_tick_at: str | None = None
     blind: bool | None = None
-    """Whether the newest tick reported itself blind; `null` when no tick has run
-    anywhere yet, which is different from a tick that found nothing wrong."""
+    """Whether the newest tick reported itself blind; `null` when no tick has run anywhere yet,
+    which is different from a tick that found nothing wrong.
+    """
     tick_seconds: float
     baseline_scopes: int
     warm_scopes: int

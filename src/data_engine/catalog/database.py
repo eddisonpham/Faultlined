@@ -323,9 +323,6 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 
 """
 
-# Columns the job lifecycle (retry / timeout / cancel) needs, added to pre-existing
-# databases. CREATE TABLE IF NOT EXISTS does not add columns to a table that already
-# exists, so these are separate idempotent statements.
 _MIGRATIONS = """
 ALTER TABLE jobs ADD COLUMN IF NOT EXISTS attempts integer NOT NULL DEFAULT 0;
 ALTER TABLE jobs ADD COLUMN IF NOT EXISTS max_attempts integer NOT NULL DEFAULT 3;
@@ -399,8 +396,6 @@ CREATE INDEX IF NOT EXISTS build_episodes_episode_idx ON build_episodes (episode
 def connect(settings: Settings | None = None) -> Iterator[Connection[dict[str, object]]]:
     """Open a short-lived connection; never log the DSN or credentials."""
     configured = settings or load_settings()
-    # Bound the connect phase: libpq's default retries a refused or unroutable host for
-    # minutes, which turns a stale DSN into an apparent hang rather than a fast error.
     with psycopg.connect(
         configured.database_url.get_secret_value(),
         row_factory=dict_row,
@@ -411,26 +406,15 @@ def connect(settings: Settings | None = None) -> Iterator[Connection[dict[str, o
 
 
 CONNECT_TIMEOUT_SECONDS = 5
-# A runaway query must fail instead of pinning a pooled connection until the API
-# exhausts its worker threads. Every statement here is a catalog read or a
-# small executemany, so anything past this is a lock or plan problem worth surfacing.
 STATEMENT_TIMEOUT_MILLISECONDS = 15_000
 
 
-#: The version `initialize_schema` records for itself (ADR 0028): the idempotent
-#: DDL *is* the baseline migration, so a database the code has merely started
-#: already reads as baseline-applied and `de migrate` runs only real pending work.
 BASELINE_VERSION = "0001"
 BASELINE_NAME = "baseline"
 
 
 def run_schema_ddl(connection: Connection[dict[str, object]]) -> None:
-    """Execute the idempotent DDL on an open connection.
-
-    Split out of `initialize_schema` so the baseline migration (ADR 0028) can
-    run the same statements inside its own transaction instead of opening a
-    second connection mid-migration.
-    """
+    """Execute the idempotent DDL on an open connection."""
     for script in (_SCHEMA, _MIGRATIONS):
         for statement in script.split(";"):
             if statement.strip():
@@ -441,8 +425,6 @@ def initialize_schema(settings: Settings | None = None) -> None:
     """Create vertical-slice tables if absent; safe to call on every startup."""
     with connect(settings) as connection:
         run_schema_ddl(connection)
-        # Record the baseline (ADR 0028). The table exists because _SCHEMA now
-        # creates it; ON CONFLICT keeps every later start a silent no-op.
         connection.execute(
             "INSERT INTO schema_migrations (version, name) VALUES (%s, %s) "
             "ON CONFLICT (version) DO NOTHING",

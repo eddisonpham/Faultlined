@@ -21,20 +21,10 @@ from data_engine.monitoring.service import MonitorService
 from data_engine.observability.logging import configure_logging
 from data_engine.observability.metrics import JsonlMetricSink, RuntimeMetrics
 
-#: How long to wait after a failed database call before trying the queue again.
 DB_ERROR_BACKOFF_SECONDS = 5.0
 
-#: How often the worker records host gauges (`system_*`) into the runtime sink.
-#: Once a minute is often enough to notice a filling disk or a growing RSS, and
-#: rare enough that eight gauges a minute do not bury the job metrics in the JSONL.
 HOST_SAMPLE_INTERVAL_SECONDS = 60.0
 
-#: How often the worker loop evaluates a monitoring window. It matches the notifier's
-#: own window (`DEFAULT_WINDOW_SECONDS`): a shorter cadence re-evaluates records the
-#: previous tick already saw, and a longer one lets a sustained fault sit unobserved
-#: between ticks. The monitor was fully implemented, tested, and inert - nothing in
-#: any running deployment called `MonitorService.tick` (EXP-0016), so `/ui/incidents`
-#: rendered zero rows forever. See ADR 0031.
 MONITOR_INTERVAL_SECONDS = DEFAULT_WINDOW_SECONDS
 
 
@@ -44,19 +34,7 @@ def build_metrics(settings: Any) -> RuntimeMetrics:
 
 
 def _parent_alive() -> bool:
-    """False once the parent process is gone.
-
-    `dev` runs the worker as a child process. If the parent is killed outright the
-    child is not reaped, and an orphan keeps claiming jobs from the shared catalog,
-    which silently breaks `just test` and steals work from any other worker.
-
-    A worker started standalone (`de worker`, `just worker`) has no multiprocessing
-    parent at all - `parent_process()` returning `None` means "not a child of a
-    multiprocessing spawn", not "orphaned". Reading `None` as dead made every
-    standalone worker exit on its first loop iteration; only `de dev`'s children
-    ever ran. Found by the worker-kill drill (EXP-0011), which starts workers the
-    way the runbook says to.
-    """
+    """False once the parent process is gone."""
     parent = multiprocessing.parent_process()
     return parent is None or parent.is_alive()
 
@@ -66,8 +44,6 @@ def _worker_loop(stop: Any, poll_seconds: float = 0.25) -> None:
     metrics = build_metrics(settings)
     worker = IngestWorker(settings, metrics=metrics)
     log = logging.getLogger(__name__)
-    # The reapers used to exist but nothing called them, so F6 deadlines were never
-    # enforced on a job that was already running and a dead worker's job was stranded.
     monitor = MonitorService(worker.catalog, metrics=metrics, metrics_path=settings.metrics_path)
     next_reap = time.monotonic()
     next_sample = time.monotonic()
@@ -88,10 +64,6 @@ def _worker_loop(stop: Any, poll_seconds: float = 0.25) -> None:
         try:
             result = worker.process_one()
         except Exception:
-            # A database blip must not end the worker's life. `claim_job` runs before
-            # the job try/except in `process_one`, so a lost connection used to
-            # propagate out of this loop and take the process down, leaving the queue
-            # unprocessed until someone restarted it. Back off and keep going.
             log.exception("worker iteration failed; continuing")
             stop.wait(max(poll_seconds, DB_ERROR_BACKOFF_SECONDS))
             continue
@@ -108,13 +80,7 @@ def _sample_host(metrics: Any, log: Any) -> None:
 
 
 def _monitor_tick(monitor: MonitorService, catalog: Any, log: Any) -> None:
-    """Evaluate one monitoring window, if this worker holds the tick lease.
-
-    Out of band by construction (ADR 0020): a tick that raises is a lost observation,
-    never a lost job, so every failure is logged and swallowed the way a host sample
-    is. The lease is the catalog's, not this process's, so a pool of workers produces
-    one tick per interval rather than one per worker.
-    """
+    """Evaluate one monitoring window, if this worker holds the tick lease."""
     try:
         with catalog.monitor_lease() as acquired:
             if not acquired:
@@ -136,8 +102,6 @@ def _reap(worker: IngestWorker, log: Any) -> None:
         timed_out = worker.catalog.reap_expired_deadlines()
         reclaimed = worker.catalog.reap_orphaned_jobs()
     except Exception:
-        # Reaping is opportunistic maintenance. If the database is unreachable the
-        # next sweep will catch up, so this must not end the loop.
         log.exception("reaper sweep failed; continuing")
         return
     if timed_out or reclaimed:

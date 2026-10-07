@@ -1,22 +1,4 @@
-"""Online centroid clustering over extracted cores, in pure Python.
-
-The shape is the one the stage 2.5 experiments chose and the scale run confirmed:
-leader-follower with refinement and freeze. A new core joins the nearest cluster if it
-is within `radius`, otherwise it starts one, so the cluster count is discovered rather
-than declared - the property a fixed-`k` method cannot offer for a catalog whose task
-vocabulary nobody has enumerated.
-
-**Why lexical and not embeddings.** EXP-2.5-08 measured embeddings at 1200 strings and
-they were not the problem; extraction was. Grouping identical cores needs no model, no
-extra dependency and no GPU, and it is exact rather than approximate. The similarity is
-cosine over hashed token vectors, so two cores that differ by a token land near each
-other and two that share nothing do not - which is what lets `mug` and `mug with lid`
-merge while `mug` and `laptop` cannot.
-
-**Freeze is the point.** A confirmed cluster does not move. Later cores still join it,
-because a human said so, and the centroid stays exactly where they put it. Without
-that, a re-cluster renames everything someone curated an hour ago.
-"""
+"""Online centroid clustering over extracted cores, in pure Python."""
 
 from __future__ import annotations
 
@@ -25,13 +7,11 @@ import math
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 
-#: Hashed token space. Fixed rather than vocabulary-sized so the dimension never depends
-#: on the corpus and a centroid written to the catalog stays loadable tomorrow.
 DIM = 256
 
 
 def token_vector(text: str, *, dim: int = DIM) -> list[float]:
-    """Hashed bag of tokens, L2-normalised. Deterministic across processes."""
+    """Hashed bag of tokens, L2-normalised."""
     vector = [0.0] * dim
     for token in text.split():
         digest = hashlib.blake2b(token.encode(), digest_size=4).digest()
@@ -44,7 +24,7 @@ def token_vector(text: str, *, dim: int = DIM) -> list[float]:
 
 
 def cosine(left: Sequence[float], right: Sequence[float]) -> float:
-    """Cosine similarity. Vectors here are unit-norm, but the guard is free."""
+    """Cosine similarity."""
     if not left or not right:
         return 0.0
     total = sum(a * b for a, b in zip(left, right, strict=True))
@@ -55,8 +35,6 @@ def cosine(left: Sequence[float], right: Sequence[float]) -> float:
     return total / (left_norm * right_norm)
 
 
-#: Centroid rules. Each is a factory: one rule instance per cluster, because a rule that
-#: keeps a buffer has to keep it per cluster or it will average across clusters.
 Rule = Callable[[], "CentroidRule"]
 
 
@@ -72,7 +50,7 @@ class CentroidRule:
 
 @dataclass(slots=True)
 class RunningMean(CentroidRule):
-    """Arithmetic mean of everything assigned. The baseline, and the default."""
+    """Arithmetic mean of everything assigned."""
 
     count: int = 0
 
@@ -87,7 +65,7 @@ class RunningMean(CentroidRule):
 
 @dataclass(slots=True)
 class SlidingWindow(CentroidRule):
-    """Mean of the last `window` points. Forgets deliberately."""
+    """Mean of the last `window` points."""
 
     window: int = 8
     buffer: list[list[float]] = field(default_factory=list)
@@ -113,9 +91,6 @@ class Ema(CentroidRule):
         ]
 
 
-#: The rules the API may choose between. The first is the default because the scale run
-#: found every rule within a few percent of the others once extraction was in front of
-#: it, so the simplest one ships.
 RULES: dict[str, Rule] = {
     "running_mean": RunningMean,
     "sliding_8": lambda: SlidingWindow(8),
@@ -126,7 +101,7 @@ RULES: dict[str, Rule] = {
 
 @dataclass(slots=True)
 class Cluster:
-    """One cluster's state. A rule instance per cluster, never per run."""
+    """One cluster's state."""
 
     centroid: list[float]
     rule: CentroidRule
@@ -139,7 +114,7 @@ class Cluster:
         return len(self.members)
 
     def absorb(self, point: Sequence[float], member: str) -> None:
-        """Add a member. A frozen cluster keeps its members and loses its centroid."""
+        """Add a member."""
         self.members.append(member)
         if not self.frozen:
             self.centroid = self.rule.update(self.centroid, point)
@@ -151,10 +126,8 @@ class Assignment:
 
     core: str
     cluster: int
-    #: True when this created the cluster rather than joining one.
     spawned: bool
     into_frozen: bool
-    #: Cosine distance to the centroid it was assigned to.
     distance: float
 
 
@@ -207,8 +180,6 @@ class OnlineCentroids:
             )
             assignment = Assignment(core, len(self.clusters) - 1, True, False, 0.0)
         else:
-            # At the cap the nearest cluster absorbs the point even outside the radius.
-            # Dropping it loses data; opening a cluster breaks the cap the operator set.
             cluster = self.clusters[nearest] if nearest is not None else self.clusters[0]
             cluster.absorb(point, core)
             assignment = Assignment(core, self.clusters.index(cluster), False, cluster.frozen, best)
@@ -219,7 +190,7 @@ class OnlineCentroids:
         return [self.observe(core) for core in cores]
 
     def confirm(self, index: int, label: str) -> None:
-        """Freeze a cluster and give it a name. Raises on an unknown index."""
+        """Freeze a cluster and give it a name."""
         if not 0 <= index < len(self.clusters):
             raise IndexError(f"no cluster {index}")
         self.clusters[index].label = label

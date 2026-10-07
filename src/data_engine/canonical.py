@@ -1,9 +1,4 @@
-"""Canonical JSON: the one serialization the platform hashes, compares, and dedupes.
-
-It lives at the package root rather than in `catalog/` because idempotency requests,
-build manifests, and validation profiles all hash it, and `catalog.repository` importing
-`validation.profile` would otherwise close a cycle.
-"""
+"""Canonical JSON: the one serialization the platform hashes, compares, and dedupes."""
 
 from __future__ import annotations
 

@@ -172,23 +172,14 @@ from data_engine.web import (
 from data_engine.web.pages import EPISODE_FLAGS, EPISODE_STATES
 from data_engine.web.records import benchmarks_model, experiments_model
 
-# Only these two filename shapes are servable; anything else is a 404.
 _SAFE_STYLESHEET = re.compile(r"(core|theme-[a-z0-9-]+)")
 
 
 def _first_message(exc: ValidationError) -> str:
-    """The first validation failure, as a sentence a person can act on.
-
-    A raw Pydantic error is a JSON object with a type code, a field path and a
-    context dict. It is the right thing for a machine and the wrong thing for a
-    form: the field path has to be recovered, and the message dropped, before it
-    becomes anything a reader can use.
-    """
+    """The first validation failure, as a sentence a person can act on."""
     for error in exc.errors():
         location = ".".join(str(part) for part in error.get("loc", ()) if part != "payload")
         message = str(error.get("msg", "invalid value"))
-        # Pydantic prefixes constraint failures with the constraint name, which
-        # means nothing on its own.
         for prefix in ("Value error, ", "String should match pattern "):
             if message.startswith(prefix):
                 message = message[len(prefix) :]
@@ -197,26 +188,12 @@ def _first_message(exc: ValidationError) -> str:
 
 
 def _ids(text: str) -> list[str]:
-    """Episode ids a form typed as a comma- or space-separated list.
-
-    Empty means the selection is the handler's own default (every episode for a
-    validate, every validated episode for a build), which is the same meaning the JSON
-    API gives an empty list rather than a third convention invented by the form.
-    """
+    """Episode ids a form typed as a comma- or space-separated list."""
     return [part for part in (chunk.strip() for chunk in text.replace(",", " ").split()) if part]
 
 
 def _profile_document(values: dict[str, str]) -> dict[str, Any]:
-    """The validation profile a form's fields describe (ADR 0016).
-
-    `enabled_rules` is omitted on purpose: the API accepts a rule subset, but `rules_for`
-    intersects it with the rule registry, so a misspelled rule name would silently switch
-    a check off. Omitting the key means every registered rule runs.
-
-    The numeric limits are parsed here rather than left to the worker, so a typo is an
-    inline form error instead of a queued job that fails. Raises `ValueError` with the
-    sentence the form should show.
-    """
+    """The validation profile a form's fields describe (ADR 0016)."""
     document: dict[str, Any] = {"name": values.get("profile_name") or "operator", "version": "1"}
     limits: tuple[tuple[str, type, str], ...] = (
         ("min_frames", int, "minimum frames"),
@@ -239,35 +216,17 @@ def _profile_document(values: dict[str, str]) -> dict[str, Any]:
     return document
 
 
-#: Page bound shared by every list endpoint. Declared in the signature rather than
-#: checked in each body so FastAPI rejects an out-of-range value itself and OpenAPI
-#: documents the range. The routes previously disagreed - some hand-rolled a 1..500
-#: check, others silently clamped to 200 - so the same parameter meant two different
-#: things depending on which endpoint a client called.
 Limit = Annotated[int, Query(ge=1, le=500)]
 
-#: ``?format=csv|jsonl`` on a list route streams the same read as a file
-#: download (ADR 0030). Named ``download`` in Python because ``format`` shadows
-#: the builtin; the wire name is what matters. Absent = the JSON view.
 Download = Annotated[str | None, Query(alias="format")]
 
-#: ``?threshold=`` on the redundancy route (ADR 0032). A distance above 1.0 cannot be
-#: produced by the weighted mean, and a threshold of 0 collapses nothing, so the range is
-#: stated at the boundary rather than clamped silently.
 Threshold = Annotated[float | None, Query(ge=0.0, le=1.0)]
 
 
 def _build_redundancy(
     catalog: PostgresCatalog, build_hash: str, threshold: float | None = None
 ) -> dict[str, Any]:
-    """One build's near-duplicate report, over its members in ordinal order (ADR 0032).
-
-    Shared by the JSON route and the build page so the two cannot disagree: the page is the
-    same report the API serves, not a second rendering of the same idea. Membership is read in
-    ordinal order and the rows are put back into it, because truncation takes the *first* N and
-    a report whose coverage depended on a database's return order would not be comparable
-    between two runs of the same catalog.
-    """
+    """One build's near-duplicate report, over its members in ordinal order (ADR 0032)."""
     ordered = [str(item["episode_id"]) for item in catalog.build_episodes(build_hash)]
     rows = catalog.episode_fingerprint_inputs(ordered)
     by_id = {str(row["id"]): row for row in rows}
@@ -280,12 +239,7 @@ def _build_redundancy(
 def _build_coverage(
     catalog: PostgresCatalog, build_hash: str, limit: int | None = None
 ) -> dict[str, Any]:
-    """One build's coverage report (ADR 0033).
-
-    Shared by the JSON route and the build page so the two cannot disagree, and computed on read
-    from the catalog rather than from anything stored: a cached rollup would have to be invalidated
-    on every ingest, vocabulary edit and build, and would be wrong in the window between.
-    """
+    """One build's coverage report (ADR 0033)."""
     value_limit = VALUE_LIMIT if limit is None else limit
     inputs = catalog.build_coverage_inputs(build_hash, limit=max(value_limit, GAP_LIMIT))
     return coverage_report(
@@ -346,11 +300,7 @@ def _metrics_model(
 
 
 def _route_template(app: FastAPI, request: Request) -> str:
-    """Route template for the matched endpoint, or `unmatched` for 404s.
-
-    Raw paths are high-cardinality and banned as metric labels; the template
-    (`/api/v1/jobs/{job_id}`) is the label.
-    """
+    """Route template for the matched endpoint, or `unmatched` for 404s."""
     endpoint = request.scope.get("endpoint")
     if endpoint is not None:
         for route in app.routes:
@@ -360,12 +310,7 @@ def _route_template(app: FastAPI, request: Request) -> str:
 
 
 def _download_redirect(request: Request, api_path: str) -> RedirectResponse:
-    """Resolve a UI download link to the same read's serializer (ADR 0030).
-
-    The link is the page's own URL with ``format`` added; the browser follows
-    this redirect silently, so the download is literally the view on screen and
-    the transport never appears in the operator's page.
-    """
+    """Resolve a UI download link to the same read's serializer (ADR 0030)."""
     query = str(request.url.query)
     return RedirectResponse(f"{api_path}?{query}" if query else api_path, status_code=302)
 
@@ -415,9 +360,6 @@ def create_app(
         title="Faultlined",
         version="0.1.0",
         lifespan=lifespan,
-        # The browser surface is the operator UI, not a developer contract viewer.
-        # /openapi.json stays: the committed contract check still needs it, and it
-        # is a machine endpoint rather than a page. See agents/decisions/0021.
         docs_url=None,
         redoc_url=None,
     )
@@ -442,12 +384,7 @@ def create_app(
 
     @app.get("/")
     def root() -> dict[str, object]:
-        """Point a first-time visitor somewhere useful.
-
-        `/` is JSON rather than a redirect because a bare 404 in the browser was
-        the original complaint; the UI is one field away and the API callers get
-        the machine-readable map they expect.
-        """
+        """Point a first-time visitor somewhere useful."""
         return {
             "service": "faultlined",
             "description": "Local-first robot episode data engine.",
@@ -474,22 +411,12 @@ def create_app(
         request: Request,
         idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
     ) -> dict[str, Any]:
-        """Queue an ingest job.
-
-        Four request shapes, one endpoint: `ingest` carries an episode in the
-        request body (the synthetic contract), `ingest_source` names a dataset on
-        disk and lets a reader interpret it, `validate` and `build` name a
-        selection of episodes already in the catalog. They are separate types
-        rather than one optional payload because "either a body or a path" is
-        exactly the kind of either/or that a typo turns into a confusing 422.
-        """
+        """Queue an ingest job."""
         correlation_id = request.state.correlation_id or str(uuid4())
         catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
         if isinstance(body, SubmitJobRequest):
             payload = {"episode": body.payload.episode.model_dump(mode="json")}
         else:
-            # Source, validate, and build payloads are already flat and
-            # self-describing; there is no episode to unwrap.
             payload = body.payload.model_dump(mode="json")
         row, created = catalog_for_request.submit_job(
             body.type,
@@ -531,13 +458,7 @@ def create_app(
 
     @app.post("/api/v1/jobs/{job_id}/cancel", response_model=JobResponse)
     def cancel_job(job_id: str, request: Request) -> dict[str, Any]:
-        """Request cancellation (F7).
-
-        A queued job is canceled immediately; a running job moves to
-        `cancel_requested` and the worker stops it at its next checkpoint. A job that
-        already reached a terminal state cannot be cancelled (409), and an unknown id
-        is a 404.
-        """
+        """Request cancellation (F7)."""
         catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
         return catalog_for_request.request_cancel(job_id)
 
@@ -550,12 +471,7 @@ def create_app(
         before: str | None = None,
         download: Download = None,
     ) -> Response | dict[str, Any]:
-        """Newest-first page of jobs for the Jobs UI.
-
-        Cursor-based: pass the last item's ``created_at`` back as ``before``. The UI
-        never asks for every row. ``?format=csv|jsonl`` streams the whole filtered
-        set as a file download instead; ``limit``/``before`` page the JSON view only.
-        """
+        """Newest-first page of jobs for the Jobs UI."""
         catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
         parsed_state = _parse_state(state)
         fmt = parse_download_format(download)
@@ -588,10 +504,7 @@ def create_app(
         before: str | None = None,
         download: Download = None,
     ) -> Response | dict[str, Any]:
-        """Newest-first page of content-addressed artifacts with their referencing episodes.
-
-        ``?format=csv|jsonl`` streams every artifact as a file download.
-        """
+        """Newest-first page of content-addressed artifacts with their referencing episodes."""
         catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
         fmt = parse_download_format(download)
         if fmt:
@@ -623,16 +536,7 @@ def create_app(
         bucket_seconds: float = 60.0,
         download: Download = None,
     ) -> Response | dict[str, Any]:
-        """Aggregated runtime telemetry from the JSONL metrics sink.
-
-        Summaries describe every (metric, labels) sample set; series are bucketed
-        means per metric name for sparklines. Worker heartbeat age is derived from
-        the newest heartbeat record's timestamp, over all records rather than the
-        window (a dead worker must not vanish from a narrow window).
-
-        ``?format=csv|jsonl`` downloads the sparkline series (metric, t, v,
-        count) for the same window.
-        """
+        """Aggregated runtime telemetry from the JSONL metrics sink."""
         catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
         model = _metrics_model(configured, catalog_for_request, window_seconds, bucket_seconds)
         fmt = parse_download_format(download)
@@ -656,13 +560,12 @@ def create_app(
 
     @app.get("/ui/app.js")
     def ui_app_js() -> Response:
-        """The client runtime. Served as a route rather than a static mount so the
-        UI stays one Python-owned directory with no extra file-serving surface."""
+        """The client runtime."""
         return Response(app_script(), media_type="text/javascript; charset=utf-8")
 
     @app.get("/ui/vendor/terminal-ui/{name}.css")
     def ui_vendor_css(name: str) -> Response:
-        """Serve the vendored terminal stylesheet. See web/vendor/terminal-ui/NOTICE.md."""
+        """Serve the vendored terminal stylesheet."""
         if not _SAFE_STYLESHEET.fullmatch(name):
             raise HTTPException(status_code=404, detail="unknown stylesheet")
         try:
@@ -677,7 +580,7 @@ def create_app(
         theme: str | None = None,
         x_fragment: str | None = Header(default=None),
     ) -> HTMLResponse:
-        """Status/Overview. The X-Fragment header returns only the polling body."""
+        """Status/Overview."""
         catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
         model = _status_model(catalog_for_request)
         if x_fragment:
@@ -706,8 +609,6 @@ def create_app(
         catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
         job = catalog_for_request.get_job(job_id)
         if job is None:
-            # Raised, not returned: the shared handler renders the full error page
-            # in the requested theme, which a hand-rolled one-line body cannot.
             raise HTTPException(status_code=404, detail=f"No job {job_id}.")
         produced = catalog_for_request.episodes_produced_by(job_id)
         report = catalog_for_request.job_report(job_id)
@@ -715,28 +616,7 @@ def create_app(
 
     @app.post("/ui/jobs")
     async def ui_submit_job(request: Request) -> Response:
-        """Queue a job from the browser form.
-
-        One front door, five kinds: `episode` and `path` are ingest, and `validate`,
-        `build` and `export` complete the loop those three form pages host (the audit's
-        release blocker 1 - EXP-0017 measured the last three steps as curl-only).
-
-        The form is parsed by hand rather than with ``Form(...)`` because that
-        would pull in ``python-multipart`` for a single urlencoded body - a new
-        dependency, on the dependency-free path ADR 0014 is built around, to save
-        three lines of ``urllib.parse``.
-
-        Every kind is built and then validated through the *same* Pydantic models
-        the JSON endpoint uses. A form is a second front door to the same door, and
-        a second front door with its own weaker validation is how a UI ends up able
-        to create jobs the API would refuse.
-
-        On a bad submission this re-renders the page that owns the form with the
-        error inline and the typed values preserved, rather than redirecting: losing
-        what someone typed because of one bad field is the fastest way to make a form
-        feel hostile. The redirect on success is 303, so a refresh does not queue the
-        same job twice.
-        """
+        """Queue a job from the browser form."""
         from urllib.parse import parse_qs
 
         raw = parse_qs((await request.body()).decode("utf-8", "replace"))
@@ -786,8 +666,6 @@ def create_app(
                             values=values,
                         )
                     )
-            # Ingest, and an export naming a build this catalog does not have: the
-            # status page is the page with nowhere else to put a general refusal.
             status = _status_model(catalog_for_request)
             status["ingest_error"] = message
             status["ingest_values"] = values
@@ -835,8 +713,6 @@ def create_app(
                     return fail("Frames must be a whole number.")
                 if not 1 <= frames <= 10_000:
                     return fail("Frames must be between 1 and 10000.")
-                # A deterministic ramp: the form is a way to get data *in*, not a
-                # sensor. Real data arrives by path or by the JSON endpoint.
                 step = 0.1
                 stamps = [round(i * step, 6) for i in range(frames)]
                 body = SubmitJobRequest(
@@ -854,8 +730,6 @@ def create_app(
         except ValidationError as exc:
             return fail(_first_message(exc))
 
-        # Ingest-from-a-body carries its episode under a key; every other kind's payload
-        # is the model's own flat document, which is exactly what the JSON API accepts.
         payload = (
             {"episode": body.payload.episode.model_dump(mode="json")}
             if isinstance(body, SubmitJobRequest)
@@ -872,16 +746,8 @@ def create_app(
 
     @app.post("/ui/jobs/{job_id}/cancel")
     def ui_cancel_job(job_id: str, request: Request, theme: str | None = None) -> RedirectResponse:
-        """Cancel from the UI and bounce back to the job.
-
-        A plain form post, so the control works without JavaScript. It calls the same
-        repository method as the API route rather than issuing an HTTP request to
-        ourselves; the redirect is 303 so a refresh does not re-submit the cancel.
-        """
+        """Cancel from the UI and bounce back to the job."""
         catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
-        # The detail page renders the current state, including why a cancel is no
-        # longer possible; a 409 here would only replace that with browser chrome for
-        # a race the user did not cause.
         with suppress(KeyError, InvalidTransition):
             catalog_for_request.request_cancel(job_id)
         suffix = f"?theme={theme}" if theme in THEMES else ""
@@ -899,26 +765,13 @@ def create_app(
         row = catalog_for_request.get_build(build_hash)
         if row is None:
             raise HTTPException(status_code=404, detail=f"No build {build_hash}.")
-        # The manifest and the membership are returned together: a build whose
-        # manifest cannot be read back is not reproducible, which is the one
-        # property it exists to have.
         return {**row, "episodes": catalog_for_request.build_episodes(build_hash)}
 
     @app.get("/api/v1/builds/{build_hash}/redundancy", response_model=BuildRedundancyResponse)
     def build_redundancy(
         build_hash: str, request: Request, threshold: Threshold = None
     ) -> dict[str, Any]:
-        """Which episodes in this build are the same behaviour recorded twice (ADR 0032).
-
-        Deterministic and read-only, computed from signals ingest already wrote - no artifact
-        is opened and no model is involved. Membership is read in ordinal order and the rows
-        are put back into that order before the report runs, because truncation takes the
-        *first* N and a report whose coverage depended on a database's return order would not
-        be comparable between two runs.
-
-        An episode that was never scored has no fingerprint and is absent, so `episode_count`
-        is what was scored, not what the build holds.
-        """
+        """Which episodes in this build are the same behaviour recorded twice (ADR 0032)."""
         catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
         if catalog_for_request.get_build(build_hash) is None:
             raise HTTPException(status_code=404, detail=f"No build {build_hash}.")
@@ -929,16 +782,7 @@ def create_app(
 
     @app.get("/api/v1/builds/{build_hash}/coverage", response_model=BuildCoverageResponse)
     def build_coverage(build_hash: str, request: Request) -> dict[str, Any]:
-        """What this build contains, and what the catalog holds that it does not (ADR 0033).
-
-        Deterministic and read-only, computed from attributes ingest already wrote - task, robot,
-        format and verdict. The gap list is the actionable half: it names the values the catalog
-        holds and this build left out, and for tasks it names the vocabulary entries with no
-        episode here whether or not an episode exists for them anywhere.
-
-        The payload is bounded by the axes and their limits, never by the episode count, with
-        `missing` and `truncated` carrying what the caps left out.
-        """
+        """What this build contains, and what the catalog holds that it does not (ADR 0033)."""
         catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
         if catalog_for_request.get_build(build_hash) is None:
             raise HTTPException(status_code=404, detail=f"No build {build_hash}.")
@@ -971,7 +815,7 @@ def create_app(
         theme: str | None = None,
         x_fragment: str | None = Header(default=None),
     ) -> HTMLResponse:
-        """Content-addressed builds. The address is the content."""
+        """Content-addressed builds."""
         catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
         model = {"items": catalog_for_request.list_builds(limit=50)}
         if x_fragment:
@@ -989,9 +833,6 @@ def create_app(
         row = catalog_for_request.get_build(build_hash)
         if row is None:
             return HTMLResponse(lineage_page({}, theme_or_default(theme)))
-        # The same two reads the API endpoint makes, in the same order: a build
-        # whose manifest cannot be read back is not reproducible, and the page
-        # has to say so rather than draw an empty graph that looks complete.
         return HTMLResponse(
             lineage_page(
                 {
@@ -1011,7 +852,7 @@ def create_app(
         x_fragment: str | None = Header(default=None),
         table: str | None = None,
     ) -> HTMLResponse:
-        """The catalog, read live. A drawing of it would eventually be a lie."""
+        """The catalog, read live."""
         catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
         model = describe(catalog_for_request.settings)
         if x_fragment:
@@ -1031,7 +872,7 @@ def create_app(
 
     @app.get("/ui/vendor/departure-mono/DepartureMono-Regular.woff2")
     def ui_font() -> Response:
-        """Serve the vendored display font. See web/vendor/departure-mono/NOTICE.md."""
+        """Serve the vendored display font."""
         return Response(font_bytes(), media_type="font/woff2")
 
     @app.get("/ui/failures", response_class=HTMLResponse)
@@ -1076,18 +917,7 @@ def create_app(
 
     @app.post("/ui/slices", include_in_schema=False)
     async def ui_create_slice(request: Request) -> Response:
-        """Save a slice from the browser, through the same model the JSON API uses.
-
-        Hand-parsed for the same reason `/ui/jobs` is (ADR 0014: no `python-multipart`
-        for one urlencoded body). Only the two keys the predicate layer honours are read
-        out of the submitted filter - `state` and `flag` - because a filter field the
-        catalog ignores would look like it did something. A duplicate name is a slice
-        conflict, which the JSON API answers 409 and this form answers in place, with the
-        name still in the field.
-
-        POST rather than the JSON route with a redirect: the redirect is 303, so
-        refreshing the page does not create the slice twice.
-        """
+        """Save a slice from the browser, through the same model the JSON API uses."""
         from urllib.parse import parse_qs
 
         raw = parse_qs((await request.body()).decode("utf-8", "replace"))
@@ -1190,11 +1020,7 @@ def create_app(
         theme: str | None = None,
         x_fragment: str | None = Header(default=None),
     ) -> HTMLResponse:
-        """Committed benchmark baselines and the runs recorded on this machine.
-
-        Reads `benchmarks/` off disk, so it needs no database and no catalog
-        table. A benchmark claim is a repository artifact, not a row.
-        """
+        """Committed benchmark baselines and the runs recorded on this machine."""
         model = benchmarks_model()
         if x_fragment:
             return HTMLResponse(benchmarks_fragment(model))
@@ -1232,11 +1058,7 @@ def create_app(
         limit: Limit = 50,
         download: Download = None,
     ) -> Response | dict[str, Any]:
-        """Scriptable episode catalog with the same curation views as the UI.
-
-        ``?format=csv|jsonl`` streams every matching episode as a file download,
-        newest first.
-        """
+        """Scriptable episode catalog with the same curation views as the UI."""
         if state is not None and state not in EPISODE_STATES:
             raise HTTPException(status_code=422, detail=f"unknown episode state: {state}")
         if flag is not None and flag not in EPISODE_FLAGS:
@@ -1246,10 +1068,6 @@ def create_app(
         if fmt:
 
             def fetch(*, limit: int, before: datetime | None) -> list[dict[str, Any]]:
-                # Always through the cursor path (a far-future first cursor): it
-                # orders newest-first, which is what pages consistently. The
-                # flag views' signal ranking is a display affordance and would
-                # duplicate rows across a page boundary.
                 return catalog_for_request.list_episodes(
                     limit=limit,
                     state=state or None,
@@ -1293,10 +1111,7 @@ def create_app(
         reason_code: str | None = None,
         download: Download = None,
     ) -> Response | dict[str, Any]:
-        """Quarantined episodes with the reason codes that put them there.
-
-        ``?format=csv|jsonl`` streams the whole quarantined set as a download.
-        """
+        """Quarantined episodes with the reason codes that put them there."""
         if reason_code is not None and reason_code not in REASON_CODES:
             raise HTTPException(status_code=422, detail=f"unknown reason_code: {reason_code}")
         catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
@@ -1324,11 +1139,7 @@ def create_app(
     def create_slice(
         body: SliceCreateRequest, request: Request, response: Response
     ) -> dict[str, Any]:
-        """Save a named curation filter.
-
-        Membership is recomputed on the next manifest read, so creating a slice is
-        cheap and the slice never goes stale as episodes change.
-        """
+        """Save a named curation filter."""
         catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
         row = catalog_for_request.register_slice(
             name=body.name, notes=body.notes, filter_config=body.filter_config
@@ -1338,8 +1149,6 @@ def create_app(
         if detail is None:
             raise KeyError(str(row["id"]))
         return detail
-
-    # ------------------------------------------------------------- clusters (ADR 0026)
 
     def _run_payload(run: dict[str, Any] | None) -> dict[str, Any] | None:
         """A stored run as the API returns it, with a JSON-safe timestamp."""
@@ -1436,9 +1245,6 @@ def create_app(
                 ClusterReviewDecision.model_validate(item)
                 for item in model.get("review_decisions", [])
             ],
-            # The live numbers come from the set just rebuilt for the figures; the
-            # orphaned count comes from the stored run, because it is a fact about the
-            # last rebuild and cannot be recomputed from the proposals alone.
             "health": {
                 **model["proposals"].health(),
                 "orphaned": int((model["health"] or {}).get("orphaned", 0)),
@@ -1532,9 +1338,6 @@ def create_app(
             detail=f"Cluster proposal {key} is archived; use the vocabulary.",
         )
 
-    # The frozen cluster API remains available as a read-only archive; the vocabulary
-    # interface below is now the only active curation workflow (ADR 0029).
-
     @app.get("/ui/clusters", include_in_schema=False)
     def ui_clusters_redirect() -> RedirectResponse:
         return RedirectResponse("/ui/vocabulary", status_code=307)
@@ -1553,8 +1356,6 @@ def create_app(
     @app.post("/ui/clusters/{key}/release", include_in_schema=False)
     def ui_cluster_detail_action_redirect(key: str) -> RedirectResponse:
         return RedirectResponse(f"/ui/vocabulary?from_cluster={quote(key)}", status_code=303)
-
-    # ---------------------------------------------------------- vocabulary (ADR 0029)
 
     @app.get("/api/v1/vocabulary", response_model=VocabularyListResponse)
     def list_vocabulary() -> dict[str, Any]:
@@ -1683,7 +1484,6 @@ def create_app(
         except ValueError as error:
             raise HTTPException(status_code=422, detail=str(error)) from error
 
-    # The UI redirects legacy cluster bookmarks; the API remains a frozen archive.
     @app.get("/ui/vocabulary", response_class=HTMLResponse)
     def ui_vocabulary(
         theme: str | None = None,
@@ -1929,12 +1729,7 @@ def create_app(
         flag: str | None = None,
         limit: Limit = 100,
     ) -> dict[str, Any]:
-        """Curated manifest for curation and dataset builds.
-
-        The same curation views as the catalog listing plus content identity
-        (source/artifact hashes). Registered before `/api/v1/episodes/{episode_id}`
-        so `export` is never read as an episode id.
-        """
+        """Curated manifest for curation and dataset builds."""
         if state is not None and state not in EPISODE_STATES:
             raise HTTPException(status_code=422, detail=f"unknown episode state: {state}")
         if flag is not None and flag not in EPISODE_FLAGS:
@@ -1984,8 +1779,6 @@ def create_app(
         catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
         return catalog_for_request.quality_summary()
 
-    # ---- monitoring notifier (ADR 0020) ----
-
     def _monitor_for(request: Request) -> MonitorService:
         return cast(MonitorService, request.app.state.monitor)
 
@@ -1999,10 +1792,7 @@ def create_app(
         before: str | None = None,
         download: Download = None,
     ) -> Response | dict[str, Any]:
-        """The incident queue, newest first. Read-only.
-
-        ``?format=csv|jsonl`` streams the filtered queue as a download.
-        """
+        """The incident queue, newest first."""
         if severity is not None and severity not in {item.value for item in Severity}:
             raise HTTPException(status_code=422, detail=f"unknown severity: {severity}")
         if label is not None:
@@ -2064,7 +1854,7 @@ def create_app(
 
     @app.post("/api/v1/incidents/{incident_id}/resolve", response_model=IncidentPayload)
     def resolve_incident(incident_id: str, request: Request) -> dict[str, Any]:
-        """Resolve. A same-fault recurrence then opens a new incident, subject to cooldown."""
+        """Resolve."""
         catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
         row = catalog_for_request.set_incident_status(incident_id, "resolved")
         if row is None:
@@ -2073,44 +1863,28 @@ def create_app(
 
     @app.get("/api/v1/monitoring/health", response_model=MonitoringHealthResponse)
     def monitoring_health(request: Request) -> dict[str, Any]:
-        """The monitor's own state. A monitor that silently stops is the worst outcome."""
+        """The monitor's own state."""
         return _monitor_for(request).health()
 
     @app.post("/api/v1/monitoring/tick", response_model=TickResponse)
     def run_monitor_tick(request: Request) -> dict[str, Any]:
-        """Evaluate one window on demand.
-
-        The loop is a scheduler's job, not a webhook's; this exists so the notifier
-        can be driven deterministically from a test, a benchmark, or an operator who
-        wants to see what it would say right now.
-        """
+        """Evaluate one window on demand."""
         return (
             _monitor_for(request).tick(cast(PostgresCatalog, request.app.state.catalog)).to_dict()
         )
 
     @app.get("/api/v1/monitoring/notify-preview", response_class=PlainTextResponse)
     def notify_preview(request: Request) -> str:
-        """What a notifier would send right now. Rendering only; nothing is sent.
-
-        Email delivery is deliberately not implemented (ADR 0020 §10.3): it needs
-        explicit owner authorization, and a dry run that is a real code path is the
-        only honest way to leave it switched off.
-        """
+        """What a notifier would send right now."""
         return _monitor_for(request).notify_preview(
             cast(PostgresCatalog, request.app.state.catalog)
         )
-
-    # ---- completion contracts ----
 
     @app.put("/api/v1/contracts/{job_id}", response_model=ContractPayload)
     def declare_contract(
         job_id: str, body: ContractRequest, request: Request, response: Response
     ) -> dict[str, Any]:
-        """Declare what a run is expected to produce; idempotent per job.
-
-        Re-declaring resets the outcome to pending, because a revised expectation
-        has not been evaluated yet and claiming otherwise would hide a breach.
-        """
+        """Declare what a run is expected to produce; idempotent per job."""
         catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
         if catalog_for_request.get_job(job_id) is None:
             raise KeyError(job_id)
@@ -2136,10 +1910,7 @@ def create_app(
         before: str | None = None,
         download: Download = None,
     ) -> Response | dict[str, Any]:
-        """Completion contracts, newest first.
-
-        ``?format=csv|jsonl`` streams the filtered set as a download.
-        """
+        """Completion contracts, newest first."""
         catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
         fmt = parse_download_format(download)
         if fmt:
@@ -2170,8 +1941,6 @@ def create_app(
             raise KeyError(job_id)
         return row
 
-    # ---- incidents UI ----
-
     def _incidents_model(request: Request) -> dict[str, Any]:
         """One read of the queue, reused by the page, its fragment, and the digest."""
         catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
@@ -2192,16 +1961,7 @@ def create_app(
     ) -> Response:
         if parse_download_format(download):
             return _download_redirect(request, "/api/v1/incidents")
-        """Honours `X-Fragment`, like every other polled page.
-
-        This route used to ignore the header and always return a whole document,
-        while the page's own `data-poll` pointed at this URL. The poller then
-        injected the entire page - nav bar and all - inside the panel it was
-        meant to replace, and the operator got a page inside a page. The
-        separate `/ui/incidents/fragment` route that made the fragment reachable
-        existed and was tested, but nothing ever polled it, which is why the bug
-        survived a test that asserted the fragment was bare.
-        """
+        """Honours `X-Fragment`, like every other polled page."""
         model = _incidents_model(request)
         if x_fragment:
             return HTMLResponse(incidents_fragment(model))

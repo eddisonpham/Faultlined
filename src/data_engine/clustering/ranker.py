@@ -1,24 +1,4 @@
-"""Synonym-candidate ranking for the unmapped queue (ADR 0029 §5).
-
-Clustering is demoted to this: given the novel strings and the vocabulary, say
-which strings *probably* belong to which entry, and which look like one new
-entry. A suggestion is a queue item, never an action - nothing here writes, and
-nothing here decides.
-
-The ranking rule is deliberately the measured one and nothing more: extracted
-core equality (`extract`, EXP-2.5-08's 48/48 on the study corpus). Three cases,
-each with an honest silence:
-
-- one entry shares the core -> an **attach** candidate for it,
-- no entry shares it -> a **new entry** candidate labelled with the core,
-- several entries share it -> **no candidate**. Choosing between equally good
-  targets is a human's call, and a ranker that guesses here is exactly the
-  confident-and-wrong failure the verdict exists to avoid.
-
-Anything looser (containment, similarity, centroids) waits for the EXP-2.5-style
-candidate-precision measurement the verdict's falsifiers demand first. The
-function is pure so that measurement can reuse it against labelled pairs.
-"""
+"""Synonym-candidate ranking for the unmapped queue (ADR 0029 §5)."""
 
 from __future__ import annotations
 
@@ -34,11 +14,9 @@ class Candidate:
     """One ranked suggestion for a group of unmapped strings."""
 
     kind: Literal["attach", "new_entry"]
-    #: The core the group shares - also the suggested label for a new entry.
     core: str
     task_strings: tuple[str, ...]
     episodes: int
-    #: `attach` target. None for `new_entry`.
     entry_id: str | None = None
     entry_label: str | None = None
 
@@ -57,13 +35,7 @@ def candidates(
     unmapped: Sequence[Mapping[str, object]],
     entries: Sequence[Mapping[str, object]],
 ) -> list[Candidate]:
-    """Rank the unmapped strings into suggestions, most fragmenting first.
-
-    ``unmapped`` rows carry ``task_string`` and ``episodes`` (the queue's shape);
-    ``entries`` carry ``id``, ``preferred_label`` and ``core``. Groups are
-    processed deterministically: equal cores group together, ordering is by
-    episode count then core, and the same inputs always produce the same queue.
-    """
+    """Rank the unmapped strings into suggestions, most fragmenting first."""
     groups: dict[str, list[Mapping[str, object]]] = {}
     for row in unmapped:
         task = str(row.get("task_string") or "")
@@ -98,6 +70,5 @@ def candidates(
             ranked.append(
                 Candidate(kind="new_entry", core=core, task_strings=tasks, episodes=episodes)
             )
-        # Several entries share the core: silent on purpose (see module docstring).
     ranked.sort(key=lambda c: (-c.episodes, c.core))
     return ranked

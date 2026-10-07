@@ -1,10 +1,4 @@
-"""Summarize JSONL metric records for dashboards and the metrics API.
-
-The JSONL sink remains the source of truth (ADR 0017); this module is pure
-functions over already-emitted records so it is testable without a process.
-Percentiles use the nearest-rank method: the value at ``ceil(q * n) - 1`` of the
-sorted samples.
-"""
+"""Summarize JSONL metric records for dashboards and the metrics API."""
 
 from __future__ import annotations
 
@@ -17,15 +11,9 @@ from pathlib import Path
 from typing import Any
 
 WORKER_HEARTBEAT_METRIC = "workers_heartbeat_age_seconds"
-#: Emitted once per monitor tick (ADR 0020). A tick runs in whichever process
-#: schedules it, so these two records are how a *different* process learns when the
-#: monitor last ran and whether it was blind (ADR 0031).
 MONITOR_TICK_METRIC = "monitor_tick_seconds"
 MONITOR_BLIND_METRIC = "monitor_blind"
 
-#: Backward chunk size for a newest-N read. One MiB keeps a tick's read a few
-#: pages regardless of how long the sink has grown; 64 MiB is the ceiling past
-#: which we stop hunting for the window rather than read a pathological file.
 TAIL_CHUNK_BYTES = 1 << 20
 TAIL_MAX_BYTES = 64 << 20
 
@@ -45,19 +33,7 @@ def _parse_line(line: bytes) -> dict[str, Any] | None:
 
 
 def read_metric_records(path: Path, *, max_records: int | None = None) -> list[dict[str, Any]]:
-    """Read metric records from a JSONL sink, newest N when a limit is given.
-
-    A missing file is empty telemetry, not an error. Malformed lines are skipped
-    rather than failing the reader: a truncated tail line after a crash must not
-    hide every healthy record before it.
-
-    With ``max_records`` the file is read **from the end** in chunks and stops as
-    soon as N valid records are in hand, so a read costs the requested window,
-    not the history. That is load-bearing: the monitor re-reads the sink every
-    tick and the API reads it on every request, and EXP-0007 measured the
-    full-history parse at half a minute's worth of a 500k-record sink. Callers
-    that genuinely want the whole file still pass ``max_records=None``.
-    """
+    """Read metric records from a JSONL sink, newest N when a limit is given."""
     if not path.exists():
         return []
     if max_records is not None and max_records <= 0:
@@ -74,15 +50,7 @@ def read_metric_records(path: Path, *, max_records: int | None = None) -> list[d
 
 
 def _read_tail(path: Path, limit: int) -> list[dict[str, Any]]:
-    """The newest ``limit`` valid records, read backward, chronological on return.
-
-    Walks the file from the end in ``TAIL_CHUNK_BYTES`` blocks so the cost is the
-    window's, not the file's. A chunk boundary can split a line: the fragment is
-    carried to the next (earlier) block, and the file's first line is completed
-    after the loop. Corrupt lines inside the window are skipped exactly as the
-    forward read skips them. The walk stops early at ``TAIL_MAX_BYTES`` - a sink
-    whose newest 64 MiB holds no valid record is not worth paging through.
-    """
+    """The newest ``limit`` valid records, read backward, chronological on return."""
     newest_first: deque[dict[str, Any]] = deque(maxlen=limit)
     size = path.stat().st_size
     position = size
@@ -104,8 +72,6 @@ def _read_tail(path: Path, limit: int) -> list[dict[str, Any]]:
                     if len(newest_first) >= limit:
                         break
         if position == 0 and len(newest_first) < limit and carried.strip():
-            # The walk reached the file start; ``carried`` is now the completed
-            # first line. On any other exit it is a mid-file fragment.
             record = _parse_line(carried)
             if record is not None:
                 newest_first.append(record)
@@ -127,7 +93,7 @@ def window_records(
 
 
 def format_labels(labels: dict[str, str] | None) -> str:
-    """Stable low-cardinality label key, e.g. ``job_type=ingest,state=succeeded``."""
+    """Stable low-cardinality label key, e.g."""
     items = sorted((labels or {}).items())
     return ",".join(f"{key}={value}" for key, value in items)
 
@@ -179,11 +145,7 @@ def summarize(records: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
 def series(
     records: Iterable[dict[str, Any]], *, bucket_seconds: float = 60.0
 ) -> dict[str, list[dict[str, Any]]]:
-    """Bucketed mean per metric name (across label sets) for sparkline rendering.
-
-    Keys are metric names only; a sparkline is a trend, and splitting it by label
-    is a job for the summaries table.
-    """
+    """Bucketed mean per metric name (across label sets) for sparkline rendering."""
     if bucket_seconds <= 0:
         raise ValueError("bucket_seconds must be positive")
     buckets: dict[str, dict[int, list[float]]] = defaultdict(lambda: defaultdict(list))
@@ -210,14 +172,7 @@ def series(
 
 
 def newest_record(records: Iterable[dict[str, Any]], *, name: str) -> dict[str, Any] | None:
-    """The newest record for one metric name, or None if it was never emitted.
-
-    The sink is the shared record between processes (ADR 0017), which is what makes
-    this the honest way for one process to ask what another one is doing. A monitor
-    tick runs in the worker loop (ADR 0031) while the health endpoint is served by
-    the API, so reading its own memory would report `never` about a monitor that is
-    running - the exact false negative the endpoint exists to prevent.
-    """
+    """The newest record for one metric name, or None if it was never emitted."""
     newest: dict[str, Any] | None = None
     newest_at: datetime | None = None
     for record in records:
@@ -238,12 +193,7 @@ def newest_metric_at(records: Iterable[dict[str, Any]], *, name: str) -> datetim
 def heartbeat_age_seconds(
     records: Iterable[dict[str, Any]], *, now: datetime | None = None
 ) -> float | None:
-    """Seconds since the newest worker heartbeat record, or None if never seen.
-
-    The heartbeat record carries value 0 ("age at emission"); its timestamp is the
-    heartbeat. Age is therefore derived at read time instead of being emitted as a
-    stale gauge.
-    """
+    """Seconds since the newest worker heartbeat record, or None if never seen."""
     newest = newest_metric_at(records, name=WORKER_HEARTBEAT_METRIC)
     if newest is None:
         return None

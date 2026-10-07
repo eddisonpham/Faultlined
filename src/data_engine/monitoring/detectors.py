@@ -1,30 +1,4 @@
-"""Deterministic detectors: explicit rules over the feature vector (ADR 0020).
-
-Every function here is a rule a person can read, check by hand, and disagree with.
-That is the whole design: a signal must cite the numbers that produced it, so a
-disagreement is a conversation about a threshold rather than an argument with a
-model's coefficients.
-
-Two families, and the split matters:
-
-* **Absolute rules** compare against a fixed threshold. They work on a cold
-  baseline, which is why the highest-value afk failures (suspended worker, stalled
-  run, full disk, unreachable database) are all of this kind — those must be
-  catchable on the first tick after they start.
-* **Baseline-informed rules** compare against a per-scope EWMA/median-MAD limit
-  (see :mod:`data_engine.monitoring.baselines`). They answer "is this source
-  behaving unusually for *itself*", and they abstain until warm. Absence of
-  evidence is not evidence of normality, so a cold scope contributes nothing
-  rather than a guess.
-
-The residual :func:`metric_shift` deserves a note. It is the closest thing here to
-the multivariate anomaly detector the earlier draft proposed, and it is pure
-arithmetic: **N distinct features beyond their own limits in the same window** is
-itself the signal. A single feature drifting is usually noise; several drifting
-together is usually a real change, and "run time climbing while throughput drops"
-is exactly the combination a per-feature threshold cannot see. Requiring agreement
-is simultaneously a precision lever and an alert-compression mechanism.
-"""
+"""Deterministic detectors: explicit rules over the feature vector (ADR 0020)."""
 
 from __future__ import annotations
 
@@ -44,23 +18,19 @@ GIB = 1024**3
 class DetectorConfig:
     """Every threshold in the notifier, in one auditable place."""
 
-    # afk-critical, absolute
     heartbeat_stale_seconds: float = 180.0
     stall_seconds: float = 900.0
     disk_free_floor_bytes: float = 2 * GIB
     clock_gap_seconds: float = 5.0
-    # baseline-informed, with an absolute backstop so cold scopes still catch gross faults
     quarantine_absolute_max: float = 0.35
     quarantine_z: float = 4.0
     quality_z: float = 4.0
     frame_collapse_ratio: float = 0.5
     repeated_failure_count: float = 3.0
-    # residual
     cpu_high_percent: float = 90.0
     memory_high_ratio: float = 0.92
     metric_shift_z: float = 4.0
     metric_shift_min_features: int = 2
-    # features the residual watches, and the direction that counts as a shift
     watched: tuple[tuple[str, str], ...] = (
         ("queue_oldest_age_seconds", "high"),
         ("queue_depth_queued", "high"),
@@ -75,8 +45,6 @@ class DetectorConfig:
 
 DEFAULT_CONFIG = DetectorConfig()
 
-#: Features a dedicated rule already owns. The residual must not re-report them,
-#: or one fault would open two incidents for the same thing.
 SPECIALISED: frozenset[str] = frozenset(
     {
         "quarantine_rate",
@@ -94,7 +62,7 @@ SPECIALISED: frozenset[str] = frozenset(
 
 @dataclass(frozen=True, slots=True)
 class DetectorContext:
-    """Everything a detector may look at. Frozen so rules cannot mutate state."""
+    """Everything a detector may look at."""
 
     now: datetime
     features: FeatureVector
@@ -104,12 +72,7 @@ class DetectorContext:
 
     @property
     def work_outstanding(self) -> bool:
-        """True when something is queued or running, or the last window produced work.
-
-        Used to keep an idle system from reporting a lost worker: no jobs and no
-        episodes means the operator is simply not using the platform, and paging
-        them about it is exactly the noise this system exists to avoid.
-        """
+        """True when something is queued or running, or the last window produced work."""
         features = self.features
         return bool(
             features.value("queue_depth_queued")
@@ -130,9 +93,6 @@ def detect(context: DetectorContext) -> list[Signal]:
     return signals
 
 
-# ---- absolute rules ---------------------------------------------------------
-
-
 def database_unreachable(context: DetectorContext) -> list[Signal]:
     if context.features.catalog_reachable:
         return []
@@ -149,12 +109,7 @@ def database_unreachable(context: DetectorContext) -> list[Signal]:
 
 
 def worker_lost(context: DetectorContext) -> list[Signal]:
-    """No heartbeat while work is outstanding.
-
-    On the stated hardware this is the most likely afk failure there is: a
-    suspended or hibernated laptop, a closed terminal, or an OOM kill. None of
-    them raise anywhere, and all of them waste the night.
-    """
+    """No heartbeat while work is outstanding."""
     if not context.work_outstanding or not context.features.catalog_reachable:
         return []
     features = context.features
@@ -173,7 +128,6 @@ def worker_lost(context: DetectorContext) -> list[Signal]:
             f"(laptop suspend, dead worker, or a closed terminal)"
         )
     else:
-        # Never seen a heartbeat at all is a stronger statement than a stale one.
         evidence = {
             "heartbeat_age_seconds": None,
             "threshold_seconds": context.config.heartbeat_stale_seconds,
@@ -193,11 +147,7 @@ def worker_lost(context: DetectorContext) -> list[Signal]:
 
 
 def run_stalled(context: DetectorContext) -> list[Signal]:
-    """A run that is still going, far past any plausible duration, with no progress.
-
-    Scope is the job id: two different stuck runs are two different incidents and
-    must not be deduplicated into one.
-    """
+    """A run that is still going, far past any plausible duration, with no progress."""
     config = context.config
     progress = context.features.value("episodes_ingested")
     signals: list[Signal] = []
@@ -207,7 +157,6 @@ def run_stalled(context: DetectorContext) -> list[Signal]:
             continue
         deadline_passed = bool(job.get("deadline_passed"))
         if not deadline_passed and progress > 0:
-            # Episodes are still landing, so the run is slow rather than stuck.
             continue
         signals.append(
             Signal(
@@ -233,12 +182,7 @@ def run_stalled(context: DetectorContext) -> list[Signal]:
 
 
 def disk_pressure(context: DetectorContext) -> list[Signal]:
-    """Free space below the floor.
-
-    Fails at publish — after all the compute, at the point the artifact is written
-    — so the work is lost rather than delayed. That asymmetry is why this is
-    notify-class despite being a resource gauge.
-    """
+    """Free space below the floor."""
     features = context.features
     if not features.has("disk_free_bytes"):
         return []
@@ -265,12 +209,7 @@ def disk_pressure(context: DetectorContext) -> list[Signal]:
 
 
 def clock_drift(context: DetectorContext) -> list[Signal]:
-    """A gap inside one episode's timestamps.
-
-    Breaks camera-to-joint alignment, so the episode ingests perfectly and is
-    worthless for training. There is no other signal for it at all, which is why it
-    is a rule on the data rather than on the pipeline.
-    """
+    """A gap inside one episode's timestamps."""
     gap = context.features.value("max_episode_timestamp_gap_seconds", -1.0)
     if gap < context.config.clock_gap_seconds:
         return []
@@ -293,16 +232,8 @@ def clock_drift(context: DetectorContext) -> list[Signal]:
     ]
 
 
-# ---- baseline-informed rules ------------------------------------------------
-
-
 def quarantine_rate_high(context: DetectorContext) -> list[Signal]:
-    """More episodes quarantined than this source normally loses.
-
-    Netflix's "percentage of data discarded", applied to the curation layer. The
-    absolute bound catches a gross change on a cold scope; the baseline catches a
-    drift that is small in absolute terms and large relative to this source.
-    """
+    """More episodes quarantined than this source normally loses."""
     features, config = context.features, context.config
     if not features.has("quarantine_rate"):
         return []
@@ -324,8 +255,6 @@ def quarantine_rate_high(context: DetectorContext) -> list[Signal]:
         evidence["baseline_median"] = baseline.median
         evidence["robust_z"] = baseline.robust_z(rate)
     else:
-        # A cold scope has no "usual" to compare against, and quoting a zero median
-        # as though it were one would put a fabricated number in the summary.
         evidence.setdefault("baseline_median", None)
     return [
         Signal(
@@ -339,12 +268,7 @@ def quarantine_rate_high(context: DetectorContext) -> list[Signal]:
 
 
 def quality_shift(context: DetectorContext) -> list[Signal]:
-    """The motion-quality distribution moved relative to its own history.
-
-    A dataset that has quietly gone bad is the failure that costs the most and is
-    noticed the least: it is only visible when training three days later, and
-    nothing at ingest time says anything is wrong.
-    """
+    """The motion-quality distribution moved relative to its own history."""
     config = context.config
     for feature, human in (
         ("verdict_jerky_rate", "jerky episodes"),
@@ -382,11 +306,7 @@ def quality_shift(context: DetectorContext) -> list[Signal]:
 
 
 def frame_count_collapse(context: DetectorContext) -> list[Signal]:
-    """Episodes arriving far shorter than this source normally produces.
-
-    A camera that dropped from 30 Hz to 1 Hz still ingests cleanly; the episodes
-    are just twenty frames instead of two hundred.
-    """
+    """Episodes arriving far shorter than this source normally produces."""
     config = context.config
     baseline = context.baselines.get("frame_count_median")
     if not context.features.has("frame_count_median") or baseline is None or not baseline.warm():
@@ -416,12 +336,7 @@ def frame_count_collapse(context: DetectorContext) -> list[Signal]:
 
 
 def repeated_read_failure(context: DetectorContext) -> list[Signal]:
-    """The same reason code failing over and over in one window.
-
-    On a single machine this is one flaky source, not a fleet problem, so the
-    scope *is* the reason code and the summary names it. Scope is deliberately
-    not the job: one flaky dataset retried five times is one incident.
-    """
+    """The same reason code failing over and over in one window."""
     threshold = context.config.repeated_failure_count
     signals: list[Signal] = []
     for reason, count in context.features.scoped_pairs("failure_count"):
@@ -440,7 +355,7 @@ def repeated_read_failure(context: DetectorContext) -> list[Signal]:
 
 
 def resource_degraded(context: DetectorContext) -> list[Signal]:
-    """Sustained host pressure. No error is raised; the tool just feels broken."""
+    """Sustained host pressure."""
     config = context.config
     features = context.features
     pressure: list[str] = []
@@ -470,13 +385,7 @@ def resource_degraded(context: DetectorContext) -> list[Signal]:
 
 
 def metric_shift(context: DetectorContext) -> list[Signal]:
-    """Several residual features beyond their own limits in the same window.
-
-    One feature drifting is usually noise. Several drifting *together* is a change
-    in the system, and the combination is exactly what no per-feature threshold
-    can express — "run time climbing while throughput falls" has no single
-    threshold, and this rule catches it with arithmetic instead of a model.
-    """
+    """Several residual features beyond their own limits in the same window."""
     config = context.config
     shifted: list[dict[str, Any]] = []
     for feature, direction in config.watched:
@@ -522,8 +431,6 @@ def metric_shift(context: DetectorContext) -> list[Signal]:
     ]
 
 
-#: Registry order is the report order. Rules are independent; nothing here reads
-#: another rule's output.
 DETECTORS: tuple[tuple[str, Detector], ...] = (
     ("database_unreachable", database_unreachable),
     ("worker_lost", worker_lost),
@@ -542,11 +449,7 @@ DETECTORS: tuple[tuple[str, Detector], ...] = (
 def observations_for(
     features: FeatureVector, *, exclude: frozenset[str] = frozenset()
 ) -> list[tuple[str, float, str]]:
-    """``(feature, value, scope)`` triples to feed the baselines after a tick.
-
-    The order is fixed so two runs over the same window produce the same baseline
-    state, which is what makes a chaos run reproducible.
-    """
+    """``(feature, value, scope)`` triples to feed the baselines after a tick."""
     triples: list[tuple[str, float, str]] = []
     for name in FEATURE_NAMES:
         if name in exclude or not features.has(name):
