@@ -929,6 +929,30 @@ class PostgresCatalog:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def episode_fingerprint_inputs(self, episode_ids: list[str]) -> list[dict[str, Any]]:
+        """The signals a behavioural fingerprint is built from, for a set of episodes (ADR 0032).
+
+        One round trip, and only the columns the descriptor reads. `dims` and `motion_trace`
+        are the largest jsonb values this catalog stores, so the projection is deliberate: a
+        report over a build of thousands must not drag every episode's full metadata and
+        validation history along with two columns it will not look at.
+
+        An episode with no `episode_quality` row is absent rather than defaulted - it has never
+        been scored, so it has no fingerprint, and the caller counts what it actually scored.
+        """
+        if not episode_ids:
+            return []
+        with connect(self.settings) as connection:
+            rows = connection.execute(
+                """SELECT e.id, coalesce(e.metadata->>'task', '') AS task,
+                          q.verdict, q.judged_dims, q.stall_ratio, q.gap_ratio,
+                          q.dims, q.motion_trace
+                     FROM episodes e JOIN episode_quality q ON q.episode_id = e.id
+                    WHERE e.id = ANY(%s)""",
+                (list(episode_ids),),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
     def record_episode_quality(self, episode_id: str, quality: dict[str, Any]) -> dict[str, Any]:
         """Persist the motion-quality summary computed at ingest (ADR 0018).
 

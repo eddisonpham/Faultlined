@@ -133,3 +133,101 @@ def test_the_index_says_what_would_create_a_build_when_there_are_none() -> None:
 def test_the_index_links_each_build_to_its_page() -> None:
     body = _index_body({"items": [_build(2)]})
     assert f'href="/ui/builds/{"b" * 64}"' in body
+
+
+# ------------------------------------------------------------ redundancy (ADR 0032)
+
+
+def _report(**overrides: object) -> dict:
+    return {
+        "method": "behavioural-fingerprint-v1",
+        "threshold": 0.1,
+        "episode_count": 12,
+        "compared_count": 12,
+        "distinct_count": 4,
+        "redundant_count": 8,
+        "reduction_ratio": 8 / 12,
+        "incomparable": [],
+        "groups": [
+            {
+                "representative": "ep-0",
+                "label": "pick the cube",
+                "duplicates": [
+                    {
+                        "episode_id": "ep-1",
+                        "label": "pick cube",
+                        "distance": 0.03,
+                        "reason": "shape",
+                    }
+                ],
+            }
+        ],
+        "truncated": False,
+        **overrides,
+    }
+
+
+@pytest.mark.unit
+def test_a_build_without_a_report_renders_without_one() -> None:
+    """The index and every caller that has no membership must not grow an empty panel."""
+    assert "Redundancy" not in lineage_page(_build(2), "vt220")
+
+
+@pytest.mark.unit
+def test_the_redundancy_section_links_both_sides_of_a_duplicate_pair() -> None:
+    body = lineage_page({**_build(2), "redundancy": _report()}, "vt220")
+    assert 'href="/ui/episodes/ep-0"' in body
+    assert 'href="/ui/episodes/ep-1"' in body
+    assert "pick cube" in body
+
+
+@pytest.mark.unit
+def test_the_redundancy_section_states_the_measure_and_that_nothing_was_removed() -> None:
+    """A report that proposed collapses without saying it is read-only would read as a
+    decision already taken."""
+    body = lineage_page({**_build(2), "redundancy": _report()}, "vt220")
+    assert "threshold 0.10" in body
+    assert "read-only" in body
+    assert "4 of 12 distinct" in body
+
+
+@pytest.mark.unit
+def test_a_truncated_report_says_which_members_it_did_not_score() -> None:
+    body = lineage_page({**_build(2), "redundancy": _report(truncated=True)}, "vt220")
+    assert "the first 12 members in build order were compared" in body
+
+
+@pytest.mark.unit
+def test_episodes_that_could_not_be_compared_are_named_as_a_count() -> None:
+    body = lineage_page(
+        {**_build(2), "redundancy": _report(incomparable=["ep-7", "ep-8"])}, "vt220"
+    )
+    assert "2 scored episode(s) carry no motion to compare on" in body
+
+
+@pytest.mark.unit
+def test_a_build_with_one_episode_says_there_is_nothing_to_compare() -> None:
+    body = lineage_page(
+        {
+            **_build(1),
+            "redundancy": _report(episode_count=1, distinct_count=1, redundant_count=0, groups=[]),
+        },
+        "vt220",
+    )
+    assert "fewer than two scored episodes" in body
+    assert "de-table" in body  # the members table is still there
+
+
+@pytest.mark.unit
+def test_a_fully_distinct_build_says_so_rather_than_showing_an_empty_table() -> None:
+    body = lineage_page(
+        {
+            **_build(2),
+            "redundancy": _report(
+                distinct_count=12, redundant_count=0, groups=[], reduction_ratio=0.0
+            ),
+        },
+        "vt220",
+    )
+    assert "every scored episode is distinct" in body
+    assert "Near-duplicate episodes in this build" not in body

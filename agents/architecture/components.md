@@ -170,6 +170,19 @@ Sits between Ingest and the catalog write: signals are computed from the rows th
 - **Dependencies:** none beyond the standard library; consumed by `ingest/` and the read API.
 - **Failure behavior:** quality must never fail an ingest — degenerate inputs score 0 with verdict
   `unknown`; mismatched series raise `ValueError` before any bytes are written.
+- **Behavioural fingerprints** (`analysis/fingerprint.py`, [ADR 0032](../decisions/0032-behavioural-fingerprints.md)):
+  a deterministic near-duplicate and similarity measure assembled from the signals above — the
+  motion trace, per-dimension normalised character, and the stall/gap fractions — read back out of
+  `episode_quality`. It answers "are two of my episodes the same behaviour recorded twice", which
+  SemDeDup and FiftyOne Brain answer with an embedding; this engine has no numerical library, never
+  opens a frame, and does not put a model in a decision path (ADR 0020), so the measure is a pure
+  function of what ingest already wrote. It **proposes and never removes**: the report names the
+  distance and the component that dominated it so the operator can disagree, and no fingerprint
+  enters a build's identity.
+- **Fingerprint failure behavior:** a malformed or non-finite signal thins the descriptor rather
+  than raising (ADR 0023's rule, one layer over) and the report counts what it could actually
+  compare; a pair with neither a trace nor a judged dimension is reported as incomparable rather
+  than scored. Cost is bounded by `MAX_EPISODES` and the bound is reported ([EXP-0019](../experiments/0019-behavioural-fingerprint-calibration.md)).
 - **Owner:** implementer.
 
 ## 16. Monitoring notifier (`monitoring/`)

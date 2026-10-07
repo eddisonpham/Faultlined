@@ -179,6 +179,29 @@ def test_register_episode_fails_if_upsert_returns_no_record() -> None:
 
 
 @pytest.mark.unit
+def test_episode_fingerprint_inputs_projects_only_the_signals_it_reads() -> None:
+    """`dims` and `motion_trace` are the largest jsonb values the catalog stores, so the
+    projection is deliberate: a report over a build of thousands must not drag every
+    episode's full metadata and history along with two columns it will not look at."""
+    catalog, connection = _catalog_with([{"id": "episode-1"}])
+    rows = catalog.episode_fingerprint_inputs(["episode-1"])
+
+    assert rows == [{"id": "episode-1"}]
+    query = connection.statements[0].lower()
+    for column in ("q.dims", "q.motion_trace", "q.verdict", "q.judged_dims", "q.stall_ratio"):
+        assert column in query
+    assert "select *" not in query
+    assert "q.episode_id" not in query.split("from")[0]  # the join key is not a result column
+
+
+@pytest.mark.unit
+def test_episode_fingerprint_inputs_asks_nothing_for_an_empty_set() -> None:
+    catalog, connection = _catalog_with()
+    assert catalog.episode_fingerprint_inputs([]) == []
+    assert connection.statements == []
+
+
+@pytest.mark.unit
 def test_get_job_and_episode_return_none_or_record() -> None:
     catalog, _ = _catalog_with({"id": "job-1"})
     assert catalog.get_job("job-1")["id"] == "job-1"

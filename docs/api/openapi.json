@@ -170,6 +170,82 @@
         "title": "BuildPayload",
         "type": "object"
       },
+      "BuildRedundancyResponse": {
+        "description": "Near-duplicate structure of a build's membership (ADR 0032).\n\nRead-only: the report proposes which episodes are the same behaviour recorded twice and\nnever removes one. `incomparable` lists the episodes that carry no signal to compare on\n(no clock, no judged dimension) - they are counted as distinct, which is the honest\ndirection, and they are named so the count is not mistaken for a measurement.",
+        "properties": {
+          "build_hash": {
+            "title": "Build Hash",
+            "type": "string"
+          },
+          "compared_count": {
+            "title": "Compared Count",
+            "type": "integer"
+          },
+          "components": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "title": "Components",
+            "type": "object"
+          },
+          "distinct_count": {
+            "title": "Distinct Count",
+            "type": "integer"
+          },
+          "episode_count": {
+            "title": "Episode Count",
+            "type": "integer"
+          },
+          "groups": {
+            "items": {
+              "$ref": "#/components/schemas/RedundancyGroupResponse"
+            },
+            "title": "Groups",
+            "type": "array"
+          },
+          "incomparable": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Incomparable",
+            "type": "array"
+          },
+          "method": {
+            "title": "Method",
+            "type": "string"
+          },
+          "reduction_ratio": {
+            "title": "Reduction Ratio",
+            "type": "number"
+          },
+          "redundant_count": {
+            "title": "Redundant Count",
+            "type": "integer"
+          },
+          "threshold": {
+            "title": "Threshold",
+            "type": "number"
+          },
+          "truncated": {
+            "default": false,
+            "title": "Truncated",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "build_hash",
+          "method",
+          "threshold",
+          "components",
+          "episode_count",
+          "compared_count",
+          "distinct_count",
+          "redundant_count",
+          "reduction_ratio"
+        ],
+        "title": "BuildRedundancyResponse",
+        "type": "object"
+      },
       "BuildSummary": {
         "additionalProperties": true,
         "properties": {
@@ -2200,6 +2276,60 @@
         "title": "QueueCursor",
         "type": "object"
       },
+      "RedundancyGroupResponse": {
+        "properties": {
+          "duplicates": {
+            "items": {
+              "$ref": "#/components/schemas/RedundantEpisode"
+            },
+            "title": "Duplicates",
+            "type": "array"
+          },
+          "label": {
+            "default": "",
+            "title": "Label",
+            "type": "string"
+          },
+          "representative": {
+            "title": "Representative",
+            "type": "string"
+          }
+        },
+        "required": [
+          "representative"
+        ],
+        "title": "RedundancyGroupResponse",
+        "type": "object"
+      },
+      "RedundantEpisode": {
+        "description": "One episode a redundancy report would collapse into a group's representative.",
+        "properties": {
+          "distance": {
+            "title": "Distance",
+            "type": "number"
+          },
+          "episode_id": {
+            "title": "Episode Id",
+            "type": "string"
+          },
+          "label": {
+            "default": "",
+            "title": "Label",
+            "type": "string"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "episode_id",
+          "distance",
+          "reason"
+        ],
+        "title": "RedundantEpisode",
+        "type": "object"
+      },
       "ResourceSample": {
         "properties": {
           "cpu_percent": {
@@ -3880,6 +4010,64 @@
           }
         },
         "summary": "Get Build"
+      }
+    },
+    "/api/v1/builds/{build_hash}/redundancy": {
+      "get": {
+        "description": "Which episodes in this build are the same behaviour recorded twice (ADR 0032).\n\nDeterministic and read-only, computed from signals ingest already wrote - no artifact\nis opened and no model is involved. Membership is read in ordinal order and the rows\nare put back into that order before the report runs, because truncation takes the\n*first* N and a report whose coverage depended on a database's return order would not\nbe comparable between two runs.\n\nAn episode that was never scored has no fingerprint and is absent, so `episode_count`\nis what was scored, not what the build holds.",
+        "operationId": "build_redundancy_api_v1_builds__build_hash__redundancy_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "build_hash",
+            "required": true,
+            "schema": {
+              "title": "Build Hash",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "threshold",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 1.0,
+                  "minimum": 0.0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Threshold"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuildRedundancyResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Build Redundancy"
       }
     },
     "/api/v1/clusters": {

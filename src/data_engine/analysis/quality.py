@@ -326,7 +326,7 @@ def _clock(
     return max(intervals), gapped / len(intervals), gapped > 0, threshold
 
 
-def _field(name: str) -> str:
+def field_name(name: str) -> str:
     """The dimension's own field name, with its address prefix removed.
 
     Dimension names are *addresses*: the MCAP reader names them `<topic>.<path>`
@@ -381,7 +381,7 @@ def _dim_quality(
         name=name,
         active=active,
         discrete=discrete,
-        gripper=bool(_GRIPPER.search(_field(name))),
+        gripper=bool(_GRIPPER.search(field_name(name))),
         norm_delta_std=math.sqrt(variance),
         mean_abs_delta_norm=sum(norm) / len(norm),
     )

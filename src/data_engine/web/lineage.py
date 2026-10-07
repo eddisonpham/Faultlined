@@ -173,6 +173,92 @@ def _members_table(build: dict[str, Any]) -> str:
     )
 
 
+def _redundancy_section(build: dict[str, Any]) -> str:
+    """Which members are the same behaviour recorded twice (ADR 0032).
+
+    Read-only, and it says so: a report that proposed collapses without stating that nothing
+    has been removed would read as a decision already taken. The reason travels with every
+    row, because the whole justification for a deterministic fingerprint over a model's
+    embedding space is that an operator can disagree with it by reading it.
+    """
+    from data_engine.web.pages import _meter, _readouts, _section
+
+    report = build.get("redundancy")
+    if not isinstance(report, dict):
+        return ""
+    scored = int(report.get("episode_count") or 0)
+    if scored < 2:
+        return _section(
+            "Redundancy",
+            '<p class="de-sub">// fewer than two scored episodes: nothing to compare</p>',
+            f"{scored} scored",
+        )
+    distinct = int(report.get("distinct_count") or 0)
+    redundant = int(report.get("redundant_count") or 0)
+    ratio = float(report.get("reduction_ratio") or 0.0)
+    threshold = float(report.get("threshold") or 0.0)
+    incomparable = [str(item) for item in (report.get("incomparable") or [])]
+    groups = [g for g in (report.get("groups") or []) if isinstance(g, dict)]
+
+    rows = "".join(
+        "<tr>"
+        f'<td><a href="/ui/episodes/{escape(str(group.get("representative")))}">'
+        f"{escape(str(group.get('label') or group.get('representative') or ''))[:48]}</a></td>"
+        f'<td><a href="/ui/episodes/{escape(str(dup.get("episode_id")))}">'
+        f"{escape(str(dup.get('label') or dup.get('episode_id') or ''))[:48]}</a></td>"
+        f'<td class="num">{float(dup.get("distance") or 0.0):.3f}</td>'
+        f"<td>{escape(str(dup.get('reason') or ''))}</td>"
+        "</tr>"
+        for group in groups
+        for dup in (group.get("duplicates") or [])
+        if isinstance(dup, dict)
+    )
+    if rows:
+        table = (
+            '<div class="de-table-wrap" tabindex="0" role="region" '
+            'aria-label="Near-duplicate episodes in this build"><table class="de-table">'
+            '<caption class="de-sr">Episodes a redundancy report would collapse onto a kept'
+            " representative, with the distance and the component that dominated it"
+            "</caption><thead><tr><th>Keep</th><th>Near-duplicate</th>"
+            '<th class="num">Distance</th><th>Dominant signal</th></tr></thead>'
+            f"<tbody>{rows}</tbody></table></div>"
+        )
+    else:
+        table = '<p class="de-sub">// every scored episode is distinct</p>'
+
+    notes = [
+        f'<p class="de-sub">threshold {threshold:.2f} on a weighted mean of motion shape,'
+        " dimension dynamics and temporal fractions &#183; a proposal, read-only &#8212;"
+        " nothing here is removed from the build</p>"
+    ]
+    if incomparable:
+        notes.append(
+            f'<p class="de-sub">{len(incomparable)} scored episode(s) carry no motion to'
+            " compare on (no clock, no judged dimension) and are counted as distinct</p>"
+        )
+    if report.get("truncated"):
+        notes.append(
+            '<p class="de-sub">this build is larger than one report scores:'
+            f" the first {scored} members in build order were compared, the rest were not</p>"
+        )
+
+    return _section(
+        "Redundancy",
+        _readouts(
+            [
+                ("scored", str(scored), ""),
+                ("distinct", str(distinct), ""),
+                ("near-duplicate", str(redundant), ""),
+                ("would shrink", f"{ratio * 100:.0f}%", ""),
+            ]
+        )
+        + f'<p class="de-sub">{_meter(ratio)} of this build repeats behaviour it already has</p>'
+        + table
+        + "".join(notes),
+        f"{distinct} of {scored} distinct",
+    )
+
+
 def _index_body(model: dict[str, Any]) -> str:
     items = model.get("items") or []
     if not items:
@@ -240,6 +326,7 @@ def _detail_body(build: dict[str, Any]) -> str:
             "episodes to build to artifacts",
         )
         + _section("Members", _members_table(build), str(int(build.get("episode_count") or 0)))
+        + _redundancy_section(build)
     )
 
 

@@ -201,6 +201,44 @@ class BuildDetailResponse(BuildSummary):
     episodes: list[dict[str, Any]] = Field(default_factory=list)
 
 
+class RedundantEpisode(BaseModel):
+    """One episode a redundancy report would collapse into a group's representative."""
+
+    episode_id: str
+    label: str = ""
+    distance: float
+    reason: str
+
+
+class RedundancyGroupResponse(BaseModel):
+    representative: str
+    label: str = ""
+    duplicates: list[RedundantEpisode] = Field(default_factory=list)
+
+
+class BuildRedundancyResponse(BaseModel):
+    """Near-duplicate structure of a build's membership (ADR 0032).
+
+    Read-only: the report proposes which episodes are the same behaviour recorded twice and
+    never removes one. `incomparable` lists the episodes that carry no signal to compare on
+    (no clock, no judged dimension) - they are counted as distinct, which is the honest
+    direction, and they are named so the count is not mistaken for a measurement.
+    """
+
+    build_hash: str
+    method: str
+    threshold: float
+    components: dict[str, float]
+    episode_count: int
+    compared_count: int
+    distinct_count: int
+    redundant_count: int
+    reduction_ratio: float
+    incomparable: list[str] = Field(default_factory=list)
+    groups: list[RedundancyGroupResponse] = Field(default_factory=list)
+    truncated: bool = False
+
+
 class JobResponse(BaseModel):
     id: str
     type: str

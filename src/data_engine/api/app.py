@@ -15,6 +15,7 @@ from fastapi import FastAPI, Header, HTTPException, Query, Request, Response
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
 from pydantic import ValidationError
 
+from data_engine.analysis.fingerprint import DEFAULT_THRESHOLD, redundancy_report
 from data_engine.api.cluster_schemas import (
     ClusterConfirmRequest,
     ClusterDetailResponse,
@@ -40,6 +41,7 @@ from data_engine.api.schemas import (
     BuildDetailResponse,
     BuildListResponse,
     BuildPayload,
+    BuildRedundancyResponse,
     ContractListResponse,
     ContractPayload,
     ContractRequest,
@@ -246,6 +248,31 @@ Limit = Annotated[int, Query(ge=1, le=500)]
 #: download (ADR 0030). Named ``download`` in Python because ``format`` shadows
 #: the builtin; the wire name is what matters. Absent = the JSON view.
 Download = Annotated[str | None, Query(alias="format")]
+
+#: ``?threshold=`` on the redundancy route (ADR 0032). A distance above 1.0 cannot be
+#: produced by the weighted mean, and a threshold of 0 collapses nothing, so the range is
+#: stated at the boundary rather than clamped silently.
+Threshold = Annotated[float | None, Query(ge=0.0, le=1.0)]
+
+
+def _build_redundancy(
+    catalog: PostgresCatalog, build_hash: str, threshold: float | None = None
+) -> dict[str, Any]:
+    """One build's near-duplicate report, over its members in ordinal order (ADR 0032).
+
+    Shared by the JSON route and the build page so the two cannot disagree: the page is the
+    same report the API serves, not a second rendering of the same idea. Membership is read in
+    ordinal order and the rows are put back into it, because truncation takes the *first* N and
+    a report whose coverage depended on a database's return order would not be comparable
+    between two runs of the same catalog.
+    """
+    ordered = [str(item["episode_id"]) for item in catalog.build_episodes(build_hash)]
+    rows = catalog.episode_fingerprint_inputs(ordered)
+    by_id = {str(row["id"]): row for row in rows}
+    return redundancy_report(
+        [by_id[episode_id] for episode_id in ordered if episode_id in by_id],
+        threshold=DEFAULT_THRESHOLD if threshold is None else threshold,
+    ).to_dict()
 
 
 def _parse_state(state: str | None) -> JobState | None:
@@ -859,6 +886,29 @@ def create_app(
         # property it exists to have.
         return {**row, "episodes": catalog_for_request.build_episodes(build_hash)}
 
+    @app.get("/api/v1/builds/{build_hash}/redundancy", response_model=BuildRedundancyResponse)
+    def build_redundancy(
+        build_hash: str, request: Request, threshold: Threshold = None
+    ) -> dict[str, Any]:
+        """Which episodes in this build are the same behaviour recorded twice (ADR 0032).
+
+        Deterministic and read-only, computed from signals ingest already wrote - no artifact
+        is opened and no model is involved. Membership is read in ordinal order and the rows
+        are put back into that order before the report runs, because truncation takes the
+        *first* N and a report whose coverage depended on a database's return order would not
+        be comparable between two runs.
+
+        An episode that was never scored has no fingerprint and is absent, so `episode_count`
+        is what was scored, not what the build holds.
+        """
+        catalog_for_request = cast(PostgresCatalog, request.app.state.catalog)
+        if catalog_for_request.get_build(build_hash) is None:
+            raise HTTPException(status_code=404, detail=f"No build {build_hash}.")
+        return {
+            "build_hash": build_hash,
+            **_build_redundancy(catalog_for_request, build_hash, threshold),
+        }
+
     @app.get("/api/v1/episodes/{episode_id}/builds", response_model=BuildListResponse)
     def builds_for_episode(episode_id: str, request: Request) -> dict[str, Any]:
         """The reverse lineage direction (FR-008): what contains this episode."""
@@ -909,7 +959,11 @@ def create_app(
         # has to say so rather than draw an empty graph that looks complete.
         return HTMLResponse(
             lineage_page(
-                {**row, "episodes": catalog_for_request.build_episodes(build_hash)},
+                {
+                    **row,
+                    "episodes": catalog_for_request.build_episodes(build_hash),
+                    "redundancy": _build_redundancy(catalog_for_request, build_hash),
+                },
                 theme_or_default(theme),
             )
         )

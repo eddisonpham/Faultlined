@@ -1,3 +1,4 @@
+import math
 from pathlib import Path
 from typing import Any
 
@@ -324,6 +325,8 @@ class IngestCatalogStub(ListingCatalogStub):
         self.submitted: list[tuple[str, dict[str, Any]]] = []
         self.slices: list[dict[str, Any]] = []
         self.slice_conflict = False
+        self.members: list[dict[str, Any]] = []
+        self.fingerprint_rows: list[dict[str, Any]] = []
         self.build = {
             "hash": BUILD_HASH,
             "name": "pick-set",
@@ -342,7 +345,11 @@ class IngestCatalogStub(ListingCatalogStub):
         return self.build if build_hash == BUILD_HASH else None
 
     def build_episodes(self, build_hash: str) -> list[dict[str, Any]]:
-        return []
+        return self.members
+
+    def episode_fingerprint_inputs(self, episode_ids: list[str]) -> list[dict[str, Any]]:
+        wanted = set(episode_ids)
+        return [row for row in self.fingerprint_rows if str(row["id"]) in wanted]
 
     def list_slices(self, *, limit: int = 50) -> list[dict[str, Any]]:
         return []
@@ -964,3 +971,112 @@ def test_fragment_requests_return_only_the_polling_body() -> None:
     fragment = client.get("/ui", headers={"X-Fragment": "1"})
     assert "<html" not in fragment.text
     assert "Queue depth by state" in fragment.text
+
+
+# ----------------------------------------------- build redundancy (ADR 0032)
+
+
+def _fingerprint_row(episode_id: str, **overrides: Any) -> dict[str, Any]:
+    """One `episode_fingerprint_inputs` row in the shape the catalog returns."""
+    trace = [[[index * 0.1, math.sin(index / 4.0)] for index in range(40)]]
+    return {
+        "id": episode_id,
+        "task": f"pick {episode_id}",
+        "verdict": "smooth",
+        "judged_dims": 6,
+        "stall_ratio": 0.0,
+        "gap_ratio": 0.0,
+        "dims": [
+            {
+                "name": f"/joint_states.position[{index}]",
+                "active": True,
+                "discrete": False,
+                "gripper": False,
+                "norm_delta_std": 0.03,
+                "mean_abs_delta_norm": 0.02,
+            }
+            for index in range(2)
+        ],
+        "motion_trace": trace,
+        **overrides,
+    }
+
+
+def _build_with_members(*episode_ids: str) -> tuple[TestClient, IngestCatalogStub]:
+    client, catalog = _ingest_client()
+    catalog.members = [
+        {"episode_id": episode_id, "ordinal": index} for index, episode_id in enumerate(episode_ids)
+    ]
+    catalog.fingerprint_rows = [_fingerprint_row(episode_id) for episode_id in episode_ids]
+    return client, catalog
+
+
+@pytest.mark.contract
+def test_the_redundancy_route_reports_near_duplicates_for_a_build() -> None:
+    """The API's own report is what the build page renders, so it is asserted here."""
+    client, _ = _build_with_members("ep-a", "ep-b")
+
+    body = client.get(f"/api/v1/builds/{BUILD_HASH}/redundancy").json()
+
+    assert body["build_hash"] == BUILD_HASH
+    assert body["episode_count"] == 2
+    assert body["distinct_count"] == 1
+    assert body["redundant_count"] == 1
+    assert body["groups"][0]["duplicates"][0]["episode_id"] == "ep-b"
+
+
+@pytest.mark.contract
+def test_the_redundancy_route_reports_distinct_episodes_as_distinct() -> None:
+    client, catalog = _build_with_members("ep-a", "ep-b")
+    # A different behaviour: a spike where the other has a sweep.
+    catalog.fingerprint_rows[1]["motion_trace"] = [
+        [[index * 0.1, 0.0 if index < 30 else 1.0] for index in range(40)]
+    ]
+
+    body = client.get(f"/api/v1/builds/{BUILD_HASH}/redundancy").json()
+
+    assert body["groups"] == []
+    assert body["distinct_count"] == 2
+    assert body["reduction_ratio"] == 0.0
+
+
+@pytest.mark.contract
+def test_the_redundancy_route_is_404_for_an_unknown_build() -> None:
+    client, _ = _build_with_members("ep-a")
+    assert client.get(f"/api/v1/builds/{'c' * 68}/redundancy").status_code == 404
+
+
+@pytest.mark.contract
+def test_the_redundancy_route_refuses_a_threshold_it_cannot_honour() -> None:
+    """A distance above 1.0 is not producible, so a threshold above it is a client bug, not a
+    request to be clamped silently."""
+    client, _ = _build_with_members("ep-a", "ep-b")
+    assert client.get(f"/api/v1/builds/{BUILD_HASH}/redundancy?threshold=2.0").status_code == 422
+    assert client.get(f"/api/v1/builds/{BUILD_HASH}/redundancy?threshold=-0.5").status_code == 422
+
+
+@pytest.mark.contract
+def test_the_redundancy_route_honours_an_explicit_threshold() -> None:
+    client, _ = _build_with_members("ep-a", "ep-b")
+    body = client.get(f"/api/v1/builds/{BUILD_HASH}/redundancy?threshold=0.0").json()
+    assert body["threshold"] == 0.0
+    assert body["redundant_count"] == 1
+
+
+@pytest.mark.contract
+def test_the_build_page_shows_the_redundancy_report_it_serves() -> None:
+    client, _ = _build_with_members("ep-a", "ep-b")
+
+    body = client.get(f"/ui/builds/{BUILD_HASH}").text
+
+    assert "Redundancy" in body
+    assert "1 of 2 distinct" in body
+    assert 'href="/ui/episodes/ep-b"' in body
+    assert "read-only" in body
+
+
+@pytest.mark.contract
+def test_a_build_with_nothing_to_compare_says_so_rather_than_showing_zeros() -> None:
+    client, _ = _build_with_members("ep-a")
+    body = client.get(f"/ui/builds/{BUILD_HASH}").text
+    assert "fewer than two scored episodes" in body
