@@ -1,15 +1,4 @@
-"""The real-data fixture fetcher, tested without a network.
-
-The `network` tests are the only ones in the suite that talk to the Hugging Face
-Hub, and a broken build has been traced to them more than once. They are also
-the tests whose *failure mode* matters most: the fetcher runs before any reader
-code, so a truncated body does not fail as "bad parquet", it fails as something
-that looks like a reader bug three layers down.
-
-These tests drive a real HTTP server on localhost, because the behaviours that
-matter here - a short body, a reset mid-transfer, a 404 - cannot be produced by
-mocking `urlopen`. They are `unit` tests and need no egress.
-"""
+"""The real-data fixture fetcher, tested without a network."""
 
 from __future__ import annotations
 
@@ -41,9 +30,6 @@ class _Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
         elif self.path == "/short":
-            # The dangerous one: a well-formed 200 whose body stops early. A
-            # fetcher that trusts the socket writes a corrupt fixture and calls
-            # it success.
             self.send_response(200)
             self.send_header("Content-Length", "9999")
             self.end_headers()
@@ -116,12 +102,7 @@ def test_a_missing_file_reports_unavailable(server: HTTPServer, tmp_path: Path) 
 
 @pytest.mark.unit
 def test_an_existing_fixture_is_never_refetched(tmp_path: Path) -> None:
-    """The cache check that keeps a second run offline.
-
-    Asserted here because it is the reason a developer's suite works with no
-    network at all, and it is the one line between the fixture layer and every
-    reader test.
-    """
+    """The cache check that keeps a second run offline."""
     assert Path("var") / "real-data" == _DOWNLOAD.REAL_DATA_ROOT
     cached = tmp_path / "meta" / "info.json"
     cached.parent.mkdir(parents=True)

@@ -32,20 +32,7 @@ def _episode() -> dict[str, Any]:
 
 
 def _drain(worker: IngestWorker, catalog: PostgresCatalog, *job_ids: str) -> None:
-    """Run queued jobs until every id given has left the queue.
-
-    `claim_job` is FIFO across the whole shared catalog, so these jobs are only
-    reached once every older claimable job has been processed. The loop therefore
-    ends when the jobs we care about are done, or when nothing is claimable at
-    all -- and it cannot spin forever, because a job that keeps failing spends its
-    own attempt budget and stops being claimable.
-
-    This used to be a fixed 50 iterations. That is a flake with a long fuse: every
-    other test shares this queue, and the catalog is never truncated between runs,
-    so the job under test is only reached after however many jobs happen to be
-    queued ahead of it. It failed once the backlog passed 50, passed in isolation,
-    and passed on a rerun of the same directory.
-    """
+    """Run queued jobs until every id given has left the queue."""
     while any(catalog.get_job(job_id)["state"] == JobState.QUEUED.value for job_id in job_ids):
         if worker.process_one() is None:
             return
@@ -89,8 +76,6 @@ def test_worker_processes_ingest_and_registers_episode(tmp_path: Path) -> None:
     episode = catalog.get_episode(actual["result"]["episode_id"])
     assert episode is not None
     assert episode["artifact_hash"] == actual["result"]["artifact_hash"]
-    # The episode is content-addressed, so a persistent database accumulates one edge per
-    # job that produced it. Assert membership, not position, or this fails on the second run.
     assert job["id"] in [edge["to_ref"] for edge in episode["lineage"]]
 
 
@@ -114,7 +99,6 @@ def test_list_jobs_filters_paginates_and_counts() -> None:
         reverse=True,
     )
 
-    # Cursor paging must not repeat a row already returned.
     first_page = catalog.list_jobs(limit=1)
     assert len(first_page) == 1
     second_page = catalog.list_jobs(limit=1, before=first_page[0]["created_at"])
@@ -147,5 +131,4 @@ def test_list_artifacts_reports_referencing_episodes(tmp_path: Path) -> None:
     row = artifacts[0]
     assert row["size_bytes"] > 0
     assert isinstance(row["episode_ids"], list)
-    # The synthetic episode is content-addressed, so every run maps to the same blob.
     assert row["episode_ids"], "an ingested artifact should reference at least one episode"

@@ -1,14 +1,4 @@
-"""Coverage as a pure fold over a catalog query result (ADR 0033).
-
-The report is where the two halves of round 2 meet: an aggregation the catalog runs, and a set
-difference against a reference. Both can be wrong in ways a page hides, so the properties asserted
-here are the ones the ADR argues for - the axes are fixed and labelled, the order is deterministic,
-a cap always travels with its true total, gaps are alphabetical, and nothing raises when the query
-result is not what the query promised.
-
-The `Decimal` cases are not decoration: the first real run of this feature read every total as 0
-because `sum()` over a `bigint` comes back as `numeric`.
-"""
+"""Coverage as a pure fold over a catalog query result (ADR 0033)."""
 
 from __future__ import annotations
 
@@ -128,9 +118,6 @@ def _report(**overrides: Any) -> CoverageReport:
     return coverage_report("bld_" + "a" * 64, _inputs(**overrides))
 
 
-# ------------------------------------------------------------------ the whole report
-
-
 @pytest.mark.unit
 def test_the_report_counts_the_build_against_the_catalog_it_was_drawn_from() -> None:
     report = _report()
@@ -176,9 +163,6 @@ def test_values_are_ordered_by_count_then_value_whatever_order_the_rows_arrive_i
     robot = forwards.axis("robot")
     assert robot is not None
     assert [item.value for item in robot.values] == ["so101"]
-
-
-# ------------------------------------------------------------------------- gaps
 
 
 @pytest.mark.unit
@@ -244,11 +228,8 @@ def test_the_task_axis_keeps_its_gap_total_when_the_gap_list_is_capped() -> None
 
 @pytest.mark.unit
 def test_a_gap_list_cut_by_the_query_still_reports_how_many_gaps_there_were() -> None:
-    """The query caps rows, so counting the rows it returned would report "no gaps" for a cut axis.
-
-    This is the bug the first real run of the feature exposed: with `limit=1` the robot axis came
-    back as no values, no gaps and `missing: 0`, when the catalog held one value the build lacked.
-    """
+    """The query caps rows, so counting the rows it returned would report "no gaps" for a cut
+    axis."""
     rows = _inputs()["values"] + [
         _row(
             "verdict",
@@ -261,8 +242,6 @@ def test_a_gap_list_cut_by_the_query_still_reports_how_many_gaps_there_were() ->
             value_rank=3,
         )
     ]
-    # A capped query returns the same partition without the catalog-only row; the window count
-    # travels on every row of it, which is what makes the total survivable.
     rows = [{**row, "gap_total": 1} if row["axis"] == "verdict" else row for row in rows]
     capped = [row for row in rows if row["axis"] != "verdict" or row["build_count"] > 0]
     verdict = coverage_report("bld_" + "a" * 64, _inputs(values=capped)).axis("verdict")
@@ -271,9 +250,6 @@ def test_a_gap_list_cut_by_the_query_still_reports_how_many_gaps_there_were() ->
     assert verdict.gaps == ()
     assert verdict.missing == 1
     assert verdict.truncated is True
-
-
-# ------------------------------------------------------------------------- caps
 
 
 @pytest.mark.unit
@@ -338,9 +314,6 @@ def test_a_catalog_of_nothing_does_not_divide_by_it() -> None:
 
     assert report.coverage_ratio == 0.0
     assert report.episode_count == 0
-
-
-# ------------------------------------------------------- input the query did not promise
 
 
 @pytest.mark.unit

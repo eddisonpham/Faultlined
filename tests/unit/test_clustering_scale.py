@@ -1,11 +1,4 @@
-"""Tests for the full-scale harness behind `just cluster scale`.
-
-The measurements in EXP-2.5-08 are only as good as the arithmetic that produces them,
-and several of them are easy to get subtly wrong: a fragmentation that counts clusters
-instead of classes, a coverage number that reads a "-" as a hit, a quality score that
-silently mixes labelled and unlabelled rows. These run against a deterministic encoder
-so the assertions are about the harness, not about a model's weights.
-"""
+"""Tests for the full-scale harness behind `just cluster scale`."""
 
 from __future__ import annotations
 
@@ -17,9 +10,6 @@ from experiments.clustering import corpus, scale
 
 from tests.unit._word_axes import WordAxes
 
-#: `word_axes` gives cosine distance 0 to strings sharing all their words and 1.0 to
-#: strings sharing none, so 0.9 separates the hand-built fixtures used below while
-#: still joining a string with itself.
 CONFIG = scale.Config(
     encoder="word_axes", radius=0.9, colour_weight=0.0, mask_verbs=False, rule="running_mean"
 )
@@ -48,9 +38,6 @@ def _items(*pairs: tuple[str, str]) -> tuple[corpus.Item, ...]:
 
 def _matrix(items: tuple[corpus.Item, ...]) -> np.ndarray:
     return WordAxes().encode([item.text for item in items])
-
-
-# ------------------------------------------------------------------ streaming
 
 
 def test_a_stream_records_the_assignment_made_on_arrival() -> None:
@@ -85,9 +72,6 @@ def test_the_cluster_cap_is_reported_rather_than_disguised_as_a_count() -> None:
 def test_a_run_that_never_hits_the_cap_says_so() -> None:
     items = _items(("alpha one", "a"), ("alpha one", "a"))
     assert scale.stream(items, _matrix(items), CONFIG, name="t", order="shuffled").capped is False
-
-
-# -------------------------------------------------------------------- metrics
 
 
 def test_fragmentation_counts_clusters_per_class_not_clusters() -> None:
@@ -171,9 +155,6 @@ def _run(items: tuple[corpus.Item, ...]) -> scale.Run:
     return scale.stream(items, _matrix(items), CONFIG, name="t", order="shuffled")
 
 
-# ------------------------------------------------------------------- encoding
-
-
 def test_encoding_returns_unit_rows_and_a_timing() -> None:
     items = corpus.synthetic_corpus(120)
     matrix, seconds = scale.encode(items, WordAxes(), CONFIG)
@@ -186,8 +167,6 @@ def test_encoding_returns_unit_rows_and_a_timing() -> None:
 def test_masking_verbs_changes_the_matrix_it_produces() -> None:
     """Otherwise a sweep that claims to compare masking is comparing nothing."""
     items = _items(("pick up the cube", "cube"), ("lift the cube", "cube"))
-    # A non-zero colour weight on both sides: switching masking on also switches the
-    # colour facet on, so the two matrices would otherwise have different widths.
     base = replace(CONFIG, colour_weight=1.0)
     masked, _ = scale.encode(items, WordAxes(), replace(base, mask_verbs=True))
     kept, _ = scale.encode(items, WordAxes(), replace(base, mask_verbs=False))
@@ -218,9 +197,6 @@ def test_batch_sensitivity_reports_a_spread_not_a_verdict() -> None:
     assert len(stats["clusters"]) == 2
 
 
-# -------------------------------------------------------------------- coverage
-
-
 def test_verb_coverage_counts_unrecognised_verbs_as_misses() -> None:
     """`verb_of` answers "-" for a miss, and "-" is a truthy string."""
     items = (
@@ -232,19 +208,8 @@ def test_verb_coverage_counts_unrecognised_verbs_as_misses() -> None:
     assert note["coverage"] == pytest.approx(0.5)
 
 
-# ------------------------------------------------------------------- the core
-
-
 def test_extracting_the_core_beats_embedding_the_sentence_by_a_wide_margin() -> None:
-    """The headroom claim, stated as a test.
-
-    Same method, same encoder, same arrival order: the only difference is whether the
-    verb, colour, adjective and location are stripped before embedding. That
-    difference is the whole of the scale failure, and it is asserted here so a change
-    to either pipeline has to argue with this test.
-    """
-    # A radius tight enough that two sentences about one object sit outside it when an
-    # adjective is present, and loose enough for two sentences whose cores are identical.
+    """The headroom claim, stated as a test."""
     config = replace(CONFIG, radius=0.3)
     items = corpus.synthetic_corpus(240)
     gold = [item.label for item in items]

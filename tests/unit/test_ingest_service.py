@@ -42,7 +42,6 @@ def test_synthetic_ingest_records_motion_quality(tmp_path: Path) -> None:
     quality = catalog.quality
     assert quality["frame_count"] == frames
     assert quality["verdict"] == "smooth"
-    # obs[0], action[0] step 1.0 and obs[1], action[1] step 2.0 -> L2 sqrt(10).
     assert quality["movement_score"] == pytest.approx(10**0.5)
     assert quality["stall_ratio"] == 0.0
     assert {dim["name"] for dim in quality["dims"]} == {

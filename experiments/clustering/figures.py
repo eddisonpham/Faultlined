@@ -1,38 +1,4 @@
-"""Three views of a clustering, as static SVG.
-
-The pair metrics say how well a clustering scores. They do not say whether it looks
-like anything a person would recognise, and EXP-2.5-04 is the reason: a pair F1 of
-0.94 is reported identically whether the merges are right or wrong, which is why the
-boundary audit had to dump individual strings before the answer could be trusted.
-These figures are the same idea one level up — the shape of the whole clustering,
-rather than the strings nearest one boundary.
-
-**Static SVG, no chart library.** Nothing here imports matplotlib or d3. The engine
-has no frontend build, the UI is server-rendered (ADR 0014), and a reviewable
-artefact that lives in `results/` next to the JSON it was generated from is worth
-more than an interactive page that cannot be diffed. Three hand-written renderers
-and a squarified treemap are a few hundred lines; the dependency they would replace
-would be considerably more.
-
-**The three views answer three different questions.**
-
-*Treemap* — how is the corpus split? Area is cluster size, so one glance shows
-whether the clustering has produced four tasks or four hundred singletons, which no
-scalar metric makes obvious.
-
-*2D map with hulls* — do the clusters occupy separate territory? The projection is
-PCA, which is the *worst* possible way to make clusters look separated, since it
-ignores the metric the clustering actually used. Points that overlap after PCA were
-almost certainly not separable at any radius either, so this view is biased against
-the method rather than for it.
-
-*Heatmap* — what is inside each cluster? This is the one that catches a clustering
-which scores well for the wrong reason, which is exactly the failure EXP-2.5-05
-found when verb synonyms split despite naming the same object.
-
-Colours in the 2D map are derived from the cluster id by a hash, so they are stable
-between runs and carry no meaning; the figure is not encoding a score in its palette.
-"""
+"""Three views of a clustering, as static SVG."""
 
 from __future__ import annotations
 
@@ -42,7 +8,6 @@ from dataclasses import dataclass
 
 import numpy as np
 
-#: Canvas margins shared by every figure, so a set of three lines up visually.
 _MARGIN = 24
 _LABEL_SIZE = 11
 
@@ -85,7 +50,7 @@ def _text(
 
 
 def _cluster_hue(index: int) -> str:
-    """A stable colour per cluster. Decorative, so a hash is enough."""
+    """A stable colour per cluster."""
     golden = 0.9 + 0.7 * ((index * 0.618033988749895) % 1.0)
     red, green, blue = _hsv_to_rgb(golden * 0.22, 0.45, 0.86)
     return f"#{red:02x}{green:02x}{blue:02x}"
@@ -109,22 +74,8 @@ def _hsv_to_rgb(hue: float, saturation: float, value: float) -> tuple[int, int, 
     return round(red * 255), round(green * 255), round(blue * 255)
 
 
-# ------------------------------------------------------------------ treemap
-
-
 def squarify(sizes: Sequence[float], width: float, height: float) -> list[Rect]:
-    """Lay rectangles out by area with roughly square aspect ratios.
-
-    Plain slice-and-dice alternates the cutting direction, which is three lines of
-    code and produces long thin slivers for unequal areas — a 200-episode cluster
-    next to a 2-episode one becomes an unreadable stripe. Squarified layout keeps
-    the aspect ratio near 1 by growing each row along its shorter side.
-
-    Rectangles come back in the order the sizes were given. Matching them back up by
-    area afterwards looks simpler and is wrong: two clusters of the same size are
-    indistinguishable, so `list.index` would label half the figure with the first
-    cluster's name.
-    """
+    """Lay rectangles out by area with roughly square aspect ratios."""
     if not sizes:
         return []
     total = float(sum(sizes))
@@ -155,11 +106,6 @@ def squarify(sizes: Sequence[float], width: float, height: float) -> list[Rect]:
         if not row:
             return
         areas = [item[0] for item in row]
-        # Each row is laid along the **shorter** remaining side, so the row's full
-        # extent is exactly that side and the layout cannot run off the canvas.
-        # Laying along the longer side overflows by construction, and the overflow
-        # is invisible in the numbers - the areas still sum correctly - so the
-        # figures carried it until a containment test caught it.
         if w >= h:
             thickness = sum(areas) / h
             offset = 0.0
@@ -183,9 +129,6 @@ def squarify(sizes: Sequence[float], width: float, height: float) -> list[Rect]:
     for index, size in enumerate(sizes):
         area = float(size) * scale
         if area <= 0.0:
-            # Kept in the output so there is exactly one rectangle per input, in
-            # order. Dropping it makes the caller's `strict=True` zip raise, and an
-            # empty cluster is a real thing a clustering can produce.
             placed[index] = Rect(x, y, 0.0, 0.0)
             continue
         item = (area, index)
@@ -231,16 +174,8 @@ def render_treemap(
     return _svg(width, height, "".join(parts), title)
 
 
-# ---------------------------------------------------------------- 2D + hull
-
-
 def convex_hull(points: np.ndarray) -> np.ndarray:
-    """Andrew's monotone chain hull, counter-clockwise.
-
-    Collinear points are dropped from the hull edges but kept in the scatter, which
-    is the point of drawing both: the hull says what the cluster encloses and the
-    points say what is actually in it.
-    """
+    """Andrew's monotone chain hull, counter-clockwise."""
     if len(points) < 3:
         return points
     ordered = points[np.lexsort((points[:, 1], points[:, 0]))]
@@ -262,12 +197,7 @@ def convex_hull(points: np.ndarray) -> np.ndarray:
 
 
 def project_2d(matrix: np.ndarray) -> tuple[np.ndarray, tuple[float, float]]:
-    """First two principal components, and the share of variance each explains.
-
-    PCA by SVD rather than a library call, and deliberately: this projection knows
-    nothing about the cosine metric the clustering used, which is what makes the map
-    an honest worst case rather than a flattering picture.
-    """
+    """First two principal components, and the share of variance each explains."""
     if matrix.ndim != 2 or matrix.shape[0] < 2:
         raise ValueError("need at least two vectors to project")
     centred = matrix - matrix.mean(axis=0, keepdims=True)
@@ -332,9 +262,6 @@ def render_map(
     return _svg(width, height, "".join(parts), title)
 
 
-# ----------------------------------------------------------------- heatmap
-
-
 def _ramp(fraction: float) -> str:
     """White to blue, used for the heatmap so cell colour reads as one quantity."""
     fraction = min(max(fraction, 0.0), 1.0)
@@ -393,12 +320,7 @@ def cluster_attribute_matrix(
     tags: Mapping[str, Sequence[str]],
     columns: Sequence[str],
 ) -> np.ndarray:
-    """Share of each cluster carrying each attribute tag.
-
-    Rows are normalised so every row sums to one across the tags present in it: a
-    big cluster is not more interesting than a small one, and an unnormalised
-    heatmap would rank clusters by size instead of by composition.
-    """
+    """Share of each cluster carrying each attribute tag."""
     matrix = np.zeros((len(members), len(columns)), dtype=np.float64)
     for row_index, label in enumerate(sorted(members)):
         texts = list(members[label])

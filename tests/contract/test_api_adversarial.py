@@ -1,14 +1,4 @@
-"""Adversarial contract tests: the API attacked as a hostile client would.
-
-Black-box and database-free: every test drives the public HTTP surface with
-inputs chosen to break it - forged headers, absurd pagination, unknown enums,
-hostile path segments, oversized and malformed bodies - and asserts the
-response stays a well-formed problem object or a clean 404. The two behaviors
-pinned here were found by probing, not by reading code: a CRLF-bearing
-``X-Correlation-Id`` used to be echoed verbatim (header injection on a real
-server), and ``limit=-5`` used to reach the catalog unclamped on the jobs,
-artifacts, and failures pages (a 500 against real PostgreSQL).
-"""
+"""Adversarial contract tests: the API attacked as a hostile client would."""
 
 from __future__ import annotations
 
@@ -22,12 +12,7 @@ from data_engine.config import Settings
 
 
 class RecordingCatalog:
-    """Enough catalog for the read routes, recording what it was handed.
-
-    Pagination assertions need the *limit value that survived the API layer*,
-    so the fake is the witness: it records what the route passed down, not what
-    the caller asked for.
-    """
+    """Enough catalog for the read routes, recording what it was handed."""
 
     def __init__(self) -> None:
         self.limits: dict[str, int] = {}
@@ -107,8 +92,6 @@ def _client(catalog: RecordingCatalog | None = None) -> TestClient:
 
 class TestCorrelationHeader:
     def test_crlf_in_the_correlation_header_is_replaced_not_echoed(self) -> None:
-        # The id is reflected on every response, so a header carrying CR/LF
-        # must never survive: on a real server that is response-splitting.
         response = _client().get(
             "/api/v1/health", headers={"X-Correlation-Id": "evil\r\nX-Injected: yes"}
         )
@@ -124,8 +107,6 @@ class TestCorrelationHeader:
         assert len(response.headers["x-correlation-id"]) < 4096
 
     def test_a_well_formed_correlation_header_is_honored(self) -> None:
-        # The hostile cases must not break the honest caller: a printable id
-        # inside the size bound comes back untouched.
         response = _client().get(
             "/api/v1/health", headers={"X-Correlation-Id": "corr-2026.09_01/a+ok"}
         )
@@ -144,12 +125,6 @@ class TestCorrelationHeader:
 
 
 class TestPaginationBounds:
-    # One policy for every list route: an out-of-range limit is a 422, never a
-    # silent correction. The routes previously disagreed - some validated 1..500
-    # in the body while others clamped to 200 - so the same query parameter meant
-    # two different things depending on the endpoint, and a client could not tell
-    # a truncated page from a complete one. The bound now lives in the signature,
-    # which is also what OpenAPI documents.
     ROUTES: ClassVar[list[str]] = [
         "/api/v1/jobs",
         "/api/v1/artifacts",
@@ -205,17 +180,12 @@ class TestEnumAndPathAbuse:
         assert response.status_code == 422
 
     def test_path_traversal_in_an_identifier_is_a_clean_problem_response(self) -> None:
-        # A path segment cannot escape its route: an encoded traversal is a
-        # 404 with a problem body - never a stack trace or a downstream hit.
         response = _client().get("/api/v1/jobs/..%2F..%2Fsecrets")
         assert response.status_code == 404
         body = response.json()
         assert body["code"] and body["title"]
 
     def test_encoded_unicode_and_nul_identifiers_get_a_clean_problem(self) -> None:
-        # Percent-encoded so the bytes actually reach the server; whatever the
-        # framework does with them, the answer must be a problem object, not
-        # a 500 with a stack trace.
         response = _client().get("/api/v1/jobs/%E2%80%AEover%00ride")
         assert response.status_code in (404, 422)
         body = response.json()
@@ -248,8 +218,6 @@ class TestBodyAbuse:
         assert response.status_code == 422
 
     def test_a_huge_episode_body_is_rejected_for_shape_not_exhaustion(self) -> None:
-        # One field with a million samples: the validator must reject the
-        # misalignment without materializing trouble - and fast.
         episode = {
             "task": "t",
             "robot": "r",

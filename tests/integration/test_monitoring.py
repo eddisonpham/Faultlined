@@ -1,14 +1,4 @@
-"""Integration tests for the notifier against real SQL (ADR 0020).
-
-The guarantees under test are the ones a stub cannot prove: that the partial
-unique index really does make dedup unbreakable, that a baseline survives a
-round trip, and that a whole tick — probe, features, rules, contracts, triage,
-persist — works against the actual database.
-
-Everything is UUID-scoped so these tests neither depend on nor disturb what
-another test wrote — which matters here more than usual, because the shared test
-database accumulates content-addressed state across runs.
-"""
+"""Integration tests for the notifier against real SQL (ADR 0020)."""
 
 from __future__ import annotations
 
@@ -48,12 +38,7 @@ def catalog() -> Iterator[PostgresCatalog]:
 
 
 def _job(catalog: PostgresCatalog, *, settle: bool = True) -> dict[str, Any]:
-    """Submit one job, optionally driving it to ``succeeded`` so contracts can settle.
-
-    ``claim_job`` takes the oldest queued job in the database, not a specific one,
-    so a shared test database means other tests' jobs come first. This drains the
-    queue until it reaches its own, which also tidies up after earlier tests.
-    """
+    """Submit one job, optionally driving it to ``succeeded`` so contracts can settle."""
     token = uuid.uuid4().hex
     job, _ = catalog.submit_job("ingest", {}, f"monitor-{token}", "test-correlation")
     job_id = str(job["id"])
@@ -70,12 +55,7 @@ def _job(catalog: PostgresCatalog, *, settle: bool = True) -> dict[str, Any]:
 
 
 def _scope() -> str:
-    """A unique scope per probe.
-
-    Fingerprints are deterministic functions of (label, scope, signature), so two
-    tests using the same scope would share one incident in the shared test
-    database — and the second would bump the first rather than open its own.
-    """
+    """A unique scope per probe."""
     return f"probe-{uuid.uuid4().hex[:8]}"
 
 
@@ -160,8 +140,6 @@ class TestIncidentStore:
     def test_the_same_fingerprint_bumps_instead_of_duplicating(
         self, catalog: PostgresCatalog
     ) -> None:
-        # The dedup guarantee is the partial unique index, not application logic,
-        # so it holds even if a crash lands between triage and the write.
         scope = _scope()
         first = _upsert(catalog, _signal(scope=scope), NOW)
         second = _upsert(catalog, _signal(scope=scope), NOW + timedelta(minutes=5))
@@ -215,7 +193,6 @@ class TestIncidentStore:
         assert catalog.set_incident_status(str(row["id"]), "acknowledged") is None
 
     def test_the_budget_counts_only_new_incidents(self, catalog: PostgresCatalog) -> None:
-        # A still-open fault re-firing is not news; only new rows consume budget.
         scope = _scope()
         row = _upsert(catalog, _signal(scope=scope), NOW)
         before = catalog.incidents_opened_since(NOW - timedelta(hours=1))
@@ -256,8 +233,6 @@ class TestContracts:
         catalog.register_contract(job["id"], Expectation(expected_episodes=1).to_dict())
         catalog.set_contract_outcome(job["id"], "short", {"valid_episodes": 0})
         catalog.register_contract(job["id"], Expectation(expected_episodes=9).to_dict())
-        # A revised expectation has not been evaluated yet, and claiming it was
-        # would hide a breach rather than surface it.
         assert catalog.get_contract(job["id"])["outcome"] == "pending"  # type: ignore[index]
 
     def test_a_contract_for_a_missing_job_fails_the_foreign_key(
@@ -316,9 +291,6 @@ class TestFullTick:
     def test_a_monitor_with_no_telemetry_is_blind_not_healthy(
         self, catalog: PostgresCatalog
     ) -> None:
-        # A monitor that cannot see the platform looks exactly like one with
-        # nothing to report, and only one of those is healthy. Silence must never
-        # be the default reading.
         report = self._monitor(catalog).tick()
         assert report.blind is True
         assert not report.features.has("sink_lag_seconds")
@@ -367,15 +339,12 @@ class TestFullTick:
             def monitoring_snapshot(self, **_: Any) -> dict[str, Any]:
                 raise RuntimeError("connection refused")
 
-        # The exact signal count is the assertion, so the host must not supply a
-        # second one: an unpinned sample reports this machine's memory pressure.
         pin_a_healthy_host(monkeypatch)
         service = self._monitor(catalog)
         report = service.tick(Broken())
         assert report.catalog_reachable is False
         assert report.blind is True
         assert Label.DATABASE_UNREACHABLE.value in {s.label for s in report.signals}
-        # Nothing else may be claimed from a platform the monitor cannot see.
         assert len(report.signals) == 1
 
     def test_a_database_outage_does_not_reset_the_baselines(self, catalog: PostgresCatalog) -> None:
@@ -389,8 +358,6 @@ class TestFullTick:
                 raise RuntimeError("connection refused")
 
         service.tick(Broken())
-        # The book is kept in memory so a brief outage blips the incident store
-        # rather than resetting every control limit to cold.
         assert service.health()["baseline_scopes"] == warm_before
 
     def test_a_breached_contract_opens_an_incident(self, catalog: PostgresCatalog) -> None:
@@ -427,10 +394,8 @@ class TestMonitorLease:
         other = PostgresCatalog(catalog.settings)
         with catalog.monitor_lease() as first:
             assert first is True
-            # A second connection stands in for another worker's loop.
             with other.monitor_lease() as second:
                 assert second is False
-        # The lock is session-scoped: closing the block releases it.
         with other.monitor_lease() as again:
             assert again is True
 
@@ -444,12 +409,7 @@ class TestMonitorLease:
 
 
 class TestScheduledTick:
-    """ADR 0031: the worker loop's own path is enough to open an incident.
-
-    This is the release-blocker acceptance criterion - "an incident appears where
-    nobody POSTs `/api/v1/monitoring/tick`" - exercised through `_monitor_tick`,
-    which is the function `_worker_loop` calls.
-    """
+    """ADR 0031: the worker loop's own path is enough to open an incident."""
 
     def _monitor(self, catalog: PostgresCatalog) -> MonitorService:
         return MonitorService(

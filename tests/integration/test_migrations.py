@@ -1,18 +1,4 @@
-"""Integration tests for the migration runner (ADR 0028), against real PostgreSQL.
-
-Each test builds its own throwaway database instead of using the shared
-`<dbname>_test` catalog, for one reason: applying a synthetic migration writes
-its version into `schema_migrations`, and a version the shipped registry does
-not know would make every later `status()` call on the shared database report
-the database as ahead of the code. The ledger has to start empty, so the
-database does too. Everything is dropped in the fixture teardown.
-
-What is pinned here, in the order an operator meets it: a fresh database reads
-as having nothing applied; `upgrade` applies the real baseline DDL and records
-it; a second `upgrade` is a no-op; an injected migration applies exactly once
-and only once even when `upgrade` runs again; and a database that knows a
-version this code does not is refused, not migrated past.
-"""
+"""Integration tests for the migration runner (ADR 0028), against real PostgreSQL."""
 
 from __future__ import annotations
 
@@ -36,11 +22,7 @@ pytestmark = pytest.mark.integration
 
 @pytest.fixture
 def fresh_settings() -> Iterator[Settings]:
-    """An empty throwaway database, dropped after the test.
-
-    The DSN's credentials are reused; only the database name is new, so nothing
-    outside the cluster this test stack already uses is touched.
-    """
+    """An empty throwaway database, dropped after the test."""
     base = postgres_test_dsn()
     if not base:
         pytest.skip("no DE_DATABASE_URL configured")
@@ -83,9 +65,6 @@ def _table_exists(settings: Settings, table: str) -> bool:
     return row is not None
 
 
-# ------------------------------------------------------------------- the ledger
-
-
 def test_a_fresh_database_starts_with_an_empty_ledger(fresh_settings: Settings) -> None:
     state = migrations.status(fresh_settings)
     assert state["applied"] == []
@@ -99,7 +78,6 @@ def test_upgrade_on_a_fresh_database_applies_and_records_every_version(
 ) -> None:
     applied = migrations.upgrade(fresh_settings)
     assert applied == ["0001", "0002"]
-    # The real DDL ran: the catalog tables exist, not just the ledger row.
     assert _table_exists(fresh_settings, "jobs")
     assert _table_exists(fresh_settings, "schema_migrations")
     assert _table_exists(fresh_settings, "task_vocabulary_entries")
@@ -115,19 +93,11 @@ def test_upgrade_is_a_noop_when_everything_is_applied(fresh_settings: Settings) 
 
 
 def test_initialize_schema_records_the_baseline_it_built(fresh_settings: Settings) -> None:
-    """The safety-net path and the migration ledger must agree.
-
-    The safety net builds idempotent DDL and records only the baseline; real
-    migrations stay pending until `de migrate` runs them (ADR 0028), so a
-    database is never silently restructured by a process start.
-    """
+    """The safety-net path and the migration ledger must agree."""
     initialize_schema(fresh_settings)
     state = migrations.status(fresh_settings)
     assert state["applied"] == ["0001"]
     assert state["pending"] == ["0002"]
-
-
-# ---------------------------------------------------------- once-only semantics
 
 
 def test_an_injected_migration_applies_exactly_once(fresh_settings: Settings) -> None:
@@ -135,13 +105,10 @@ def test_an_injected_migration_applies_exactly_once(fresh_settings: Settings) ->
     probe = _ProbeMigration("9001", "CREATE TABLE probe_done (id integer)")
     registry: tuple[Migration, ...] = (BaselineMigration(), probe)
 
-    # initialize_schema already built and recorded the baseline, so only the
-    # probe is pending.
     assert migrations.upgrade(fresh_settings, migrations=registry) == ["9001"]
     assert probe.calls == 1
     assert _table_exists(fresh_settings, "probe_done")
 
-    # The second run skips it: once recorded, a migration never runs again.
     assert migrations.upgrade(fresh_settings, migrations=registry) == []
     assert probe.calls == 1
     state = migrations.status(fresh_settings, migrations=registry)
@@ -156,13 +123,9 @@ def test_a_failing_migration_leaves_no_version_behind(fresh_settings: Settings) 
 
     with pytest.raises(PsycopgSyntaxError):
         migrations.upgrade(fresh_settings, migrations=registry)
-    # The transaction rolled back: no version row, no partial state to clean up.
     state = migrations.status(fresh_settings)
     assert "9002" not in state["applied"]
     assert broken.calls == 1
-
-
-# ------------------------------------------------------------- ahead of the code
 
 
 def test_a_database_newer_than_the_code_is_refused(fresh_settings: Settings) -> None:
@@ -171,8 +134,6 @@ def test_a_database_newer_than_the_code_is_refused(fresh_settings: Settings) -> 
     registry: tuple[Migration, ...] = (BaselineMigration(), probe)
     migrations.upgrade(fresh_settings, migrations=registry)
 
-    # The shipped registry does not know 9004; migrating past it would be
-    # running old code against a newer catalog.
     with pytest.raises(RuntimeError, match="newer than this code"):
         migrations.upgrade(fresh_settings)
 

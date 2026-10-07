@@ -1,10 +1,4 @@
-"""Unit tests for the clustering method, centroid rules, and metrics.
-
-Deliberately built on the `null` encoder. These tests are about *plumbing and
-invariants* - does the freeze actually freeze, does a metric compute the right
-thing - and none of them should need a model downloaded to pass. A test that
-requires a network fetch is a test that fails for reasons unrelated to the code.
-"""
+"""Unit tests for the clustering method, centroid rules, and metrics."""
 
 from __future__ import annotations
 
@@ -70,8 +64,7 @@ def test_every_rule_returns_a_unit_vector(rule: object) -> None:
 
 @pytest.mark.unit
 def test_a_rule_survives_a_freshly_spawned_cluster() -> None:
-    """A brand-new cluster has one point. `RobustTrim` raised here on its first
-    update because the requested kth exceeded the buffer length."""
+    """A brand-new cluster has one point."""
     for rule in (RobustTrim(64, 0.2), Huber(64, 1.0), Medoid(32)):
         centroid = rule.update(
             np.array([1.0, 0.0], dtype=np.float32), np.array([0.0, 1.0], np.float32)
@@ -81,12 +74,7 @@ def test_a_rule_survives_a_freshly_spawned_cluster() -> None:
 
 @pytest.mark.unit
 def test_robust_rules_resist_an_outlier_that_the_running_mean_follows() -> None:
-    """The property that separates them, stated as a test rather than a claim.
-
-    Both rules must be primed first: on the very first update every rule returns
-    the point itself, because a one-member cluster's centre *is* that member.
-    Comparing them on a cold start would compare nothing.
-    """
+    """The property that separates them, stated as a test rather than a claim."""
     outlier = np.array([-1.0, 0.0], dtype=np.float32)
     start = np.array([0.98, 0.2], dtype=np.float32)
     start = start / np.linalg.norm(start)
@@ -107,15 +95,7 @@ def test_robust_rules_resist_an_outlier_that_the_running_mean_follows() -> None:
 
 @pytest.mark.unit
 def test_ema_bounds_a_single_point_more_than_a_running_mean() -> None:
-    """A slow EMA resists a single point more than a running mean does.
-
-    Primed on inliers first: on a cold start every rule returns the point itself,
-    because a one-member cluster's centre is that member, and the comparison
-    would be between two identical answers.
-    """
-    # Deliberately non-collinear. An exactly anti-parallel outlier in one
-    # dimension normalises straight back to the start direction, which makes the
-    # comparison meaningless.
+    """A slow EMA resists a single point more than a running mean does."""
     start = np.array([1.0, 0.0], dtype=np.float32)
     inlier = np.array([0.92, 0.39], dtype=np.float32)
     outlier = np.array([0.0, 1.0], dtype=np.float32)
@@ -227,7 +207,6 @@ def test_unassigned_strings_are_reported() -> None:
 @pytest.mark.unit
 def test_ari_is_one_for_an_identical_partition_and_zero_for_chance() -> None:
     assert metrics.adjusted_rand([0, 0, 1, 1], [0, 0, 1, 1]) == pytest.approx(1.0)
-    # Everything in one cluster is a degenerate partition: 0/0, reported as 0.
     assert metrics.adjusted_rand([0, 0, 0, 0], [0, 0, 0, 0]) == 0.0
 
 

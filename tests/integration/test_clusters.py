@@ -1,19 +1,4 @@
-"""Integration tests for cluster proposal storage (real SQL).
-
-The contract tests in `tests/contract/test_cluster_api.py` replace this module, so the
-SQL underneath them is only ever asserted here: the four tables, the transactional
-rebuild, and the one property the whole design exists for - a confirmation survives a
-rebuild that re-keys every proposal.
-
-That property was measured broken. The first version pointed
-`cluster_confirmations` at `task_clusters(key)` with `ON DELETE CASCADE`, and one
-rebuild with a different axis set deleted every label an operator had written. The
-tests below are written so that version would fail them.
-
-`replace_proposals` truncates the proposal tables by design, so nothing here is safe to
-run against a catalog whose cluster state matters, and each test removes the
-confirmations it wrote.
-"""
+"""Integration tests for cluster proposal storage (real SQL)."""
 
 from __future__ import annotations
 
@@ -32,8 +17,6 @@ from tests.conftest import postgres_test_dsn
 
 pytestmark = pytest.mark.integration
 
-#: A fixed corpus with one obvious group (the mugs), so what is being asserted is the
-#: storage and not a grouping decision the clustering layer already owns in its own tests.
 CONTROLLED = {
     "put the red mug on the plate": 12,
     "put the blue mug on the plate": 8,
@@ -91,9 +74,6 @@ def _label() -> str:
     return f"pytest-{uuid.uuid4().hex[:8]}"
 
 
-# ------------------------------------------------------------------ the rebuild
-
-
 def test_a_rebuild_writes_proposals_a_run_and_a_health_block(settings: Settings) -> None:
     result = store.rebuild(settings, source="sample")
     assert result["run_id"] > 0
@@ -112,11 +92,6 @@ def test_a_rebuild_writes_proposals_a_run_and_a_health_block(settings: Settings)
 def test_a_second_rebuild_replaces_the_first_rather_than_adding_to_it(
     settings: Settings,
 ) -> None:
-    # Establish a baseline run of our own so the assertions below do not depend on
-    # what an earlier test left behind. run_history is capped and this database is
-    # never truncated, so counting rows stopped growing once the cap was reached:
-    # the original `len(run_history(limit=200)) == before + 2` passed for dozens of
-    # runs and then failed on its own, with no code change, at 247 accumulated runs.
     store.rebuild(settings, source="sample", ignored="site")
     before = [row["id"] for row in store.run_history(settings, limit=5)]
 
@@ -186,9 +161,6 @@ def test_a_rebuild_reads_the_catalog_and_reports_the_truncation_flag(
     assert result["health"]["truncated"] is True, "a capped read has to say it was capped"
 
 
-# -------------------------------------------------------------- confirmations
-
-
 def test_confirming_names_a_proposal_and_the_name_reads_back(
     settings: Settings, cleanup: None
 ) -> None:
@@ -226,24 +198,13 @@ def test_releasing_a_confirmation_puts_the_cluster_back_in_play(
 def test_a_confirmation_survives_a_rebuild_that_re_keys_every_proposal(
     settings: Settings, cleanup: None
 ) -> None:
-    """The property the whole module exists for.
-
-    Changing the ignored axes changes every core, so every proposal key changes. The
-    confirmation is stored as the task strings it covers and has to find them again.
-
-    Written over a controlled proposal set rather than over the catalog on purpose: the
-    test database is shared, and grouping a few thousand unrelated task strings is the
-    clustering's business, not the store's. What is under test here is that a
-    confirmation written against one set of rows is found again in another.
-    """
+    """The property the whole module exists for."""
     first = build(CONTROLLED, ignored=Ignored(verb=True, colour=True))
     key = max(first.proposals, key=lambda item: item.task_count).key
     label = _label()
     store.replace_proposals(settings, first)
     assert store.confirm(settings, key, label) is True
 
-    # Ignoring the site as well takes the core from "mug on plate" to "mug": a different
-    # key, holding the same four task strings.
     second = build(CONTROLLED, ignored=Ignored(verb=True, colour=True, site=True))
     assert max(second.proposals, key=lambda item: item.task_count).key != key, (
         "if the key did not change, this proves nothing"
@@ -261,13 +222,7 @@ def test_a_confirmation_survives_a_rebuild_that_re_keys_every_proposal(
 def test_a_confirmation_whose_strings_are_gone_is_counted_as_orphaned(
     settings: Settings, cleanup: None
 ) -> None:
-    """Reported, never quietly reattached to the nearest surviving cluster.
-
-    Shrinking the radius scatters the confirmed group. Every remaining fragment still
-    shares a task string with the confirmation, so matching on *any* overlap would put
-    the operator's name on an arbitrary neighbour. It is orphaned instead, and the claim
-    stays in the table where the operator can find it.
-    """
+    """Reported, never quietly reattached to the nearest surviving cluster."""
     result = store.rebuild(settings, source="sample")
     group = max(
         (item for item in result["proposals"].proposals if item.task_count > 1),
@@ -362,9 +317,6 @@ def test_confirming_the_same_group_twice_keeps_one_confirmation(
     assert detail is not None and detail["label"] == f"{label}-renamed"
 
 
-# ------------------------------------------------------------- the detail view
-
-
 def _ui_client(settings: Settings) -> object:
     """The real app over the real catalog, driven only through HTTP."""
     from fastapi.testclient import TestClient
@@ -408,8 +360,6 @@ def test_the_vocabulary_page_replaces_the_cluster_detail_workflow(settings: Sett
     assert response.status_code == 200
     assert "Unmapped queue" in response.text
     assert 'href="/ui/vocabulary"' in response.text
-    # No cluster control survives the cutover; the only triage action is the
-    # vocabulary's own candidate acceptance.
     assert "/ui/clusters" not in response.text
     assert "/confirm" not in response.text
     assert "/ui/vocabulary/rebuild" not in response.text

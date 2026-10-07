@@ -1,23 +1,4 @@
-"""Metrics, ordered by how much they actually answer the question.
-
-The gold set is a set of *pair* labels, so the primary metrics are pair-level.
-That is a deliberate choice. ARI and B-cubed compare partitions and are the
-standard numbers, but they average over every item and will happily report a
-healthy score for a clustering that merged "place the bowl on the plate" with
-"screw in the bolt". This domain has one failure that matters more than the rest
-- two different things landing in one cluster - and only a pair metric names it
-directly.
-
-`over_merge_rate` is therefore the headline. A method that is wrong in that
-direction produces a dataset build that silently mixes tasks, and no aggregate
-partition score makes that obvious. `under_merge_rate` is its opposite and much
-cheaper to live with: a task split across two clusters shows up as two smaller
-clusters, and a human merges them.
-
-Ambiguous pairs are never scored. They are counted and returned separately,
-because folding them into either class would let a method score well by accident
-on calls a human could argue either way.
-"""
+"""Metrics, ordered by how much they actually answer the question."""
 
 from __future__ import annotations
 
@@ -38,13 +19,8 @@ class PairScores:
     pair_f1: float
     scored_pairs: int
     ambiguous_pairs: int
-    #: Gold "different" pairs that were merged, with the texts. The audit reads
-    #: this; a number alone does not say what went wrong.
     over_merged: tuple[tuple[str, str], ...] = ()
-    #: Gold "same" pairs that were split apart.
     under_merged: tuple[tuple[str, str], ...] = ()
-    #: Strings the clustering never assigned. Reported so a method that quietly
-    #: drops inputs cannot read as a clean result.
     unassigned: tuple[str, ...] = ()
 
     def as_dict(self) -> dict[str, float | int]:
@@ -69,13 +45,7 @@ def pair_scores(
     pairs: Iterable[GoldPair],
     view: str,
 ) -> PairScores:
-    """Score a clustering against the decided pairs for one view.
-
-    `labels` maps a task string to its cluster id. A pair is "merged" when both
-    strings carry the same label, and "split" otherwise. Unlabelled strings are
-    counted as unassigned and reported, because a method that silently drops
-    inputs would otherwise look clean.
-    """
+    """Score a clustering against the decided pairs for one view."""
     attribute = f"same_{view}"
     positives: list[tuple[str, str]] = []
     negatives: list[tuple[str, str]] = []
@@ -122,11 +92,7 @@ def _comb2(n: int) -> float:
 
 
 def adjusted_rand(left: Sequence[int], right: Sequence[int]) -> float:
-    """Adjusted Rand Index between two labellings of the same items.
-
-    Returns 0.0 when both labellings are degenerate (everything in one cluster),
-    where the index is 0/0 and any value would be an invention.
-    """
+    """Adjusted Rand Index between two labellings of the same items."""
     if len(left) != len(right):
         raise ValueError("label sequences must be the same length")
     n = len(left)
@@ -170,7 +136,6 @@ def b_cubed(labels: Sequence[int], gold: Sequence[int]) -> float:
     total = 0.0
     for index, (a, b) in enumerate(zip(labels, gold, strict=True)):
         both = joint[(a, b)]
-        # A singleton in both labellings agrees perfectly; the formula gives 0/0.
         if predicted_sizes[a] == 1 and gold_sizes[b] == 1:
             total += 1.0
             continue
@@ -183,20 +148,10 @@ def b_cubed(labels: Sequence[int], gold: Sequence[int]) -> float:
 
 @dataclass(frozen=True, slots=True)
 class Stability:
-    """How much a method's output moves when the input order moves.
+    """How much a method's output moves when the input order moves."""
 
-    This is the metric that decides whether the method is usable online. A
-    clustering that reshuffles with input order means every label a human
-    confirmed becomes wrong the next time a batch arrives, whatever its accuracy.
-    """
-
-    #: Mean pairwise ARI between runs over different input orders, in [0, 1].
     mean_agreement: float
-    #: Worst pairwise ARI. A single bad ordering is enough to ruin a day of
-    #: curation, so the worst case is reported next to the mean.
     worst_agreement: float
-    #: Cluster counts seen across orders; more than one value means the method's
-    #: own answer to "how many tasks are there?" is order-dependent.
     distinct_cluster_counts: int
     orders: int = 0
     extras: dict[str, float] = field(default_factory=dict)

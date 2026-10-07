@@ -1,15 +1,4 @@
-"""Stop the dev server that is listening on the API port - `just stop`.
-
-The counterpart to `check_port`: a forgotten background `just run` keeps the
-port and the next start fails. Netstat archaeology (find the PID, taskkill it)
-is exactly the kind of ritual that gets mistyped, so the stop is one command.
-
-Safety: the script only kills a process that is (a) listening on the API port
-and (b) looks like this project's own server (`de`, `python`, or `uvicorn`
-image name). Anything else - some other application that happens to hold the
-port - is reported and left alone; killing an unrelated process by port is how
-mornings are ruined.
-"""
+"""Stop the dev server that is listening on the API port - `just stop`."""
 
 from __future__ import annotations
 
@@ -27,8 +16,6 @@ _OWN_IMAGE_PARTS = ("de", "python", "uvicorn")
 
 def _looks_like_ours(image: str | None) -> bool:
     if image is None:
-        # Unknown image: assume ours rather than refuse - the port check already
-        # narrowed this to the API port we configure.
         return True
     lowered = image.lower()
     return any(part in lowered for part in _OWN_IMAGE_PARTS)

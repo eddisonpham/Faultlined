@@ -1,14 +1,6 @@
 """Entry point for the stage 2.5 clustering experiments.
 
-Run with `just cluster <subcommand>`. Subcommands are added as each experiment
-lands, and each writes a JSON result under `experiments/clustering/results/` so a
-result is reviewable and diffable rather than scrolled past in a terminal.
-
-Order matters and is enforced by the runner: `factorial` and `audit` refuse to
-run until the two upstream decisions they depend on - the centroid rule and the
-view projection - have been frozen and recorded. A full factorial evaluated
-before the centroid question is settled would multiply the search space by a
-factor nobody needs, and the results would be impossible to read.
+Run with `just cluster <subcommand>`.
 """
 
 from __future__ import annotations
@@ -37,10 +29,6 @@ def _write(name: str, payload: dict[str, Any]) -> Path:
     return path
 
 
-#: The two gold sets. `hand` is realistic and small; `constructed` has labels
-#: that are exact by construction and is an upper bound. Both are available to
-#: every scoring command, because a conclusion is only worth stating when the two
-#: agree - see `evaluation/gold_grid.py` for what each one can and cannot answer.
 GOLD_SETS = ("hand", "constructed")
 
 
@@ -104,10 +92,6 @@ def cmd_gold(args: argparse.Namespace) -> int:
     return 0
 
 
-#: Candidate radii, in cosine distance. The grid brackets where the object view's
-#: best similarity threshold sits (similarity 0.83-0.87, so distance 0.13-0.17) with
-#: room either side, because the online algorithm needs a radius that produces a
-#: usable number of clusters, not one that maximises a pairwise score.
 RADIUS_GRID = (0.05, 0.10, 0.15, 0.20, 0.30, 0.40)
 
 
@@ -130,18 +114,7 @@ def _score_on_dev(
 
 
 def cmd_centroids(args: argparse.Namespace) -> int:
-    """Decide the centroid rule on dev data, before the factorial.
-
-    Dev only, always. The held-out set exists to be touched once, and an
-    exploratory sweep over nine rules on it would spend that for nothing.
-
-    The radius is *selected here too*, on dev, rather than supplied. The previous
-    version of this command took a radius as an argument and every reported number
-    inherited whatever the caller typed - which is why the earlier run is marked
-    invalid in the findings record. Over-merges are ranked first because a false
-    merge silently mixes two tasks into one build, while a false split shows up as
-    two small clusters a human fixes in seconds.
-    """
+    """Decide the centroid rule on dev data, before the factorial."""
     from experiments.clustering import centroid_experiment
     from experiments.clustering.evaluation import evaluation as ev
 
@@ -206,11 +179,7 @@ def cmd_centroids(args: argparse.Namespace) -> int:
 
 
 def cmd_projection(args: argparse.Namespace) -> int:
-    """Does the learned projection make the action view work by threshold alone?
-
-    Reports the width sweep on dev, then the chosen width's score on held-out -
-    which is read once, after everything is frozen.
-    """
+    """Does the learned projection make the action view work by threshold alone?"""
     from experiments.clustering import projection
     from experiments.clustering.evaluation import separability as sep
 
@@ -235,8 +204,6 @@ def cmd_projection(args: argparse.Namespace) -> int:
     print(f"embedding {encoder.name} dim={encoder.dim}  gold={args.set_name}")
     print(f"{'view':7s} {'k':>3s} {'dev bacc':>9s} {'dev over':>9s} {'dev split':>9s}")
     for view in ("action", "object"):
-        # `None` means "use the module's measured default"; a literal 0.1 here
-        # would silently override it and quietly reproduce the worst setting.
         shrinkage = args.shrinkage if args.shrinkage is not None else projection.DEFAULT_SHRINKAGE
         fitted, sweep = projection.choose_k(
             by_text, split.dev, view, encoder.name, shrinkage, metric=args.metric
@@ -247,8 +214,6 @@ def cmd_projection(args: argparse.Namespace) -> int:
 
         metrics: dict[str, Any] = {}
         for metric in ("cosine", "euclidean"):
-            # The dev "before" is the control that decides whether the projection
-            # failed or merely overfitted. Without it a held-out drop is ambiguous.
             dev_before = sep.separability(by_text, split.dev, metric=metric)[view]
             dev_after = sep.separability(projected, split.dev, metric=metric)[view]
             before = sep.separability(by_text, split.heldout, metric=metric)[view]
@@ -295,24 +260,14 @@ def cmd_projection(args: argparse.Namespace) -> int:
     return 0
 
 
-#: A string whose distance to the centroid it joined falls within this multiple of
-#: the radius counts as a boundary case. Comfortably inside means the assignment was
-#: obvious; comfortably outside means the string sat alone.
 BOUNDARY_MARGIN = 1.5
 
 
-#: Candidate colour-facet weights. Zero is the current behaviour and is included so
-#: the sweep can report what the facet buys rather than only that it was tried.
 COLOUR_WEIGHTS = (0.0, 0.25, 0.5, 1.0, 2.0, 4.0)
 
 
 def cmd_colours(args: argparse.Namespace) -> int:
-    """Choose the colour-facet weight on dev, sweeping the radius with it.
-
-    The two are coupled - adding a facet changes the scale of every cosine distance,
-    so a radius tuned without one is wrong for it - and they are therefore swept
-    together rather than in sequence. Selection is on dev pairs only.
-    """
+    """Choose the colour-facet weight on dev, sweeping the radius with it."""
     from experiments.clustering import attributes, centroid_experiment
     from experiments.clustering.evaluation import evaluation as ev
     from experiments.clustering.methods.online_centroids import OnlineCentroids
@@ -393,12 +348,7 @@ def _frozen_fit(
     Any,
     PairScores,
 ]:
-    """Fit the frozen configuration on held-out strings and return the pieces.
-
-    Shared by `final` and `plot` so the figure cannot describe a different
-    clustering from the one that was scored. A visualisation of anything other than
-    the evaluated artefact is worse than no visualisation.
-    """
+    """Fit the frozen configuration on held-out strings and return the pieces."""
     from experiments.clustering import centroid_experiment
     from experiments.clustering.evaluation import evaluation as ev
     from experiments.clustering.methods.online_centroids import OnlineCentroids
@@ -418,12 +368,7 @@ def _frozen_fit(
 
 
 def cmd_plot(args: argparse.Namespace) -> int:
-    """Render the frozen clustering as three reviewable SVG figures.
-
-    Treemap, a PCA map with per-cluster convex hulls, and a cluster-by-attribute
-    heatmap. Written next to the JSON the run produced so a reader can check one
-    against the other.
-    """
+    """Render the frozen clustering as three reviewable SVG figures."""
     from experiments.clustering import figures
     from experiments.clustering.evaluation import gold_grid
 
@@ -449,9 +394,6 @@ def cmd_plot(args: argparse.Namespace) -> int:
         colour = attributes.colour_of(text)
         tags[text] = [f"colour:{colour}"]
     if args.set_name == "constructed":
-        # The grid knows each string's verb class exactly. No heuristic could, and
-        # a guessed verb in a figure that is supposed to be evidence would be worse
-        # than omitting the row.
         for text, (verb, _object) in gold_grid.string_classes(
             gold_grid.constructed_pairs()
         ).items():
@@ -475,8 +417,6 @@ def cmd_plot(args: argparse.Namespace) -> int:
     (out / f"map-{stem}.svg").write_text(svg, encoding="utf-8")
     written.append(f"map-{stem}.svg")
 
-    # Verb columns only where they exist; 17 of them would crowd the colour ones
-    # off the canvas and the colour split is what EXP-2.5-05 turned on.
     heat_columns = [column for column in columns if not column.startswith("verb:")] + top_verbs
     heat = figures.render_heatmap(
         matrix[:, [columns.index(column) for column in heat_columns]],
@@ -503,18 +443,7 @@ def cmd_plot(args: argparse.Namespace) -> int:
 
 
 def cmd_final(args: argparse.Namespace) -> int:
-    """Score the frozen configuration on held-out pairs, once, and audit its edges.
-
-    Everything here is fixed before this runs: encoder, view, centroid rule, radius.
-    The clustering is fitted on held-out *strings* and scored against held-out
-    *pairs*, so nothing about the answer was tuned on what is being graded.
-
-    The audit exists because pair F1 alone cannot tell a human whether the clusters
-    are right. A false merge at 0.941 looks identical to a correct merge. So the
-    strings sitting near the decision boundary are dumped with the members they were
-    merged with and the labels they were actually judged against, which is the only
-    form in which "works well" is checkable.
-    """
+    """Score the frozen configuration on held-out pairs, once, and audit its edges."""
     from experiments.clustering import centroid_experiment
     from experiments.clustering.evaluation import evaluation as ev
     from experiments.clustering.methods.online_centroids import OnlineCentroids
@@ -538,8 +467,6 @@ def cmd_final(args: argparse.Namespace) -> int:
     result = model.fit(heldout_vectors, heldout_texts)
     scores = ev.pair_scorer(split.heldout, args.view)(result.labels, heldout_texts, args.rule)
 
-    # Every gold label this string was judged by, so the audit can say what the
-    # string "actually" is rather than only what it was clustered with.
     verdicts: dict[str, list[str]] = {}
     for pair in split.heldout:
         verdict = getattr(pair, f"same_{args.view}")
@@ -561,10 +488,6 @@ def cmd_final(args: argparse.Namespace) -> int:
     boundary: list[dict[str, Any]] = []
     for text in heldout_texts:
         label = centroid_of[text]
-        # A true cosine distance, normalised on both sides. The clustering's own
-        # `1 - dot` assumes unit points, and a centroid is a mean rather than a
-        # point, so reporting that expression here would print a number the radius
-        # is not actually compared against.
         point = by_text[text]
         centre = centroids[label]
         cosine = float(point @ centre) / (
@@ -597,8 +520,6 @@ def cmd_final(args: argparse.Namespace) -> int:
             "radius": args.radius,
             "colour_weight": args.colour_weight,
             "mask_verbs": args.mask_verbs,
-            # A verb the lexicon misses is a silent no-op, not an error, so the
-            # coverage is reported with every run rather than assumed.
             "verb_mask_coverage": (
                 attributes.verb_mask_coverage(heldout_texts) if args.mask_verbs else None
             ),
@@ -615,8 +536,6 @@ def cmd_final(args: argparse.Namespace) -> int:
             "false_merges": len(scores.over_merged),
             "false_splits": len(scores.under_merged),
             "unassigned": scores.unassigned,
-            # The failing pairs themselves, not just their count: an over-merge rate
-            # of 0.286 does not say *which* pairs, and the whole point of this
             "over_merged_pairs": [{"a": left, "b": right} for left, right in scores.over_merged],
             "under_merged_pairs": [{"a": left, "b": right} for left, right in scores.under_merged],
         },
@@ -660,12 +579,7 @@ def sep_all(vectors: Any, texts: Sequence[str]) -> dict[str, Any]:
 
 
 def cmd_watch(args: argparse.Namespace) -> int:
-    """Stream task strings through the frozen clustering and serve a live view.
-
-    The one property an offline metric cannot show is that a confirmed cluster
-    stops moving, so this watches it happen: feed strings, click confirm, and the
-    figures re-render after every arrival.
-    """
+    """Stream task strings through the frozen clustering and serve a live view."""
     from experiments.clustering import watch
 
     encoder = embeddings.get(args.embedding)
@@ -688,12 +602,7 @@ def cmd_watch(args: argparse.Namespace) -> int:
 
 
 def cmd_separability(args: argparse.Namespace) -> int:
-    """Premise check: are same-pairs and different-pairs separable at all?
-
-    If they interleave at every threshold then no radius exists that works, and
-    every downstream number would be measuring an unachievable target. Worth
-    knowing before spending a factorial on it.
-    """
+    """Premise check: are same-pairs and different-pairs separable at all?"""
     from experiments.clustering.evaluation import separability as sep
 
     encoder = embeddings.get(args.embedding)
@@ -761,20 +670,7 @@ def cmd_separability(args: argparse.Namespace) -> int:
 
 
 def cmd_scale(args: argparse.Namespace) -> int:
-    """Run the frozen configuration over a thousand strings and report what breaks.
-
-    Three passes, because each answers a different question:
-
-    * **synthetic only** - the scale curve, the radius/masking sweep, and the label
-      metrics, all on strings whose gold object class is known.
-    * **real only** - the LeRobot task sentences, which have no labels and are
-      reported as cluster count, singleton rate and cohesion.
-    * **mixed** - both in one stream, to see whether 46 sentences of text nobody tuned
-      against disturb the 48 synthetic classes.
-
-    Everything is written to `results/scale.json`; the tables printed here are
-    generated from that file so the two cannot disagree.
-    """
+    """Run the frozen configuration over a thousand strings and report what breaks."""
     from experiments.clustering import corpus, figures, scale
 
     config = scale.Config(
@@ -796,8 +692,6 @@ def cmd_scale(args: argparse.Namespace) -> int:
 
     gold_synthetic = [item.label for item in synthetic]
     shuffled_items = corpus.shuffled(synthetic)
-    # One encode per verb setting, in one fixed order, reused by every pass below.
-    # Re-encoding per pass would let batch composition decide the cluster count.
     matrices: dict[bool, np.ndarray] = {}
     encode_seconds = 0.0
     for mask in (True, False):
@@ -863,8 +757,6 @@ def cmd_scale(args: argparse.Namespace) -> int:
             confirm_top=args.confirm_top,
         )
         mixed_run = scale.summary(mixed)
-        # Scored on the synthetic rows only: the real rows have no gold class, and
-        # inventing one for them would be exactly the circularity this run avoids.
         mixed_quality = scale.score_subset(mixed, mixed_items, "synthetic")
         mixed_run["synthetic_b_cubed"] = round(mixed_quality.get("b_cubed", 0.0), 4)
         mixed_run["synthetic_clusters"] = mixed_run["clusters"]

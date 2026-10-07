@@ -1,34 +1,5 @@
 #!/usr/bin/env python3
-"""Stage-5 fault injection: hard-killing a worker mid-ingest (NFR-006, F5/F10).
-
-One throwaway database per trial, a real `de worker` process ingesting the real
-hour-long MCAP bag (~43 MiB, ~13 s of ingest to kill inside), and a real hard kill
-(`taskkill /F /T`: no `finally`, no failure path, the same visible state a container
-restart or OOM-kill leaves). Then a fresh worker's production reaper sweep must
-reclaim the orphaned job and finish it, and the catalog must converge to exactly one
-episode and one intact artifact no matter where in the ingest the kill landed.
-
-Two kill points per run, sampling the two shapes a mid-ingest death can take:
-
-- ``mid-parse``   killed while the reader is still parsing; nothing published yet.
-- ``on-write``    killed at the first sign of artifact-write activity (the
-                  ``.pending-*`` temp or the published blob), the publish-then-
-                  register window where a half-done ingest can strand bytes.
-
-The 900 s presumed-death window (`ORPHANED_JOB_SECONDS`) is not waited out: the
-victim's `started_at` is back-dated past it before recovery starts, so the
-production reaper SQL runs with its production constant and the drill measures the
-recovery, not the clock. Kill `None` is not simulated anywhere: the worker process
-is always really killed.
-
-Checks after recovery, in both trials: the job succeeded on its retry, exactly one
-episode row exists for the source, the artifact blob's SHA-256 still matches the
-file it claims to be, exactly one quality row exists, and re-ingesting the same
-source as a fresh job is a no-op (F26). Stranded ``.pending-*`` temps and any blob
-published without a matching episode row are reported, not hidden.
-
-Numbers go to stdout as JSON; this script writes nothing to the repo.
-"""
+"""Stage-5 fault injection: hard-killing a worker mid-ingest (NFR-006, F5/F10)."""
 
 from __future__ import annotations
 
@@ -46,8 +17,6 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "scripts"))
 
-# Throwaway-database helpers live next door in the scaling-campaign driver; both
-# scripts are campaign tooling over the same isolated Postgres conventions.
 from scale_campaign import (  # noqa: E402
     catalog_for,
     drop_database,
@@ -56,7 +25,7 @@ from scale_campaign import (  # noqa: E402
 )
 
 FIXTURE = ROOT / "var" / "real-data" / "so101_pick_place_hour.mcap"
-ORPHAN_WINDOW_SECONDS = 900.0  # jobs.state.ORPHANED_JOB_SECONDS, mirrored for back-dating
+ORPHAN_WINDOW_SECONDS = 900.0
 
 
 def _require_fixture() -> None:
@@ -74,8 +43,6 @@ def _sha256_file(path: Path) -> str:
 
 def _worker_env(dsn: str, artifact_root: Path, metrics_path: Path) -> dict[str, str]:
     env = os.environ.copy()
-    # Every piece of worker state goes to the trial's throwaway directories: the
-    # drill must not leave blobs in var/artifacts or records in the dev metrics sink.
     env["DE_DATABASE_URL"] = dsn
     env["DE_ARTIFACT_ROOT"] = str(artifact_root)
     env["DE_METRICS_PATH"] = str(metrics_path)
@@ -83,15 +50,7 @@ def _worker_env(dsn: str, artifact_root: Path, metrics_path: Path) -> dict[str, 
 
 
 def _worker_command(*cli_args: str) -> list[str]:
-    """The worker entry point, run in this interpreter rather than through `uv`.
-
-    `uv run` wraps the worker in a launcher process: `Popen.pid` is then the
-    launcher, and `terminate()` kills only that - the real worker survives as an
-    orphan and keeps claiming jobs from the throwaway catalog (it happened on the
-    first draft of this drill: a "stopped" worker was still running). Killing the
-    python process that executes the job loop is the whole point, so the drill
-    spawns `data_engine.cli:main` directly - same code path `de worker` runs.
-    """
+    """The worker entry point, run in this interpreter rather than through `uv`."""
     return [
         sys.executable,
         "-c",
@@ -112,11 +71,7 @@ def _start_worker(dsn: str, artifact_root: Path, log_path: Path) -> subprocess.P
 
 
 def _hard_kill(proc: subprocess.Popen[bytes]) -> None:
-    """TerminateProcess on the worker itself: no cleanup, no failure path runs.
-
-    `Popen.kill()` is TerminateProcess on Windows - the same unclean death as
-    `kill -9` or an OOM-kill, which is exactly the state NFR-006 is about.
-    """
+    """TerminateProcess on the worker itself: no cleanup, no failure path runs."""
     if proc.poll() is None:
         proc.kill()
     try:
@@ -157,12 +112,7 @@ def _wait_started(dsn: str, job_id: str, timeout: float) -> float:
 
 
 def _wait_write_activity(artifact_root: Path, timeout: float) -> str:
-    """Return as soon as the ingest starts writing artifacts, naming what appeared.
-
-    The ``.pending-*`` temp is created at the start of the blob copy, so it is the
-    earliest visible sign that the write half of the ingest has begun - wide enough
-    a window to kill into deterministically, unlike the publish-to-register gap.
-    """
+    """Return as soon as the ingest starts writing artifacts, naming what appeared."""
     blob_dir = artifact_root / "blobs" / "sha256"
     deadline = time.perf_counter() + timeout
     while time.perf_counter() < deadline:
@@ -199,11 +149,7 @@ def _snapshot(dsn: str, artifact_root: Path, source_hash: str) -> dict[str, obje
 
 
 def _backdate_orphan(dsn: str, job_id: str) -> None:
-    """Age the victim's `started_at` past the presumed-death window.
-
-    The window itself is production (900 s); waiting it out would measure the
-    clock, so the drill moves the clock instead and the reaper SQL runs unmodified.
-    """
+    """Age the victim's `started_at` past the presumed-death window."""
     with _connect(dsn) as connection:
         connection.execute(
             """UPDATE jobs SET started_at = started_at - make_interval(secs => %s)
@@ -249,8 +195,6 @@ def run_trial(kill_mode: str, source_hash: str, keep_db: bool) -> dict[str, obje
             else:
                 trigger = _wait_write_activity(artifact_root, timeout=30)
                 trigger = f"first artifact-write activity: {trigger}"
-                # The write window is short (copy ~43 MiB, then register+finish):
-                # kill immediately on sighting, not on the next scheduled step.
             _hard_kill(victim)
         finally:
             _stop_worker(victim)
@@ -271,8 +215,6 @@ def run_trial(kill_mode: str, source_hash: str, keep_db: bool) -> dict[str, obje
         finished = _job_row(dsn, job_id)
         result = finished.get("result") or {}
 
-        # F26 under crash conditions: a fresh ingest of the same source must not
-        # grow a second episode. `de worker --once` drains exactly the dup job.
         dup, _ = catalog.submit_job(
             "ingest_source",
             {"source": str(FIXTURE)},
@@ -333,9 +275,6 @@ def main() -> int:
 
     _require_fixture()
     source_hash = _sha256_file(FIXTURE)
-    # Retry each mode until the kill lands mid-flight: the on-write window is
-    # short enough that a kill can arrive after the job already finished, and a
-    # trial whose victim died with the job done proves nothing about recovery.
     trials = []
     for mode in ("mid-parse", "on-write"):
         for _attempt in range(3):

@@ -1,33 +1,7 @@
 """A/B the curation claim, end to end through the real entry point (ADR 0032).
 
-The question, asked the way an operator would ask it: **does the redundancy report let me keep
-the behaviours I have at a fraction of the episodes?** Two arms over one catalog:
-
-- **A (control):** validate every ingested episode, build from all of them, export the build.
-- **B (treatment):** ask the platform which episodes are near-duplicates of which, keep the
-  representatives, build from those, export that build.
-
-Both arms go through the same door a human uses - `POST /api/v1/jobs` for ingest, validate,
-build and export, and `GET /api/v1/builds/{hash}/redundancy` for the report. Nothing is
-computed twice or out of band. The corpus plants a known number of distinct behaviours, so
-"did B keep the behaviours" is answerable rather than asserted, and the size of each export is
-read off the disk.
-
-It also asks both builds the coverage question (ADR 0033, `GET /api/v1/builds/{hash}/coverage`),
-because the two reports see different things and the claim needs both: redundancy sees *within*
-a behaviour (which takes are the same motion), coverage sees *across* the axes (which tasks,
-embodiments, formats and verdicts the build holds at all). A compaction that dropped a whole
-behaviour would look fine to one and broken to the other, so the run asserts that no axis lost
-a value between the arms rather than trusting the episode count.
-
-While it runs it polls `GET /api/v1/monitoring/health` and `GET /api/v1/metrics`, and asks for
-one monitor tick, so the platform's own telemetry is exercised rather than assumed.
-
-Refuses a catalog that already holds anything: this counts absolute state, and a shared catalog
-would make the report describe someone else's episodes.
-
-    just run                       # terminal 1, on a throwaway database
-    uv run --all-extras python scripts/fingerprint_ab.py --behaviours 24 --copies 4
+just run
+uv run --all-extras python scripts/fingerprint_ab.py --behaviours 24 --copies 4
 """
 
 from __future__ import annotations
@@ -48,14 +22,7 @@ DIMS = 4
 SEED = 20261007
 TERMINAL = {"succeeded", "failed", "canceled", "timed_out"}
 
-#: A profile has to carry a name and a version; the empty document the schema defaults to is
-#: refused by the job handler rather than by the schema, and the failure arrives as a parse
-#: error. Passing a real document keeps this driver out of that trap and says so, because the
-#: trap is a live defect worth reproducing on purpose rather than tripping over (see EXP-0020).
 PROFILE = {"name": "ab-curation", "version": "1"}
-
-
-# ------------------------------------------------------------------ transport
 
 
 def _request(method: str, path: str, body: dict[str, Any] | None = None) -> Any:
@@ -85,15 +52,8 @@ def _submit(kind: str, payload: dict[str, Any]) -> dict[str, Any]:
     return _request("POST", "/api/v1/jobs", {"type": kind, "payload": payload})
 
 
-# --------------------------------------------------------------------- corpus
-
-
 def _series(behaviour: int, *, jitter: int, rng: list[int]) -> list[list[float]]:
-    """One recording of one behaviour as `observations` rows.
-
-    `jitter == 0` is the original; every other value is another take of the same motion with
-    amplitude and phase noise, which is what a re-teleop looks like in the numbers.
-    """
+    """One recording of one behaviour as `observations` rows."""
     period = 4.0 + behaviour * 0.75
     scale = 1.0 + 0.012 * jitter
     phase = 0.03 * jitter
@@ -124,16 +84,8 @@ def _episode(behaviour: int, copy: int, *, task: str) -> dict[str, Any]:
     }
 
 
-# ------------------------------------------------------------------ monitoring
-
-
 class Watch:
-    """Polls the platform's own telemetry while the run happens.
-
-    The point of polling rather than reading at the end: the interesting facts about a run
-    (queue depth, a monitor that has gone blind, incidents that opened) are only visible while
-    it is happening.
-    """
+    """Polls the platform's own telemetry while the run happens."""
 
     def __init__(self) -> None:
         self.samples = 0
@@ -157,9 +109,6 @@ class Watch:
         }
 
 
-# ------------------------------------------------------------------ coverage
-
-
 def _coverage(build_hash: str) -> tuple[dict[str, Any], float]:
     started = time.perf_counter()
     report = _request("GET", f"/api/v1/builds/{build_hash}/coverage")
@@ -167,11 +116,7 @@ def _coverage(build_hash: str) -> tuple[dict[str, Any], float]:
 
 
 def _present(report: dict[str, Any]) -> dict[str, int]:
-    """Distinct values per axis, taken from the report's own totals rather than from the list.
-
-    The list is capped at 20 values; the corpus plants 24 behaviours, so comparing the lists
-    would compare two truncated samples and could miss a loss past the cap.
-    """
+    """Distinct values per axis, taken from the report's own totals rather than from the list."""
     return {str(axis["axis"]): int(axis["present"]) for axis in report["axes"]}
 
 
@@ -194,9 +139,6 @@ def _print_coverage(label: str, report: dict[str, Any], ms: float) -> None:
             f"      {axis['label']:<11s} {axis['present']:>3d} distinct · "
             f"holds {held or 'nothing'} · missing: {gaps or 'nothing on this axis'}"
         )
-
-
-# --------------------------------------------------------------------- the run
 
 
 def _preflight() -> None:
@@ -232,7 +174,6 @@ def main() -> int:
     watch = Watch()
     started = time.perf_counter()
 
-    # --- ingest: behaviours x copies, all through the API's own ingest job -----
     print(f"\n[1] ingesting {args.behaviours} behaviours x {args.copies} takes")
     ingest_started = time.perf_counter()
     for behaviour in range(args.behaviours):
@@ -251,7 +192,6 @@ def main() -> int:
         f"({ingest_seconds / max(total, 1) * 1000:.0f} ms/episode)"
     )
 
-    # --- validate everything, so a build has a selection to default to ---------
     print("\n[2] validating every episode")
     settle_started = time.perf_counter()
     submitted = _submit("validate", {"episode_ids": [], "profile": PROFILE})
@@ -269,7 +209,6 @@ def main() -> int:
         )
     watch.poll()
 
-    # --- arm A: build and export everything -----------------------------------
     print("\n[3] arm A (control): build from every valid episode")
     arm_a_started = time.perf_counter()
     build_a = _wait(
@@ -286,7 +225,6 @@ def main() -> int:
     arm_a = time.perf_counter() - arm_a_started
     watch.poll()
 
-    # --- the report, through the platform's own route -------------------------
     print("\n[4] the redundancy report, as the page asks for it")
     report_started = time.perf_counter()
     report = _request("GET", f"/api/v1/builds/{hash_a}/redundancy")
@@ -303,7 +241,6 @@ def main() -> int:
         f"redundant · {report_seconds * 1000:.0f} ms · truncated={report['truncated']}"
     )
 
-    # --- arm B: build and export the representatives only ---------------------
     print("\n[5] arm B (treatment): build from the representatives")
     arm_b_started = time.perf_counter()
     build_b = _wait(
@@ -320,7 +257,6 @@ def main() -> int:
     arm_b = time.perf_counter() - arm_b_started
     watch.poll()
 
-    # --- the coverage lens on the same claim ----------------------------------
     print("\n[6] the coverage report, for both builds (ADR 0033)")
     coverage_a, coverage_a_ms = _coverage(hash_a)
     coverage_b, coverage_b_ms = _coverage(hash_b)
@@ -341,12 +277,10 @@ def main() -> int:
             f"({sum(present_a.values())}) on {present_a['task']} task(s) of {total} episodes"
         )
 
-    # --- monitor tick, so the platform's own detector runs --------------------
     print("\n[7] one monitor tick, through the on-demand route")
     tick = _request("POST", "/api/v1/monitoring/tick")
     metrics = _request("GET", "/api/v1/metrics?window_seconds=3600")
 
-    # --- results --------------------------------------------------------------
     root = Path(args.export_root) if args.export_root else None
     size_a, files_a = _export_size(root, hash_a) if root else (0, 0)
     size_b, files_b = _export_size(root, hash_b) if root else (0, 0)

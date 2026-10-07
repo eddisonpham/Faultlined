@@ -133,7 +133,6 @@ def test_worker_times_out_a_job_whose_deadline_already_passed(
     assert result is not None
     assert result["state"] == JobState.TIMED_OUT.value
     assert result["error"]["type"] == "DeadlineExceeded"
-    # A job that never ran must not be recorded as a handler failure.
     points = _points(tmp_path / "metrics" / "runtime.jsonl")
     assert "jobs_failures_total" not in {point["name"] for point in points}
     assert "jobs_timeouts_total" in {point["name"] for point in points}
@@ -143,17 +142,11 @@ def test_worker_times_out_a_job_whose_deadline_already_passed(
 def test_worker_times_out_a_handler_that_overruns_the_deadline(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """F6: a handler that starts before the deadline and overruns it is time out.
-
-    The deadline watchdog re-checks at every checkpoint, so an overrunning
-    handler is killed even though it started on time.
-    """
+    """F6: a handler that starts before the deadline and overruns it is time out."""
     deadline_at = datetime.now(UTC) + timedelta(seconds=5)
     catalog = FakeCatalog(_job(deadline_at=deadline_at, attempts=1, max_attempts=1))
     worker = _worker(catalog, tmp_path)
 
-    # The handler starts near the end of the budget: it lasts 6 s of a 5 s
-    # budget, so the 5-second deadline is exceeded before the handler returns.
     def _slow_handler(self, job: dict[str, Any], job_type: str) -> dict[str, Any]:
         time.sleep(6)
         return {"episode_id": "ep-1"}
@@ -202,7 +195,6 @@ def test_worker_cancels_a_running_job_at_the_checkpoint(
 
     assert result is not None
     assert result["state"] == JobState.CANCELED.value
-    # A coordinator cancel is not a retry: the job must not be requeued.
     assert catalog.requeues == 0
     points = _points(tmp_path / "metrics" / "runtime.jsonl")
     assert "jobs_cancellations_total" in {point["name"] for point in points}
@@ -242,9 +234,6 @@ def test_worker_cancel_beats_a_retry_on_transient_failure(
     )
     catalog.cancel_requested = True
 
-    # Make every handler invocation fail transiently so the worker walks the
-    # retry branch; on each walk the cancel check in _settle_failure must fire
-    # and win over requeuing.
     monkeypatch.setattr(
         "data_engine.jobs.worker.IngestWorker._run_handler",
         lambda _: (_ for _ in ()).throw(RuntimeError("ingest service down")),
@@ -255,12 +244,9 @@ def test_worker_cancel_beats_a_retry_on_transient_failure(
 
     assert result is not None
     assert result["state"] == JobState.CANCELED.value
-    # Every transient failure was swallowed by a cancel, never requeued.
     assert catalog.requeues == 0
     points = _points(tmp_path / "metrics" / "runtime.jsonl")
     assert "jobs_cancellations_total" in {point["name"] for point in points}
-    # No retry fires: cancel was set on the catalog, so _settle_failure
-    # settles as canceled before the retry branch is reached.
 
 
 @pytest.mark.unit

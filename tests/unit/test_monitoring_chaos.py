@@ -1,11 +1,4 @@
-"""Unit tests for the chaos harness (B-016).
-
-These are tests of the *harness*, not of detector accuracy: each one pins a
-property the fault-injection campaign will rely on. The seams must be narrow
-and honest (an injected window is really what the tick sees), the scoring must
-measure latency from the moment detection was possible, and the replay clock
-must actually move.
-"""
+"""Unit tests for the chaos harness (B-016)."""
 
 from __future__ import annotations
 
@@ -36,14 +29,7 @@ WINDOW_SECONDS = 60.0
 
 
 class ChaosCatalog:
-    """The monitor's eight catalog seams, in memory.
-
-    The platform side (`monitoring_snapshot`) refuses to answer: every window
-    this file runs injects its own snapshot, and a silent fallback to a "real"
-    probe would mean the harness was scored against nothing. Monitor-side state
-    (baselines, incidents) behaves like the repository's, so hold/freeze and
-    dedup run for real across ticks.
-    """
+    """The monitor's eight catalog seams, in memory."""
 
     def __init__(self) -> None:
         self.baseline_rows: list[dict[str, Any]] = []
@@ -60,8 +46,6 @@ class ChaosCatalog:
         self.baseline_rows = [dict(row) for row in rows]
 
     def upsert_incident(self, **kwargs: Any) -> dict[str, Any]:
-        # Upsert semantics, like the repository: a bump updates the row in
-        # place (occurrence count and last-seen move) rather than appending.
         for index, existing in enumerate(self.incidents):
             if existing["id"] == kwargs["incident_id"]:
                 bumped = {
@@ -103,12 +87,7 @@ def _monitor() -> tuple[ChaosMonitor, ChaosCatalog]:
 
 
 def _warm(monitor: ChaosMonitor, feature: str, value: float, *, n: int = 25) -> None:
-    """Warm one baseline the way production would: persisted, then loaded.
-
-    The service reloads its book from the catalog on every reachable tick, so
-    seeding the in-memory book directly would be discarded before any rule
-    could read it.
-    """
+    """Warm one baseline the way production would: persisted, then loaded."""
     monitor._catalog.baseline_rows.append(  # type: ignore[union-attr]
         Baseline(feature=feature, scope="", samples=(value,) * n, center=value).to_row()
     )
@@ -116,10 +95,6 @@ def _warm(monitor: ChaosMonitor, feature: str, value: float, *, n: int = 25) -> 
 
 class TestWindowBuilders:
     def test_worker_lost_window_clears_the_strict_staleness_bound(self) -> None:
-        # The detector fires on age > threshold, not >=. At detectable_at the
-        # last beat must be older than the threshold with margin, and at onset
-        # the age must read exactly one threshold so an early tick is silent
-        # rather than borderline.
         window = worker_lost_window(onset=T0, window_seconds=WINDOW_SECONDS)
         beat = datetime.fromisoformat(str(window.records[0]["timestamp"]))
         assert beat == window.onset - timedelta(seconds=2 * WINDOW_SECONDS + 60.0)
@@ -129,8 +104,6 @@ class TestWindowBuilders:
         assert (window.onset - beat).total_seconds() == DETECTOR_CONFIG.heartbeat_stale_seconds
 
     def test_worker_lost_window_holds_work_outstanding(self) -> None:
-        # A lost worker only matters while the queue wants one; an idle system
-        # with a stale heartbeat must not be scored as a fault.
         window = worker_lost_window(onset=T0, window_seconds=WINDOW_SECONDS)
         assert window.snapshot is not None
         depth = window.snapshot["queue_depth"]
@@ -145,12 +118,9 @@ class TestWindowBuilders:
         assert all(record["value"] == 0.0 for record in records)
 
     def test_backlog_window_carries_a_live_worker(self) -> None:
-        # A backlog with no heartbeats is two faults, not one: the window would
-        # fire WORKER_LOST and the harness would score it blind. The worker is
-        # alive in this fault.
         window = queue_backlog_window(onset=T0, window_seconds=WINDOW_SECONDS)
         assert window.records, "backlog window must carry fresh heartbeats"
-        assert window.label == ""  # no dedicated rule owns a backlog
+        assert window.label == ""
 
     def test_clean_window_is_unlabeled_and_progressing(self) -> None:
         window = clean_window(onset=T0, window_seconds=WINDOW_SECONDS)
@@ -172,8 +142,6 @@ class TestEvaluateWindow:
         assert catalog.incidents[0]["label"] == Label.WORKER_LOST.value
 
     def test_detection_at_onset_is_silent(self) -> None:
-        # Scoring at onset would credit detection the pipeline cannot have:
-        # the staleness clock has not run out yet, so the tick must say nothing.
         monitor, _ = _monitor()
         window = worker_lost_window(onset=T0, window_seconds=WINDOW_SECONDS)
         outcome = evaluate_window(monitor, window, tick_at=window.onset)
@@ -190,18 +158,14 @@ class TestEvaluateWindow:
         assert outcome.observed_at == late
 
     def test_backlog_is_not_scored_as_a_lost_worker_or_blind(self) -> None:
-        # The trap this test pins: a backlog window without heartbeats would
-        # double-fire as WORKER_LOST and flip the blind flag - mislabeled truth.
         monitor, _ = _monitor()
         window = queue_backlog_window(onset=T0, window_seconds=WINDOW_SECONDS)
         outcome = evaluate_window(monitor, window)
         assert outcome.blind is False
         assert Label.WORKER_LOST.value not in outcome.fired_labels
-        assert outcome.detected is False  # no dedicated rule owns a cold backlog
+        assert outcome.detected is False
 
     def test_warm_backlog_shift_surfaces_as_metric_shift(self) -> None:
-        # A backlog *is* detectable once the queue baselines are warm - by the
-        # residual consensus rule, which is the designed path, not a new rule.
         monitor, _ = _monitor()
         _warm(monitor, "queue_oldest_age_seconds", 1.0)
         _warm(monitor, "queue_depth_queued", 1.0)
@@ -221,22 +185,14 @@ class TestEvaluateWindow:
         assert outcome.latency_seconds is None
 
     def test_the_only_overrides_are_the_three_documented_seams(self) -> None:
-        # Anything beyond `_records`/`_probe`/`_resources` (plus construction and
-        # injection) would make "chaos result" mean "a different implementation ran".
         authored = {name for name in ChaosMonitor.__dict__ if not name.startswith("__")}
         assert authored == {"inject", "_records", "_probe", "_resources"}
 
     def test_the_host_is_replayed_rather_than_sampled(self) -> None:
-        # The host is an input like the telemetry and the snapshot, so replay
-        # pins it. Unpinned, the campaign scores the machine it ran on: a loaded
-        # box opens RESOURCE_DEGRADED in every window, null ones included.
         monitor, _ = _monitor()
         assert monitor._resources() == REPLAY_HOST
 
     def test_uninjected_snapshot_falls_through_to_the_real_probe(self) -> None:
-        # A window with snapshot=None must exercise the service's own probe;
-        # here that probe refuses, so the tick must report unreachable and
-        # blind - not quietly carry the previous window's snapshot.
         monitor, _ = _monitor()
         monitor.inject(FaultWindow(label="", onset=T0, detectable_at=T0, records=[]))
         monitor._chaos_snapshot = None
@@ -276,9 +232,6 @@ class TestEvaluateSequence:
             evaluate_sequence(monitor, [late, early])
 
     def test_sustained_fault_holds_its_baseline(self) -> None:
-        # The freeze rule: while a fault stays in breach, its baseline must not
-        # absorb the fault as the new normal, and the second tick bumps the
-        # same incident instead of opening a second one.
         monitor, catalog = _monitor()
         _warm(monitor, "queue_oldest_age_seconds", 1.0)
         _warm(monitor, "queue_depth_queued", 1.0)

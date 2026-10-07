@@ -1,9 +1,4 @@
-"""Unit tests for deterministic incident rendering (ADR 0020 §10.2).
-
-The contract being tested is the afk rule: an incident must be actionable without
-opening the laptop, or it must not claim to be. A summary that says "unusual
-metric activity detected" is a bug, and these tests are how that stays caught.
-"""
+"""Unit tests for deterministic incident rendering (ADR 0020 §10.2)."""
 
 from __future__ import annotations
 
@@ -131,8 +126,6 @@ class TestActionability:
 
 class TestHonesty:
     def test_quarantine_omits_a_baseline_it_does_not_have(self) -> None:
-        # A cold scope has no "usual"; printing 0% as though it were one would put
-        # a fabricated number in front of a human.
         cold = render_summary(
             Label.QUARANTINE_RATE_HIGH.value,
             {"quarantine_rate": 0.5, "absolute_max": 0.35, "basis": "absolute"},
@@ -156,8 +149,6 @@ class TestHonesty:
         assert "robust sigmas" in warm
 
     def test_summaries_avoid_characters_a_console_cannot_encode(self) -> None:
-        # These strings are read in terminals; a cp1252 console cannot encode a
-        # sigma glyph, and a summary that crashes the terminal is worse than none.
         for label in Label:
             rendered = render_summary(
                 label.value,
@@ -172,8 +163,6 @@ class TestHonesty:
                 "d",
             )
             rendered.encode("cp1252")
-            # GREEK SMALL LETTER SIGMA, written as an escape so this assertion
-            # does not itself contain the character it forbids.
             assert "\u03c3" not in rendered
 
 
@@ -196,8 +185,6 @@ class TestDigest:
         assert render_digest([]) == "No incidents."
 
     def test_notify_class_incidents_come_first(self) -> None:
-        # The absent operator reads the wasted night first and everything else
-        # underneath it.
         digest = render_digest(
             [
                 _incident(id="a", label="METRIC_SHIFT", severity="medium", notify_class="queue"),
@@ -241,7 +228,6 @@ class TestNotifyBody:
         assert "/ui/incidents" in body
 
     def test_the_body_never_invents_a_cause(self) -> None:
-        # Everything printed came from the incident's own summary field.
         body = render_notify([_incident(summary="disk is full")])
         assert "disk is full" in body
         with pytest.raises(KeyError):

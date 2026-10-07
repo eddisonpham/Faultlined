@@ -1,11 +1,4 @@
-"""Unit tests for the detector rules (ADR 0020).
-
-Two properties matter for every rule and are asserted throughout:
-
-* it **fires** on the fault it owns, with evidence a human can check by hand;
-* it **abstains** otherwise — particularly when its baseline is cold, because a
-  rule that guesses is worse than a rule that is silent.
-"""
+"""Unit tests for the detector rules (ADR 0020)."""
 
 from __future__ import annotations
 
@@ -109,7 +102,6 @@ class TestRegistry:
             assert name and callable(rule)
 
     def test_health_produces_no_incidents(self) -> None:
-        # The most important negative test in the file.
         assert detect(_context()) == []
 
 
@@ -128,7 +120,6 @@ class TestAbsoluteRules:
         assert Label.WORKER_LOST.value in _labels(busy)
 
     def test_worker_lost_does_not_page_an_idle_platform(self) -> None:
-        # No jobs and no episodes means the owner is simply not using it.
         assert Label.WORKER_LOST.value not in _labels(_context(records=[STALE_HEARTBEAT]))
 
     def test_never_seen_heartbeat_is_reported_distinctly(self) -> None:
@@ -142,7 +133,6 @@ class TestAbsoluteRules:
         assert Label.RUN_STALLED.value in labels
 
     def test_run_stalled_is_silent_while_episodes_land(self) -> None:
-        # Slow is not stuck. The job is old but still producing.
         records = [
             {
                 "name": "episodes_ingested_total",
@@ -162,8 +152,6 @@ class TestAbsoluteRules:
         assert Label.RUN_STALLED.value not in _labels(context)
 
     def test_two_stalled_runs_are_two_incidents(self) -> None:
-        # Scope is the job id on purpose: two different stuck runs are two
-        # different incidents and must not be deduplicated into one.
         context = _context(
             running=[
                 {"id": "job-1", "job_type": "ingest", "age_seconds": 2000.0},
@@ -179,7 +167,6 @@ class TestAbsoluteRules:
         )
         signals = detect(context)
         assert Label.DISK_PRESSURE.value in {s.label for s in signals}
-        # Fails at publish, after all the compute: the work is lost, not delayed.
         assert (
             next(s for s in signals if s.label == Label.DISK_PRESSURE.value).notify_class
             == NotifyClass.NOTIFY
@@ -263,8 +250,6 @@ class TestBaselineRules:
         assert Label.QUARANTINE_RATE_HIGH.value not in _labels(context)
 
     def test_quarantine_cites_no_baseline_it_does_not_have(self) -> None:
-        # A cold scope has no "usual"; quoting zero as though it were one would
-        # put a fabricated number into a human-readable summary.
         context = _context(snapshot={"quarantine_rate": 0.9})
         signal = next(s for s in detect(context) if s.label == Label.QUARANTINE_RATE_HIGH.value)
         assert signal.evidence["baseline_median"] is None
@@ -279,7 +264,6 @@ class TestBaselineRules:
         assert Label.QUALITY_SHIFT.value in _labels(warm)
 
     def test_quality_shift_reports_the_strongest_signal_only(self) -> None:
-        # One fault must not open three incidents for three of its symptoms.
         book = BaselineBook()
         _warm(book, "verdict_jerky_rate", 0.05)
         _warm(book, "jerk_mean", 0.01)
@@ -311,7 +295,6 @@ class TestMetricShiftConsensus:
         return book
 
     def test_one_shifted_feature_is_not_an_incident(self) -> None:
-        # A single feature drifting is usually noise.
         context = _context(
             snapshot={"queue_depth": {"queued": 1}, "oldest_queued_age_seconds": 900.0},
             baselines=self._steady(),
@@ -319,8 +302,6 @@ class TestMetricShiftConsensus:
         assert Label.METRIC_SHIFT.value not in _labels(context)
 
     def test_several_shifted_features_are_one_incident(self) -> None:
-        # This is the closest thing the design has to a multivariate detector, and
-        # it is pure arithmetic: several signals moving together *is* the signal.
         context = _context(
             snapshot={"queue_depth": {"queued": 9}, "oldest_queued_age_seconds": 900.0},
             baselines=self._steady(),
@@ -346,8 +327,6 @@ class TestMetricShiftConsensus:
         context = _context(
             snapshot={"episodes_per_second": 0.0, "queue_depth_queued": 40.0}, baselines=book
         )
-        # queue_depth_queued is cold, so the only eligible shift is the drop in
-        # throughput, which is below the consensus threshold on its own.
         assert Label.METRIC_SHIFT.value not in _labels(context)
 
     def test_consensus_threshold_is_configurable(self) -> None:
@@ -358,16 +337,11 @@ class TestMetricShiftConsensus:
             config=DetectorConfig(metric_shift_min_features=1),
         )
         signals = [s for s in detect(context) if s.label == Label.METRIC_SHIFT.value]
-        # With the consensus lowered to one, the same window that was silent
-        # under the default now reports — the rule is the threshold, not a
-        # separate detector.
         assert signals and len(signals[0].evidence["shifted"]) >= 1
 
 
 class TestObservations:
     def test_observations_follow_the_schema_order_and_are_stable(self) -> None:
-        # Reproducibility: two runs over the same window must produce the same
-        # baseline state, so the observation order cannot vary.
         first = [
             name for name, _, _ in observations_for(_context(records=[STALE_HEARTBEAT]).features)
         ]

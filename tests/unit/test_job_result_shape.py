@@ -1,11 +1,4 @@
-"""The worker's success path must not assume every job produces an episode.
-
-`process_one` used to read `result["episode_id"]` unconditionally. That happened
-to work while every job result happened to be shaped like an ingest result, and
-it broke the moment a validate job started reporting over a *selection*: the job
-did its whole job correctly, was then recorded as failed with a KeyError, and the
-operator saw a failure for work that succeeded.
-"""
+"""The worker's success path must not assume every job produces an episode."""
 
 from __future__ import annotations
 
@@ -19,11 +12,7 @@ pytestmark = pytest.mark.unit
 
 
 def _code(func: object) -> str:
-    """The body of a function with comments and docstrings removed.
-
-    Assertions here have to read code, not prose: a fix whose explanation names
-    the bug it fixed will otherwise fail its own regression test.
-    """
+    """The body of a function with comments and docstrings removed."""
     import inspect
 
     source = inspect.getsource(func)  # type: ignore[arg-type]

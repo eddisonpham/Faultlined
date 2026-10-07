@@ -1,10 +1,4 @@
-"""A deterministic stand-in for a sentence encoder, shared by the clustering tests.
-
-Every distinct word gets its own axis with weight 1, so cosine similarity between two
-sentences is the fraction of words they share. Nothing about a model's training run can
-change an outcome here: what is under test is the method, not the encoder, and these
-tests must keep passing on a machine with no model weights and no network.
-"""
+"""A deterministic stand-in for a sentence encoder, shared by the clustering tests."""
 
 from __future__ import annotations
 
@@ -12,12 +6,11 @@ import zlib
 
 import numpy as np
 
-#: Wide enough that the clustering test vocabulary never collides on an axis.
 DIM = 256
 
 
 class WordAxes:
-    """Word-per-axis encoder. Deterministic, dependency-free, and deliberately dull."""
+    """Word-per-axis encoder."""
 
     name = "word_axes"
     dim = DIM

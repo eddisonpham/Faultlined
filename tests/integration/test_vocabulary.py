@@ -1,15 +1,4 @@
-"""Integration tests for the task vocabulary (ADR 0029), against real PostgreSQL.
-
-A throwaway database per test (the `test_migrations.py` pattern): the vocabulary
-is global state over episodes, so queue and health assertions on the shared test
-catalog would measure whatever else ran first. The ledger has to start empty for
-the backfill test too.
-
-What is pinned here: the 0002 backfill and its first-wins rule; deterministic
-entry creation and id stability across renames; map-or-resolve at ingest; the
-unmapped queue as a query that cannot drift; and - the reason events exist -
-merge, split, map and dismiss are all exactly reversible.
-"""
+"""Integration tests for the task vocabulary (ADR 0029), against real PostgreSQL."""
 
 from __future__ import annotations
 
@@ -76,9 +65,6 @@ def _seed_episode(catalog: PostgresCatalog, task: str) -> None:
     )
 
 
-# ------------------------------------------------------------------ migration 0002
-
-
 class TestBackfill:
     def test_confirmations_and_reviews_become_vocabulary(self, settings: Settings) -> None:
         with connect(settings) as connection:
@@ -105,17 +91,14 @@ class TestBackfill:
         _apply_backfill(settings)
 
         entries = vocabulary.list_entries(settings)
-        # Two confirmations with one label collapse into one entry.
         assert [e["preferred_label"] for e in entries] == ["Mug handling"]
         assert entries[0]["task_count"] == 3
-        # Oldest confirmation wins for a shared string: provenance is 'confirm'.
         members = vocabulary.entry_members(settings, entries[0]["id"])
         assert {m["task_string"] for m in members} == {
             "put the red mug down",
             "put the blue mug down",
             "put the green mug down",
         }
-        # A dismissed string never re-queues; an unnamed class has no name to map to.
         dismissed = vocabulary.mapping_for(settings, "xyzzy noise string")
         assert dismissed == {
             "task_string": "xyzzy noise string",
@@ -149,9 +132,6 @@ class TestBackfill:
         assert vocabulary.mapping_for(settings, "task x") is not None
 
 
-# --------------------------------------------------------------- entries and labels
-
-
 class TestEntries:
     def test_a_renamed_id_cannot_be_reused_by_a_new_label(self, settings: Settings) -> None:
         original = vocabulary.create_entry(settings, preferred_label="Mug handling")
@@ -182,17 +162,12 @@ class TestEntries:
             vocabulary.rename_entry(settings, entry_id=first["id"], preferred_label="Two")
 
 
-# ----------------------------------------------------------------- map-or-resolve
-
-
 class TestMapOrResolve:
     def test_resolution_statuses(self, settings: Settings, catalog: PostgresCatalog) -> None:
         entry = vocabulary.create_entry(settings, preferred_label="mug", core="mug")
         vocabulary.map_task(settings, task_string="known string", entry_id=entry["id"])
 
         assert vocabulary.map_or_resolve(settings, "known string") == "mapped"
-        # The extracted core matches the entry's core exactly ("pick up the red
-        # mug" -> "mug"), so ingest maps it without a human.
         assert vocabulary.map_or_resolve(settings, "pick up the red mug") == "auto"
         auto = vocabulary.mapping_for(settings, "pick up the red mug")
         assert auto == {
@@ -200,8 +175,6 @@ class TestMapOrResolve:
             "entry_id": entry["id"],
             "provenance": "ingest",
         }
-        # A core with no entry, or with two, is never auto-mapped: choosing
-        # between equally good entries is a human's call.
         assert vocabulary.map_or_resolve(settings, "polish the telescope") == "unmapped"
         vocabulary.create_entry(settings, preferred_label="golden mug", core="mug")
         assert vocabulary.map_or_resolve(settings, "pick up the blue mug") == "unmapped"
@@ -236,9 +209,6 @@ class TestMapOrResolve:
             settings, limit=1, after=(first[0]["episodes"], first[0]["task_string"])
         )
         assert [row["task_string"] for row in second] == ["beta task"]
-
-
-# ------------------------------------------------------------- events and reversals
 
 
 class TestGuards:
@@ -347,7 +317,6 @@ class TestGuards:
                 expected_core="drawer",
                 entry_id="voc_missing",
             )
-        # An entry whose core is not the candidate's core cannot be its target.
         with pytest.raises(ValueError, match="no longer the unique core match"):
             vocabulary.accept_candidate(
                 settings,
@@ -355,7 +324,6 @@ class TestGuards:
                 expected_core="drawer",
                 entry_id=target["id"],
             )
-        # A new entry is refused once an entry already owns the suggested core.
         vocabulary.create_entry(settings, preferred_label="drawers", core="drawer")
         with pytest.raises(ValueError, match="an entry now uses the suggested core"):
             vocabulary.accept_candidate(
@@ -407,12 +375,7 @@ class TestGuards:
         )
 
     def test_the_event_log_refuses_a_kind_it_cannot_undo(self, settings: Settings) -> None:
-        """`undo_event` raises on an unknown kind, and the schema refuses to store one.
-
-        The guard in `undo_event` is therefore unreachable through the API, which
-        is the point: a future migration that adds a kind without an undo branch
-        cannot slip an uncompensable event into the log.
-        """
+        """`undo_event` raises on an unknown kind, and the schema refuses to store one."""
         with connect(settings) as connection, pytest.raises(psycopg.errors.CheckViolation):
             connection.execute(
                 "INSERT INTO task_vocabulary_events (kind, payload) VALUES ('teleport', %s)",
@@ -424,21 +387,11 @@ class TestGuards:
 
 
 class TestConcurrentWriters:
-    """Two writers at once, over real connections on real PostgreSQL.
-
-    Every case here is a race the store has to survive on its own: nothing above
-    it serialises requests, and the vocabulary is edited by people working in
-    parallel. Threads are used rather than mocks so the locks, the unique index
-    and the transaction boundaries are the ones production runs on.
-    """
+    """Two writers at once, over real connections on real PostgreSQL."""
 
     @staticmethod
     def _race(*calls: Callable[[], Any]) -> list[Any]:
-        """Run the calls at once and return each one's outcome.
-
-        Every outcome is captured rather than raised: a test that only sees the
-        first exception cannot tell "one writer won" from "both crashed".
-        """
+        """Run the calls at once and return each one's outcome."""
         start = threading.Barrier(len(calls))
         results: list[Any] = [None] * len(calls)
 
@@ -492,7 +445,6 @@ class TestConcurrentWriters:
                 "entry_id": entry_id,
                 "provenance": "confirm",
             }
-        # Two events, not four: the refused writer wrote nothing at all.
         assert (
             len([e for e in vocabulary.list_events(settings, limit=50) if e["kind"] == "map"]) == 2
         )
@@ -728,7 +680,6 @@ class TestMergeSplitUndo:
         assert restored["provenance"] == "confirm"
         assert dismissed["provenance"] == "dismiss"
 
-        # A map over nothing, undone, leaves nothing behind.
         vocabulary.map_task(settings, task_string="fresh string", entry_id=entry["id"])
         vocabulary.undo_event(settings, event_id=_last_event(settings))
         assert vocabulary.mapping_for(settings, "fresh string") is None
@@ -742,9 +693,6 @@ class TestMergeSplitUndo:
             vocabulary.undo_event(settings, event_id=event_id)
         with pytest.raises(KeyError):
             vocabulary.undo_event(settings, event_id=999_999)
-
-
-# ------------------------------------------------------------------------ health
 
 
 class TestHealth:

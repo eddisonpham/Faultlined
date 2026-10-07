@@ -11,9 +11,6 @@ from data_engine.catalog.repository import SliceNameConflict
 from data_engine.config import Settings
 from data_engine.jobs.state import JobState
 
-#: A build identity in the shape `builds/service.py::build_hash` produces, so a test
-#: cannot assert against a hash the API would refuse (that is how the 64-character cap
-#: survived: every fixture here was a short fake).
 BUILD_HASH = "bld_" + "ab" * 32
 
 
@@ -79,11 +76,10 @@ def test_root_points_a_first_visitor_somewhere_useful() -> None:
 
 @pytest.mark.contract
 def test_swagger_ui_is_not_served() -> None:
-    """The browser surface is the operator UI. `/docs` must not reappear by default."""
+    """The browser surface is the operator UI."""
     client = _client()
     assert client.get("/docs").status_code == 404
     assert client.get("/redoc").status_code == 404
-    # The machine contract stays, because the drift check needs it.
     assert client.get("/openapi.json").status_code == 200
 
 
@@ -418,15 +414,12 @@ def test_the_ingest_form_queues_a_job_from_the_browser() -> None:
         follow_redirects=False,
     )
 
-    # 303, not 302: a refresh must not queue the same job a second time.
     assert response.status_code == 303
     assert response.headers["location"].startswith("/ui/jobs/job-new")
     assert len(catalog.submitted) == 1
     kind, payload = catalog.submitted[0]
     assert kind == "ingest"
     episode = payload["episode"]
-    # The schema's own invariant, so the form cannot build an episode the JSON
-    # endpoint would reject.
     assert len(episode["timestamps"]) == len(episode["observations"]) == 3
     assert len(episode["actions"]) == 3
 
@@ -481,11 +474,7 @@ def test_the_ingest_form_rejects_a_nonsense_frame_count() -> None:
 
 @pytest.mark.contract
 def test_the_ingest_form_does_not_pull_in_a_dependency() -> None:
-    """Form(...) would require python-multipart for one urlencoded body.
-
-    ADR 0014 is a no-build, no-extra-dependency frontend; a new runtime package
-    to save three lines of urllib.parse is not a trade worth making.
-    """
+    """Form(...) would require python-multipart for one urlencoded body."""
     source = Path("src/data_engine/api/app.py").read_text(encoding="utf-8")
     assert "from fastapi import" in source and "Form" not in source.split("\n")[12]
     assert "parse_qs" in source
@@ -511,9 +500,6 @@ def test_the_validate_form_queues_a_job_from_the_browser() -> None:
     assert response.status_code == 303, response.text
     kind, payload = catalog.submitted[-1]
     assert kind == "validate"
-    # The document the *API's own model* accepts, built from the form's fields: the
-    # limits are typed, the selection is a list, and `enabled_rules` is absent so every
-    # registered rule runs rather than whichever names a person happened to spell right.
     assert payload == {
         "episode_ids": ["ep-1", "ep-2"],
         "profile": {"name": "strict", "version": "1", "min_frames": 5},
@@ -624,8 +610,6 @@ def test_the_slice_form_saves_a_slice_from_the_browser() -> None:
     )
 
     assert response.status_code == 303, response.text
-    # The theme travels in the body, so the page the operator lands on is the one they
-    # were using rather than the default.
     assert response.headers["location"].startswith("/ui/slices/slice-1")
     assert "theme=" in response.headers["location"]
     assert catalog.slices == [
@@ -982,9 +966,6 @@ def test_fragment_requests_return_only_the_polling_body() -> None:
     assert "Queue depth by state" in fragment.text
 
 
-# ----------------------------------------------- build redundancy (ADR 0032)
-
-
 def _fingerprint_row(episode_id: str, **overrides: Any) -> dict[str, Any]:
     """One `episode_fingerprint_inputs` row in the shape the catalog returns."""
     trace = [[[index * 0.1, math.sin(index / 4.0)] for index in range(40)]]
@@ -1037,7 +1018,6 @@ def test_the_redundancy_route_reports_near_duplicates_for_a_build() -> None:
 @pytest.mark.contract
 def test_the_redundancy_route_reports_distinct_episodes_as_distinct() -> None:
     client, catalog = _build_with_members("ep-a", "ep-b")
-    # A different behaviour: a spike where the other has a sweep.
     catalog.fingerprint_rows[1]["motion_trace"] = [
         [[index * 0.1, 0.0 if index < 30 else 1.0] for index in range(40)]
     ]
@@ -1089,9 +1069,6 @@ def test_a_build_with_nothing_to_compare_says_so_rather_than_showing_zeros() -> 
     client, _ = _build_with_members("ep-a")
     body = client.get(f"/ui/builds/{BUILD_HASH}").text
     assert "fewer than two scored episodes" in body
-
-
-# ------------------------------------------------- build coverage (ADR 0033)
 
 
 def _coverage_inputs() -> dict[str, Any]:

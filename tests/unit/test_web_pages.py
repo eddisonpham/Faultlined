@@ -167,18 +167,13 @@ def test_poll_region_targets_the_fragment_endpoint() -> None:
     html = jobs_page({"items": []}, None, DEFAULT_THEME)
     assert 'data-poll="/ui/jobs"' in html
     assert 'data-poll-ms="3000"' in html
-    # The interval is per-section and follows the documented cadence.
     assert 'data-poll="/ui"' in status_page({}, DEFAULT_THEME)
     assert 'data-poll-ms="5000"' in artifacts_page({}, DEFAULT_THEME)
 
 
 @pytest.mark.unit
 def test_polling_replaces_only_the_live_region_not_the_page_chrome() -> None:
-    """A poll that swapped <main> would silently delete the filter forms.
-
-    This is the bug the innermost-region rule exists to prevent, so it is
-    asserted structurally rather than left to a browser check.
-    """
+    """A poll that swapped <main> would silently delete the filter forms."""
     html = jobs_page({"items": []}, None, DEFAULT_THEME)
     live = html.index('class="de-live"')
     filters = html.index('class="de-filters"')
@@ -217,8 +212,6 @@ def test_deadline_reads_as_remaining_budget_and_flags_overdue() -> None:
     assert "5m over" in overdue
 
     assert "text-comment" in _deadline({}, now)
-    # An unparsable timestamp is shown verbatim rather than dropped: a raw column
-    # value is more useful to debug with than a dash.
     assert "not-a-timestamp" in _deadline({"deadline_at": "not-a-timestamp"}, now)
 
 
@@ -242,7 +235,6 @@ def test_cancel_action_is_a_form_post_for_live_jobs_only() -> None:
     for state in ("succeeded", "failed", "canceled", "timed_out"):
         assert "<form" not in _cancel_action({"id": "job-1", "state": state}, DEFAULT_THEME)
 
-    # A job already flagged for cancellation has nothing left to ask for.
     assert "cancel unavailable" in _cancel_action({"id": "j", "state": "cancel_requested"}, "vt220")
 
 
@@ -273,9 +265,6 @@ def test_job_detail_shows_the_cancel_control_for_a_live_job() -> None:
     assert "de-cancel" in html
     assert "1/3" in html
     assert "data-deadline" in html
-
-
-# ------------------------------------------- run-intelligence pages (ADR 0017/18)
 
 
 @pytest.mark.unit
@@ -334,23 +323,16 @@ def test_metrics_body_reports_latency_and_a_stale_worker() -> None:
     }
     body = _metrics_body(model)
     assert "45s stale" in body
-    # The route is reported as the operation it performs. The raw template is an
-    # internal label and must not reach the operator's screen.
     assert "job listing" in body
     assert "/api/v1" not in body
     assert "Time spent handling requests" in body
     assert "request handling" in body
-    assert "4.0" in body  # p95 ms of that operation
+    assert "4.0" in body
 
 
 @pytest.mark.unit
 def test_the_ingest_form_appears_only_on_a_genuinely_empty_system() -> None:
-    """It is the only way data gets in, so it leads an empty system...
-
-    ...and disappears the moment there is anything to look at. Left permanently
-    on the Status page it becomes a form nobody reads sitting above the numbers
-    they actually came for.
-    """
+    """It is the only way data gets in, so it leads an empty system..."""
     empty = {
         "status": "ok",
         "queue_depth": {},
@@ -369,12 +351,7 @@ def test_the_ingest_form_appears_only_on_a_genuinely_empty_system() -> None:
 
 @pytest.mark.unit
 def test_a_rejected_submission_reopens_the_form_on_a_busy_system() -> None:
-    """The error renders *inside* the form, so the gate must yield to it.
-
-    Found by driving the real form: gating purely on emptiness meant a bad
-    submission on a populated system returned 200 with the message going
-    nowhere - no error, no form, nothing to correct.
-    """
+    """The error renders *inside* the form, so the gate must yield to it."""
     busy = {
         "status": "ok",
         "queue_depth": {"succeeded": 4},
@@ -421,7 +398,6 @@ def test_the_ingest_form_is_a_post_that_needs_no_javascript() -> None:
         "vt220",
     )
     assert '<form class="de-ingest" method="post" action="/ui/jobs">' in body
-    # Every control is a real named field with a label bound to it.
     for name in ("kind", "task", "robot", "frames", "source"):
         assert f'name="{name}"' in body
         assert f'for="ing-{name}"' in body
@@ -429,11 +405,7 @@ def test_the_ingest_form_is_a_post_that_needs_no_javascript() -> None:
 
 @pytest.mark.unit
 def test_an_empty_state_link_is_escaped_on_b_sides() -> None:
-    """`hint` is escaped; `link` is markup. Exactly one of them may be trusted.
-
-    Both halves have to escape or one of two failures is available: an author's
-    <a> silently rendering as literal text, or a value reaching the page raw.
-    """
+    """`hint` is escaped; `link` is markup."""
     rendered = _empty(
         "nothing here",
         "a <script>alert(1)</script> hint",
@@ -441,7 +413,6 @@ def test_an_empty_state_link_is_escaped_on_b_sides() -> None:
     )
     assert "<script>" not in rendered
     assert "&lt;script&gt;" in rendered
-    # ...and the legitimate case still produces a real link, not escaped text.
     linked = _empty("no jobs", "start here", ("status page", "/ui"))
     assert '<a href="/ui">status page</a>' in linked
 
@@ -593,15 +564,7 @@ def test_insights_body_renders_distributions_heat_and_outliers() -> None:
 
 @pytest.mark.unit
 def test_the_motion_chart_is_plotted_on_the_dimensionless_score() -> None:
-    """The chart this replaced plotted a quantity with no shared unit.
-
-    `movement_score` is an L2 norm in the source's own units, so the reference
-    run put a driving fixture at 1.0e8 beside arm joints at 0.02 and four of the
-    five episodes collapsed onto the floor of a linear axis. `jerk_score` is the
-    same motion divided by each dimension's range, so the axis is meaningful
-    across datasets. Both numbers are still shown, because "how far did this joint
-    actually travel" is a real question with a real-unit answer.
-    """
+    """The chart this replaced plotted a quantity with no shared unit."""
     body = _insights_body(
         {
             "episode_count": 2,
@@ -628,16 +591,12 @@ def test_the_motion_chart_is_plotted_on_the_dimensionless_score() -> None:
             "outliers": {},
         }
     )
-    # The dots are placed from jerk_score, so a 1e8 raw score cannot drag the
-    # small episode to the floor: the two dots sit at clearly different heights
-    # and the axis is labelled in the normalised unit.
-    assert "log10" not in body  # 0.004..0.018 is under two decades; linear is right
+    assert "log10" not in body
     assert "0.018" in body
     assert "Recording reliability" in body
     assert "gapped" in body
-    # Both units remain available, labelled, for the per-dataset question.
     assert "raw /frame" in body
-    assert "100000000" in body  # the raw score, in its own units, still shown
+    assert "100000000" in body
 
 
 @pytest.mark.unit
@@ -813,8 +772,6 @@ def test_incidents_page_escapes_the_scope() -> None:
 
 @pytest.mark.unit
 def test_a_blind_monitor_is_called_out_on_its_own_page() -> None:
-    # A monitor that has silently stopped looks exactly like one with nothing to
-    # report, and only one of those is healthy.
     health = dict(_model()["health"])  # type: ignore[arg-type]
     health["blind"] = True
     html = incidents_page(_model(health=health), DEFAULT_THEME)

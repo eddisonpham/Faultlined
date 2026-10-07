@@ -1,20 +1,4 @@
-"""Refuse to start when the API port is already taken, and say who took it.
-
-A second `just run` otherwise dies with a bare `WinError 10048`, which reads as a
-fault in the project rather than "a server you started earlier is still
-listening" - and the fix is a command the reader has to guess.
-
-Implemented in Python rather than as a shell snippet in the recipe for two
-reasons. A `#!/usr/bin/env bash` recipe makes `just` resolve the interpreter
-through `cygpath`, which is absent from a PowerShell PATH that has Git's `bin`
-but not `usr\\bin` - the same trap `windows-shell` in the justfile already
-documents. And the check needs different commands per platform (`netstat` on
-Windows, `lsof` elsewhere), which is a few lines of Python and an ugly
-conditional in a recipe.
-
-The port comes from the same environment the application reads, so this check
-can never disagree with the port the server is about to bind.
-"""
+"""Refuse to start when the API port is already taken, and say who took it."""
 
 from __future__ import annotations
 
@@ -57,8 +41,6 @@ def main() -> int:
         stop = f"taskkill //PID {pid} //F" if sys.platform == "win32" else f"kill {pid}"
         print(f"  or:        {stop}", file=sys.stderr)
     else:
-        # Still actionable without a PID: a reader who cannot find the process
-        # needs the command, not just the diagnosis.
         find = (
             f"netstat -ano | findstr :{port}"
             if sys.platform == "win32"

@@ -36,11 +36,7 @@ class _FakeProcess:
 def test_a_standalone_worker_has_no_parent_and_keeps_running(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """`parent_process() is None` means "not a multiprocessing child", not "orphaned".
-
-    The guard used to read `None` as dead, so every standalone `de worker` exited on
-    its first loop iteration (EXP-0011).
-    """
+    """`parent_process() is None` means "not a multiprocessing child", not "orphaned"."""
     monkeypatch.setattr("data_engine.cli.multiprocessing.parent_process", lambda: None)
     assert _parent_alive() is True
 
@@ -116,11 +112,7 @@ def _loop_with(
 
 
 class _Metrics:
-    """Counts host samples, and can be told to fail one.
-
-    The monitor emits its own metric family through the same recorder; those calls
-    are not what these tests are about, so every other method is a no-op.
-    """
+    """Counts host samples, and can be told to fail one."""
 
     def __init__(self, *, broken: bool = False) -> None:
         self.host_samples = 0
@@ -156,17 +148,11 @@ class _Outage:
 
 @pytest.mark.unit
 def test_worker_loop_survives_a_database_outage(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A blip must not end the worker's life.
-
-    `claim_job` runs before the per-job try/except in `process_one`, so a lost
-    connection used to propagate out of this loop and take the process down, leaving
-    the queue unprocessed until someone restarted it.
-    """
+    """A blip must not end the worker's life."""
     worker = _Outage(failures=2)
 
     _loop_with(monkeypatch, worker, iterations=4)
 
-    # Kept going past both failures instead of dying on the first.
     assert worker.calls == 3
 
 
@@ -198,8 +184,7 @@ def test_a_failing_reaper_does_not_end_the_loop(monkeypatch: pytest.MonkeyPatch)
 
 @pytest.mark.unit
 def test_worker_loop_ticks_the_monitor(monkeypatch: pytest.MonkeyPatch) -> None:
-    """EXP-0016: `MonitorService.tick` had no production caller, so incidents never
-    existed. The worker loop is the scheduler now, under a catalog-held lease."""
+    """EXP-0016: `MonitorService.tick` had no production caller, so incidents never existed."""
     worker = _Outage(failures=0)
 
     _loop_with(monkeypatch, worker, iterations=2)
@@ -260,8 +245,6 @@ def test_a_failing_host_sample_does_not_end_the_loop(monkeypatch: pytest.MonkeyP
     worker = _Outage(failures=0)
     metrics = _Metrics(broken=True)
 
-    # Three loop iterations so the assertion can see work done *after* the sample
-    # blew up: `_Stop` ends the loop on the third `is_set` check.
     _loop_with(monkeypatch, worker, iterations=3, metrics=metrics)
 
     assert metrics.host_samples == 1

@@ -1,10 +1,4 @@
-"""The `just reset` data wipe.
-
-Two of its behaviours are load-bearing and neither is visible in normal use: it
-refuses a `*_test` database, and it refuses to run without confirmation. Both are
-asserted here, because a reset script that quietly grows a default is a script
-that eventually deletes something it should not.
-"""
+"""The `just reset` data wipe."""
 
 import importlib.util
 from pathlib import Path
@@ -36,7 +30,7 @@ def test_it_refuses_a_test_database(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.mark.unit
 def test_it_refuses_without_confirmation(monkeypatch: pytest.MonkeyPatch) -> None:
-    """`just reset` is muscle memory by now. The confirmation has to be typed."""
+    """`just reset` is muscle memory by now."""
     monkeypatch.setenv("DE_DATABASE_URL", "postgresql://localhost:5432/data_engine")
     with pytest.raises(SystemExit, match="--yes"):
         _RESET.main([])

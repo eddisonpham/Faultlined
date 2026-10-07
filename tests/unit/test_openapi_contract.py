@@ -1,8 +1,4 @@
-"""Contract drift check (ADR 0009).
-
-The OpenAPI document is committed at docs/api/openapi.json so an API change cannot land
-without the contract being refreshed. This fails the suite when the two diverge.
-"""
+"""Contract drift check (ADR 0009)."""
 
 from __future__ import annotations
 

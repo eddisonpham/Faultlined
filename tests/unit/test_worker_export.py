@@ -1,11 +1,4 @@
-"""Worker-level tests for the `export` job type (ADR 0025).
-
-The worker's export path is a selection-shaped handler like `build`: it names
-resources that already exist (a build, its members) rather than carrying
-bytes. The failure taxonomy is the point here - unknown build and malformed
-build fail terminally, while disk errors retry - so the fake catalog exists to
-make those distinctions observable without PostgreSQL.
-"""
+"""Worker-level tests for the `export` job type (ADR 0025)."""
 
 from __future__ import annotations
 
@@ -170,8 +163,6 @@ def test_export_of_a_build_that_already_exists_is_a_successful_noop(
     worker = _worker(tmp_path, catalog, blobs, monkeypatch=monkeypatch)
     worker.process_one()
 
-    # A second export with no readable artifacts at all still succeeds: the
-    # verified tree at the content address is the answer.
     worker2 = _worker(tmp_path, catalog, {}, monkeypatch=monkeypatch, fail_reads=True)
     result = worker2.process_one()
 
@@ -191,14 +182,11 @@ def test_unknown_build_hash_fails_terminally(
 
     assert result is not None
     assert result["state"] == JobState.FAILED.value
-    assert catalog.requeues == 0  # terminal: no retry burned
-    # The worker records the exception type, not its text (existing convention).
+    assert catalog.requeues == 0
     assert result["error"]["type"] == "ExportBuildUnknown"
 
 
 def test_export_build_unknown_is_the_terminal_type(tmp_path: Path) -> None:
-    # Pins the worker's terminal set without a queue: the class exists so the
-    # retry policy can tell "caller typo" from "disk hiccup".
     assert issubclass(ExportBuildUnknown, ValueError)
 
 
@@ -223,7 +211,7 @@ def test_transient_read_failure_retries(tmp_path: Path, monkeypatch: pytest.Monk
     result = worker.process_one()
 
     assert result is not None
-    assert result["state"] == JobState.QUEUED.value  # requeued for retry
+    assert result["state"] == JobState.QUEUED.value
     assert catalog.requeues == 1
 
 

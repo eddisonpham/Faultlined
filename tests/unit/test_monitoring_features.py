@@ -1,9 +1,4 @@
-"""Unit tests for the pure feature builder (ADR 0020).
-
-The invariants under test are the ones that make a monitor trustworthy in
-production rather than only in a test: determinism, missing-is-absent, and no
-unbounded labels in the vector.
-"""
+"""Unit tests for the pure feature builder (ADR 0020)."""
 
 from __future__ import annotations
 
@@ -53,8 +48,6 @@ class TestSchema:
         assert _build().schema_version == FEATURE_SCHEMA_VERSION
 
     def test_every_feature_has_a_documented_group(self) -> None:
-        # Guards against a feature being added to the vector with no owner: an
-        # unconsumed feature is dead weight that still costs a baseline scope.
         assert "sensor_availability" in FEATURE_NAMES
         assert "max_episode_timestamp_gap_seconds" not in FEATURE_NAMES
 
@@ -101,8 +94,6 @@ class TestMissingIsNotZero:
         assert sparse.value("sensor_availability") < dense.value("sensor_availability")
 
     def test_never_seen_heartbeat_is_a_missing_feature(self) -> None:
-        # Not a stale heartbeat: no record at all. The detector decides what that
-        # means; the builder must not invent a value.
         assert not _build(records=[]).has("heartbeat_age_seconds")
 
     def test_stale_heartbeat_is_derived_at_read_time(self) -> None:
@@ -111,7 +102,6 @@ class TestMissingIsNotZero:
         assert vector.value("heartbeat_age_seconds") == 300.0
 
     def test_unreachable_catalog_drops_catalog_derived_features(self) -> None:
-        # Recording zeros here would look like a healthy, empty system.
         vector = _build(
             snapshot={"quarantine_rate": 0.4, "frame_count_median": 10.0},
             catalog_reachable=False,
@@ -146,8 +136,6 @@ class TestQueueAndProgress:
         assert _build(records=records).value("job_failure_rate") == 0.5
 
     def test_a_lone_failure_is_a_total_failure_rate(self) -> None:
-        # One settled run, and it failed: the rate is 1.0, not "unknown". This is
-        # why REPEATED_READ_FAILURE needs a count threshold rather than a rate.
         assert (
             _build(records=[_record("jobs_failures_total", 1.0)]).value("job_failure_rate") == 1.0
         )
@@ -193,8 +181,6 @@ class TestScopedFeatures:
 
 class TestReferences:
     def test_identifiers_ride_in_refs_not_values(self) -> None:
-        # A string in the numeric vector would make a baseline meaningless and
-        # would put high-cardinality data on a path the schema calls bounded.
         vector = _build(
             snapshot={
                 "max_episode_timestamp_gap_seconds": 9.0,

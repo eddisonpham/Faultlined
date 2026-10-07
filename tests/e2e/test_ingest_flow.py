@@ -177,8 +177,6 @@ def test_api_worker_artifact_and_lineage_end_to_end(tmp_path: Path) -> None:
     episode_id = job_response.json()["result"]["episode_id"]
     episode_response = client.get(f"/api/v1/episodes/{episode_id}")
     assert episode_response.status_code == 200
-    # The episode is content-addressed, so a persistent database accumulates one edge per
-    # job that produced it. Assert membership, not position, or this fails on the second run.
     assert job_id in [edge["to_ref"] for edge in episode_response.json()["lineage"]]
     assert worker.artifacts.get_bytes(episode_response.json()["artifact_hash"])
 

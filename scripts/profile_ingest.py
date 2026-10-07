@@ -1,18 +1,8 @@
 #!/usr/bin/env python3
 """Attribute MCAP ingest time per stage and dump cProfile hotspots.
 
-EXP-0005's stage attribution (container / +decode / +engine) is the method that
-found the flatten lever; this script makes that method a command so the stage-4
-profiling criterion re-measures it against the current tree instead of quoting
-history. Black-box over the real reader and the real ingest service, with an
-in-memory catalog and a throwaway artifact store - the same protocol as the
-`mcap-ingest` benchmark workload, so the numbers are comparable.
-
-The raw cProfile dump goes to `var/profile/` (gitignored, like the benchmark
-results); the stdout table is what the experiment record quotes.
-
-    uv run --all-extras python scripts/profile_ingest.py
-    uv run --all-extras python scripts/profile_ingest.py --reps 5 --save
+uv run --all-extras python scripts/profile_ingest.py
+uv run --all-extras python scripts/profile_ingest.py --reps 5 --save
 """
 
 from __future__ import annotations
@@ -111,11 +101,7 @@ def stage_full_ingest(path: Path, artifact_root: Path) -> float:
 
 
 def profile_other_workload(workload: str) -> str:
-    """cProfile one benchmarked engine stage (one trial, no warmups).
-
-    The harness functions are reused rather than reimplemented, so what is
-    profiled is the operation the committed workloads measure.
-    """
+    """cProfile one benchmarked engine stage (one trial, no warmups)."""
     from benchmarks import harness
 
     operations = {
@@ -196,9 +182,6 @@ def main() -> int:
             "reader (decode+flatten+stats+quality)": stage_reader,
             "full ingest (read+hash+artifact)": lambda p: stage_full_ingest(p, artifact_root),
         }
-        # One warmup per stage, then the measured passes: the artifact store is a
-        # fresh throwaway tree per full-ingest pass, so no run benefits from a
-        # warm filesystem cache the benchmark would not have.
         for _warmup in range(1):
             for fn in functions.values():
                 fn(path)

@@ -1,10 +1,4 @@
-"""Port/PID lookup shared by the dev scripts (`check_port`, `stop_server`).
-
-Both scripts must agree with the port the application binds, so the port comes
-from the same environment variable the application reads (`DE_API_PORT`, the
-`api_port` setting). An earlier version read `DE_PORT`, which the application
-never reads: the check would have passed while the server bound 8000 anyway.
-"""
+"""Port/PID lookup shared by the dev scripts (`check_port`, `stop_server`)."""
 
 from __future__ import annotations
 
@@ -84,10 +78,7 @@ def _from_lsof(port: int) -> str | None:
 
 
 def _parse_netstat(text: str, port: int) -> str | None:
-    """The PID from `netstat -ano` output listening on `port`.
-
-    Lines look like: "TCP  127.0.0.1:8000  0.0.0.0:0  LISTENING  1234".
-    """
+    """The PID from `netstat -ano` output listening on `port`."""
     for line in text.splitlines():
         if "LISTENING" not in line:
             continue

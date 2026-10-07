@@ -1,15 +1,4 @@
-"""Crash recovery: a worker that dies mid-job must not strand the job.
-
-These are the guarantees a stub cannot prove. A worker killed by a container restart
-never runs its own failure path, so the job is left in `running`; nothing that runs in
-the product used to notice, because the reapers existed but no caller ever invoked
-them. Each test drives real SQL so the state transitions are enforced by the database
-rather than by the test's own assumptions.
-
-The test database is shared with the whole suite and is long-lived - it already holds
-thousands of jobs - so these tests neither drain the queue to reach their own job nor
-leave rows behind. `abandoned_job` creates one job per test and removes it afterwards.
-"""
+"""Crash recovery: a worker that dies mid-job must not strand the job."""
 
 from __future__ import annotations
 
@@ -38,16 +27,7 @@ def catalog() -> Iterator[PostgresCatalog]:
 
 @pytest.fixture
 def abandoned_job(catalog: PostgresCatalog) -> Iterator[Callable[..., str]]:
-    """Create one job per test in the state a dead worker leaves behind, then clean up.
-
-    `created_at` is moved just behind the oldest row in the table so the job sorts
-    ahead of everything else queued here, which lets a test prove it is claimable
-    again with a single `claim_job()` call. A fixed constant would not do: this
-    database is long-lived and keeps whatever earlier runs left behind, so the
-    threshold is computed rather than assumed. Draining the queue instead would claim
-    and abandon jobs that belong to other tests. Jobs created here are removed
-    afterwards, so they cannot accumulate.
-    """
+    """Create one job per test in the state a dead worker leaves behind, then clean up."""
     created: list[str] = []
 
     def _make(*, age_seconds: float, max_attempts: int = 3) -> str:
@@ -88,7 +68,6 @@ def test_a_dead_workers_job_is_requeued_not_stranded(
     reclaimed = catalog.get_job(job_id)
     assert reclaimed is not None
     assert reclaimed["state"] == JobState.QUEUED.value
-    # Requeued, not failed: the retry budget is still there for whoever picks it up.
     assert int(reclaimed["attempts"]) < int(reclaimed["max_attempts"])
     error: dict[str, Any] = reclaimed["error"]  # type: ignore[assignment]
     assert error["type"] == "WorkerLost"
@@ -102,7 +81,6 @@ def test_a_requeued_orphan_is_actually_claimable_again(
     job_id = abandoned_job(age_seconds=ORPHANED_JOB_SECONDS + 60)
     catalog.reap_orphaned_jobs()
 
-    # Safe to claim straight away: this job sorts ahead of everything else queued.
     claimed = catalog.claim_job()
     assert claimed is not None
     assert claimed["id"] == job_id

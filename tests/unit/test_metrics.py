@@ -131,7 +131,6 @@ def test_host_gauges_are_emitted_and_unreadable_fields_are_skipped(tmp_path: Pat
     assert by_name["process_rss_bytes"]["labels"] == {"process_role": "worker"}
     assert by_name["system_disk_free_bytes"]["labels"] == {"volume": "."}
     assert by_name["system_network_bytes_sent_total"]["labels"] == {"interface": "aggregate"}
-    # No GPU answered, so no zeroed GPU record: absent beats fabricated.
     assert "system_gpu_utilization_percent" not in by_name
 
 

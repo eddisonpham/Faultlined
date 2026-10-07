@@ -1,12 +1,4 @@
-"""Behavioural fingerprints (ADR 0032).
-
-The module's whole justification is that the measure carries information without a model, so
-the tests are about *what the measure can see*: that it is blind to duration and to overall
-scale, that a missing component is left out of both sides of the mean rather than scored as
-zero, and that a set with planted near-duplicates collapses to the planted number. Assertions
-are about relative separation (a planted pair is closer than an unrelated pair) because the
-default threshold itself is calibrated by `scripts/fingerprint_calibration.py`, not by taste.
-"""
+"""Behavioural fingerprints (ADR 0032)."""
 
 from __future__ import annotations
 
@@ -87,9 +79,6 @@ def _jittered(values: list[float], *, index: int) -> list[float]:
     ]
 
 
-# ------------------------------------------------------------------ the descriptor
-
-
 def test_a_fingerprint_is_built_from_one_persisted_row_and_nothing_else() -> None:
     item = fingerprint(_row("ep-1", task="pick the cube"))
     assert item.episode_id == "ep-1"
@@ -103,11 +92,7 @@ def test_a_row_with_no_task_falls_back_to_the_id_as_its_label() -> None:
 
 
 def test_the_shape_is_blind_to_how_long_the_recording_took() -> None:
-    """The same motion over 4 s of samples and over 40 s of samples is the same behaviour.
-
-    This is the property that makes a 6 s demonstration comparable to a 60 s one; without it
-    every episode would only ever match another of the same duration.
-    """
+    """The same motion over 4 s of samples and over 40 s of samples is the same behaviour."""
     quick = _trace(_wave(40), step=0.1)
     slow = _trace(_wave(40), step=1.0)
 
@@ -126,8 +111,8 @@ def test_the_shape_is_blind_to_the_overall_scale_of_the_motion() -> None:
 
 
 def test_a_flat_trace_has_no_shape_rather_than_a_vector_of_zeros() -> None:
-    """A zero vector would sit at distance zero from every other flat episode - a false
-    duplicate produced by an absence of motion rather than by a shared motion."""
+    """A zero vector would sit at distance zero from every other flat episode - a false duplicate
+    produced by an absence of motion rather than by a shared motion."""
     flat = fingerprint(_row("a", trace=_trace([0.0] * 40), dims=[]))
     assert flat.shape == ()
     assert not flat.comparable
@@ -136,14 +121,13 @@ def test_a_flat_trace_has_no_shape_rather_than_a_vector_of_zeros() -> None:
 def test_a_trace_with_no_clock_is_absent_and_the_episode_says_so() -> None:
     item = fingerprint(_row("a", trace=[]))
     assert item.shape == ()
-    assert item.comparable  # dynamics are still there
+    assert item.comparable
     assert distance(item, fingerprint(_row("b", trace=[]))) is not None
 
 
 def test_dynamics_are_keyed_by_the_dimensions_own_field_name() -> None:
-    """An MCAP dimension is `<topic>.<path>`; the topic is where a signal came from, not what
-    it is (the ADR 0018 amendment). Two recordings of the same joints under different topics
-    must therefore still line up on dynamics."""
+    """An MCAP dimension is `<topic>.<path>`; the topic is where a signal came from, not what it
+    is (the ADR 0018 amendment)."""
     left = fingerprint(_row("a", dims=_dims(prefix="position")))
     right = fingerprint(
         _row(
@@ -173,8 +157,8 @@ def test_a_discrete_dimension_is_excluded_the_way_the_verdict_excludes_it() -> N
 
 
 def test_the_descriptor_uses_qualitys_own_field_rule() -> None:
-    """One rule, not two: a change to what a dimension's name *is* cannot make
-    `analysis.quality` and `analysis.fingerprint` disagree about a gripper."""
+    """One rule, not two: a change to what a dimension's name *is* cannot make `analysis.quality`
+    and `analysis.fingerprint` disagree about a gripper."""
     assert field_name("/left/gripper/joint_states.position[3]") == "position[3]"
     assert field_name("observation.state[3]") == "state[3]"
 
@@ -202,17 +186,8 @@ def test_the_fingerprint_matches_what_analyze_actually_produces() -> None:
     assert [name for name, _, _ in item.dynamics] == ["position[0]", "position[1]"]
 
 
-# --------------------------------------------------------------------- distance
-
-
 def test_a_component_only_one_side_has_is_left_out_of_both_sides_of_the_mean() -> None:
-    """Compared on what both have, renormalised by the weights present.
-
-    Scoring a missing component as zero would push an episode with no clock away from
-    everything, which is indistinguishable from "this is a different behaviour" - the exact
-    confusion the module exists to avoid. Here the only real difference is the trace, and the
-    distance is the shape component's own weight share of it.
-    """
+    """Compared on what both have, renormalised by the weights present."""
     has_shape = Fingerprint(
         episode_id="a",
         label="a",
@@ -261,9 +236,6 @@ def test_a_planted_pair_is_much_closer_than_an_unrelated_pair() -> None:
     assert near < far / 3
 
 
-# --------------------------------------------------------------------- the report
-
-
 def test_planted_near_duplicates_collapse_to_the_number_of_distinct_behaviours() -> None:
     rows: list[dict[str, Any]] = []
     for base in range(3):
@@ -310,8 +282,8 @@ def test_the_representative_is_the_cleanest_take_not_the_first_one_seen() -> Non
 
 
 def test_a_group_says_which_signal_made_it_a_duplicate() -> None:
-    """The justification for a deterministic measure is that an operator can disagree with it
-    by reading it, so the reason travels with the row."""
+    """The justification for a deterministic measure is that an operator can disagree with it by
+    reading it, so the reason travels with the row."""
     rows = [_row("a"), _row("b", stall=0.10)]
     report = redundancy_report(rows)
 
@@ -324,8 +296,7 @@ def test_a_group_says_which_signal_made_it_a_duplicate() -> None:
 def test_temporal_character_alone_cannot_carry_a_group_at_the_calibrated_threshold() -> None:
     """A consequence of calibrating for precision, asserted so it cannot drift silently: the
     temporal component carries the smallest weight, so a pair that differs only in how much it
-    stalls has to differ by very little to collapse. Shape and dynamics are what make a
-    duplicate; the temporal fractions break ties between candidates that already agree."""
+    stalls has to differ by very little to collapse."""
     rows = [_row("a"), _row("b", stall=0.9, gap=0.2)]
     assert redundancy_report(rows).groups == ()
 
@@ -355,7 +326,7 @@ def test_an_episode_with_nothing_to_compare_on_is_counted_as_distinct_and_named(
     report = redundancy_report(rows)
     assert report.incomparable == ("c",)
     assert report.compared_count == 2
-    assert report.distinct_count == 2  # the kept representative plus the incomparable one
+    assert report.distinct_count == 2
 
 
 def test_an_empty_set_produces_an_empty_report_rather_than_dividing_by_zero() -> None:
@@ -384,12 +355,9 @@ def test_the_default_threshold_separates_the_planted_pair_from_the_unrelated_one
     assert unrelated.redundant_count == 0
 
 
-# ------------------------------------------------------------------- robustness
-
-
 def test_a_non_finite_signal_does_not_poison_every_distance_it_touches() -> None:
-    """A NaN would make every `<= threshold` test false, which is the failure ADR 0023 exists
-    to prevent one layer up: it must not become an invisible shape here either."""
+    """A NaN would make every `<= threshold` test false, which is the failure ADR 0023 exists to
+    prevent one layer up: it must not become an invisible shape here either."""
     item = fingerprint(_row("a", stall=float("nan"), gap=float("inf")))
     assert item.stall_ratio == 0.0
     assert item.gap_ratio == 0.0
@@ -425,7 +393,7 @@ def test_a_gap_between_runs_is_still_one_chronological_series() -> None:
 def test_the_pruning_shortcut_agrees_with_the_public_distance() -> None:
     """`redundancy_report`'s early exits are an optimisation, not a second definition of the
     measure: a pair collapses exactly when `distance()` says it should, for every threshold on
-    the grid. Without this the fast path could quietly become the specification."""
+    the grid."""
     rows = [
         _row("a"),
         _row("b", trace=_trace(_jittered(_wave(60), index=1))),

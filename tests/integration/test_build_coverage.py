@@ -1,21 +1,4 @@
-"""Build coverage over a real catalog (ADR 0033).
-
-The unit tests hand `coverage_report` rows that are shaped the way the query promises. This is the
-round trip that can break: four persisted attributes are unpivoted, joined against the catalog the
-build was drawn from, and the task axis's gaps are read from the vocabulary rather than from the
-episodes. It also pins the two things the first real run got wrong - `sum()` over a `bigint` comes
-back as `numeric`, so every total has to be cast and read as a count - and the property the ADR
-argues for: the report is computed on read, so it follows the catalog without touching the build.
-
-The suite shares one database and does not truncate between tests, so the assertions are written for
-a catalog that already holds generations of earlier runs and will hold this one's rows tomorrow:
-counts about the catalog are relative (a baseline plus what this test seeded), gaps are asserted by
-membership in a name this test owns, and the probe rows read with a window wide enough that the
-shared catalog cannot hide one of them behind an axis cap. The caps themselves are exercised by the
-boundedness test, which asserts on its own build rather than on the catalog. A first version used
-fixed probe names and read through the shipped caps; it passed alone and failed in the full suite,
-which is exactly the failure this discipline prevents.
-"""
+"""Build coverage over a real catalog (ADR 0033)."""
 
 from __future__ import annotations
 
@@ -35,16 +18,12 @@ from tests.conftest import postgres_test_dsn
 
 pytestmark = pytest.mark.integration
 
-#: Names this test owns, so a gap assertion cannot be satisfied or broken by another test's data.
 PICK = "coverage-probe pick"
 FOLD = "coverage-probe fold"
 UNFILLED = "coverage-probe place the can"
 PICK_TASK = "coverage-probe/pick the cube"
 FOLD_TASK = "coverage-probe/fold the cloth"
 
-#: The read window the gap assertions use. The route asks for `max(VALUE_LIMIT, GAP_LIMIT)`; a test
-#: that asserts a gap list asks for more, so nothing another test left in the catalog can push this
-#: test's own value past the cap. The shipped caps are what the boundedness test is about.
 WIDE = 500
 
 
@@ -132,8 +111,6 @@ def test_coverage_round_trips_a_real_build_against_the_catalog_it_came_from(
     assert task["values"][0]["value"] not in task["gaps"], "a value the build holds is not a gap"
     assert "ur5e" in robot["gaps"], "the catalog holds another embodiment; the build left it out"
     assert "so101" not in robot["gaps"]
-    # Other tests share the database and may have ingested other formats, so this is a membership
-    # check rather than an empty list.
     assert "synthetic-json" not in _axis(report, "format")["gaps"]
 
 
@@ -156,7 +133,6 @@ def test_a_vocabulary_label_with_no_episode_anywhere_is_still_a_gap(
     whole = _report(catalog, _build(catalog, selected, "coverage-probe-whole"))
 
     subset_task = _axis(subset, "task")
-    # The raw task strings normalise through the vocabulary on the way out.
     assert [item["value"] for item in subset_task["values"]] == [PICK]
     assert FOLD in subset_task["gaps"], "a label with an episode elsewhere is a gap here"
     assert UNFILLED in subset_task["gaps"], "a label with no episode anywhere is still a gap"

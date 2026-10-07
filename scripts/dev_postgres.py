@@ -1,10 +1,5 @@
 #!/usr/bin/env python3
-"""Start or stop an isolated local PostgreSQL for development and integration tests.
-
-The cluster lives in gitignored var/pgdata on a non-default port, so it never
-touches a system PostgreSQL installation and never needs administrator rights or
-a password. Intended for local development only.
-"""
+"""Start or stop an isolated local PostgreSQL for development and integration tests."""
 
 from __future__ import annotations
 
@@ -86,12 +81,6 @@ def start(bin_dir: Path) -> None:
     if is_listening():
         print(f"PostgreSQL already listening on port {port()}")
         return
-    # The server must outlive the invoking shell. On Windows, a killed parent tears the
-    # cluster down via the server's children (0xC000013A). Console flags do not help:
-    # a process launched from a job object stays in that job, and killing the job kills
-    # the server regardless of DETACHED_PROCESS or CREATE_NEW_CONSOLE. Only
-    # CREATE_BREAKAWAY_FROM_JOB escapes it, and it works only when the parent job permits
-    # breakaway, so fall back to an ordinary detached child if it is refused.
     kwargs: dict[str, object] = {}
     if os.name == "nt":
         kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP | CREATE_BREAKAWAY_FROM_JOB
@@ -117,7 +106,6 @@ def start(bin_dir: Path) -> None:
         except OSError:
             if not kwargs:
                 raise
-            # The parent job forbids breakaway; run as a plain detached child instead.
             kwargs = (
                 {"start_new_session": True}
                 if os.name != "nt"

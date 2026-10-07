@@ -22,13 +22,11 @@ def _ramp(count: int, step: float = 1.0) -> list[float]:
 @pytest.mark.unit
 def test_linear_ramp_scores_movement_and_normalized_jerk() -> None:
     quality = analyze({"action[0]": _ramp(10)})
-    # Delta is 1.0 per transition: mean L2 movement is exactly 1.0.
     assert quality.movement_score == pytest.approx(1.0)
-    # Jerk normalizes by the dim's range (9.0), so 10-unit ramps score the same.
     assert quality.jerk_score == pytest.approx(1.0 / 9.0)
     assert quality.stall_ratio == 0.0
     assert quality.frame_count == 10
-    assert quality.verdict == "smooth"  # constant delta -> zero delta-sigma
+    assert quality.verdict == "smooth"
 
 
 @pytest.mark.unit
@@ -43,11 +41,9 @@ def test_jerk_is_scale_free_across_dims() -> None:
 @pytest.mark.unit
 def test_stall_ratio_counts_flat_transitions() -> None:
     quality = analyze({"action[0]": [0.0, 0.0, 0.0, 1.0, 1.0, 1.0]})
-    # 4 of 5 transitions move nothing at all.
     assert quality.stall_ratio == pytest.approx(0.8)
     assert quality.movement_score == pytest.approx(0.2)
     assert quality.jerk_score == pytest.approx(0.2)
-    # Two unique values reads as a discrete dim, which is excluded from the verdict.
     assert quality.dims[0].discrete is True
     assert quality.verdict == "unknown"
 
@@ -87,14 +83,11 @@ def test_verdict_uses_absolute_normalized_sigma_bands() -> None:
     smooth = [_dim("a", 0.005), _dim("b", 0.01)]
     assert _verdicts(smooth)[0] == "smooth"
 
-    # A *majority* of rough dims lifts the episode; the median is what decides.
     assert _verdicts([*smooth, _dim("c", 0.05)])[0] == "smooth"
     assert _verdicts([*smooth, _dim("c", 0.05), _dim("d", 0.06)])[0] == "moderate"
 
-    # A gripper's bang-bang open/close never drags the episode's verdict.
     assert _verdicts([*smooth, _dim("gripper", 0.5, gripper=True)])[0] == "smooth"
 
-    # Discrete dims are not judged at all.
     assert _verdicts([_dim("mode", 9.0, discrete=True)])[0] == "unknown"
 
     assert _verdicts([])[0] == "unknown"
@@ -103,13 +96,7 @@ def test_verdict_uses_absolute_normalized_sigma_bands() -> None:
 
 @pytest.mark.unit
 def test_one_bad_dimension_does_not_condemn_the_episode_but_is_still_reported() -> None:
-    """The rule that changed after a real log had 17 clean joints and one noisy one.
-
-    Worst-case let a single miscalibrated encoder decide whether an episode was
-    usable, and the operator could not see which dimension had done it without
-    opening the JSON. The median fixes the verdict; `worst_*` keeps the strict
-    reading available so the change hides nothing.
-    """
+    """The rule that changed after a real log had 17 clean joints and one noisy one."""
     joints = [_dim(f"joint_{i}", 0.005) for i in range(17)]
     noisy = _dim("encoder_drift", 0.9)
 
@@ -119,20 +106,13 @@ def test_one_bad_dimension_does_not_condemn_the_episode_but_is_still_reported() 
     assert worst_dim == "encoder_drift"
     assert judged == 18
 
-    # When most of the arm really is rough, the verdict follows.
     rough = [_dim(f"joint_{i}", 0.2) for i in range(9)]
     assert _verdicts([*rough, *joints[:4]])[0] == "jerky"
 
 
 @pytest.mark.unit
 def test_topic_name_does_not_decide_the_verdict() -> None:
-    """The gripper exclusion reads a dimension's field, never its address.
-
-    EXP-0014 D1: byte-identical payloads came out `smooth` under `/joint_states`
-    and `unknown` under `/left/gripper/joint_states`, because every dimension's
-    address contained `grip`. The verdict was a function of a topic-naming
-    convention.
-    """
+    """The gripper exclusion reads a dimension's field, never its address."""
     positions = [round(i * 0.01, 4) for i in range(20)]
     plain = analyze({"/joint_states.position[0]": positions})
     gripper_topic = analyze({"/left/gripper/joint_states.position[0]": positions})
@@ -187,9 +167,6 @@ def test_to_dict_is_json_ready() -> None:
     assert all(set(dim) >= {"name", "active", "discrete", "gripper"} for dim in data["dims"])
 
 
-# ------------------------------------------------------- summary assembly
-
-
 def _row(
     episode_id: str,
     frames: int,
@@ -235,7 +212,6 @@ def test_summary_groups_verdicts_and_ranks_outliers() -> None:
     assert [item["episode_id"] for item in summary["speed_distribution"]] == ["e1", "e2", "e3"]
     assert [item["episode_id"] for item in summary["outliers"]["jerk"]] == ["e1", "e3", "e2"]
     assert [item["episode_id"] for item in summary["outliers"]["stall"]] == ["e3", "e1", "e2"]
-    # e3 is the length outlier (120 vs ~50 mean).
     assert summary["outliers"]["length"][0]["episode_id"] == "e3"
     assert summary["outliers"]["length"][0]["value"] > 1
 
@@ -269,35 +245,24 @@ def test_zscore_handles_degenerate_populations() -> None:
 @pytest.mark.unit
 def test_length_histogram_bins_do_not_overflow() -> None:
     summary = _assemble_quality_summary([_row("e1", 10), _row("e2", 10)])
-    # Identical lengths: width falls back to 1 and everything lands in one bin.
     assert sum(bin["count"] for bin in summary["length"]["histogram"]) == 2
     assert summary["length"]["std"] == 0.0 or math.isclose(summary["length"]["std"], 0.0)
-
-
-# ---------------------------------------------------------------- motion trace
-#
-# The trace is the jerk score over time: the same quantity `jerk_score`
-# averages, plotted so a gapped recording renders as a literal hole instead of
-# a line drawn across a dropout.
 
 
 def test_the_motion_trace_is_the_jerk_score_over_time() -> None:
     quality = analyze({"j0": [0.0, 1.0, 2.0, 3.0]}, timestamps=[0.0, 1.0, 2.0, 3.0])
     (run,) = quality.motion_trace
-    # |delta|/range = 1/3 for every transition; points land at the observed frame.
     assert run == ((1.0, 1.0 / 3.0), (2.0, 1.0 / 3.0), (3.0, 1.0 / 3.0))
     assert quality.jerk_score == pytest.approx(1.0 / 3.0)
 
 
 def test_a_gapped_recording_renders_a_hole_not_motion() -> None:
-    # Five seconds between frames 2 and 3 at a 1 Hz median: past the 5x factor.
     timestamps = [0.0, 1.0, 2.0, 30.0, 31.0, 32.0]
     quality = analyze({"j0": [0.0, 1.0, 2.0, 3.0, 4.0, 5.0]}, timestamps=timestamps)
     assert len(quality.motion_trace) == 2
     first, second = quality.motion_trace
     assert [t for t, _ in first] == [1.0, 2.0]
     assert [t for t, _ in second] == [31.0, 32.0]
-    # The transition across the dropout is not drawn in either run.
     assert all(t < 30.0 for t, _ in first)
     assert all(t >= 30.0 for t, _ in second)
     assert quality.integrity == "gapped"

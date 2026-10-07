@@ -1,10 +1,4 @@
-"""Tests for the full-scale corpus and the real-string harvest.
-
-The corpus is the instrument for EXP-2.5-08, so its properties are asserted rather than
-assumed: a corpus that quietly became unbalanced, or that reused one string 500 times,
-would still produce a plausible-looking report. These tests run without a model and
-without a network.
-"""
+"""Tests for the full-scale corpus and the real-string harvest."""
 
 from __future__ import annotations
 
@@ -15,8 +9,6 @@ from pathlib import Path
 
 import pytest
 from experiments.clustering import attributes, corpus, real_tasks
-
-# ------------------------------------------------------------------ synthetic
 
 
 def test_the_corpus_is_the_size_asked_for_and_holds_no_duplicates() -> None:
@@ -46,8 +38,6 @@ def test_the_corpus_contains_verbs_the_masking_lexicon_does_not_know() -> None:
     unknown = [item for item in items if item.unknown_verb]
     assert len(unknown) > 200
     recognised = [item for item in unknown if attributes.verb_of(item.text) not in ("", "-")]
-    # Some are recognised anyway ("turn on" inside "turn on the shelf"), which is
-    # exactly why coverage is measured rather than assumed.
     assert len(recognised) < len(unknown)
 
 
@@ -71,9 +61,6 @@ def test_the_balance_report_exposes_the_imbalances_a_reader_should_worry_about()
     assert sum(report["label"].values()) == 300
 
 
-# --------------------------------------------------------------------- orders
-
-
 def test_shuffling_is_seeded_and_therefore_reproducible() -> None:
     items = corpus.synthetic_corpus(300)
     first = [item.text for item in corpus.shuffled(items)]
@@ -92,9 +79,6 @@ def test_the_adversarial_order_puts_every_class_together() -> None:
 
 def _label_of(item: corpus.Item) -> str:
     return item.label
-
-
-# ----------------------------------------------------------------- the control
 
 
 def test_the_control_corpus_varies_only_verb_and_colour() -> None:
@@ -116,9 +100,6 @@ def test_an_axis_corpus_varies_exactly_one_axis() -> None:
 def test_an_axis_corpus_rejects_an_axis_it_does_not_khow() -> None:
     with pytest.raises(ValueError, match="unknown axis"):
         corpus.axis_corpus("mood", ("", "happy"))
-
-
-# ------------------------------------------------------------------ the core
 
 
 @pytest.mark.parametrize(
@@ -150,9 +131,6 @@ def test_the_core_corpus_keeps_the_gold_labels() -> None:
     cores = corpus.core_corpus(items)
     assert [core.label for core in cores] == [item.label for item in items]
     assert len({core.text for core in cores}) == 48
-
-
-# ----------------------------------------------------------------- real text
 
 
 def test_placeholder_task_strings_are_rejected() -> None:

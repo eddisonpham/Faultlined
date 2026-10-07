@@ -1,28 +1,7 @@
 """Measure what the coverage report costs at scale (ADR 0033).
 
-The claim under test is not "coverage is useful" - that is a judgement - but the two things that
-would make it *wrong to ship*: that the report is bounded by the axes rather than by the episode
-count, and that it is cheap enough to sit in the build page.
-
-**The falsifier, stated before anything is run.** The idea is dead if, at 10 000 episodes:
-
-- the payload grows with the episode count rather than staying flat at the axis caps, or
-- the whole read plus fold exceeds 200 ms (the page already pays ~224 ms for the redundancy
-  report at 96 episodes per EXP-0020, and this surface exists to be cheaper than that), or
-- the gap list is empty or trivially "everything is covered" for a build that visibly holds a
-  fraction of the catalog.
-
-Nothing is written to the repository. The numbers become EXP-0021. It needs a throwaway database
-on the isolated cluster and refuses one that already holds episodes, because it measures absolute
-state (a shared catalog would make the report describe someone else's episodes):
-
-    export DE_DATABASE_URL=postgresql://data_engine@127.0.0.1:55432/bb_coverage
-    uv run --all-extras python scripts/coverage_bench.py --episodes 100 1000 10000
-
-The corpus plants a vocabulary of its own - one entry per task string, plus a handful of labels
-with no episode anywhere - so both reference sets are exercised: the catalog's differences and the
-operator's unfilled tasks. One in ten episodes is left unscored on purpose, so the verdict axis
-carries its own `(unscored)` value rather than a tidy sweep.
+export DE_DATABASE_URL=postgresql://data_engine@127.0.0.1:55432/bb_coverage
+uv run --all-extras python scripts/coverage_bench.py --episodes 100 1000 10000
 """
 
 from __future__ import annotations
@@ -51,17 +30,7 @@ COST_BUDGET_MS = 200.0
 def _seed(
     catalog: PostgresCatalog, settings: Settings, episodes: int, *, tasks: int, unfilled: int
 ) -> list[str]:
-    """A catalog with a populated vocabulary and `episodes` episodes spread across the axes.
-
-    The episodes are written with the writer's own statements on **one** connection rather than
-    through `register_episode` per episode. That is a deliberate exception to "seed the real way",
-    and it is here because of a number this bench produced: a repository call opens its own
-    connection, and one connection on this host costs ~60 ms, so seeding 10 000 episodes the
-    per-row way is thirty minutes of `connect()` and measures Windows, not the report. The read
-    path - the catalog query and the fold - is untouched and is what all the numbers below are
-    about. The vocabulary does go through `vocabulary.create_entry`/`map_task`, because ADR 0029's
-    bookkeeping (mappings plus events) is not something a bench should re-implement.
-    """
+    """A catalog with a populated vocabulary and `episodes` episodes spread across the axes."""
     if catalog.count_episodes():
         raise SystemExit(
             f"refusing to run: the catalog already holds {catalog.count_episodes()} episodes. "
@@ -109,7 +78,7 @@ def _seed(
             Jsonb([]),
         )
         for index, episode_id in enumerate(ids)
-        if index % 10  # one in ten left unscored, so the axis carries `(unscored)`
+        if index % 10
     ]
     with connect(settings) as connection, connection.cursor() as cursor:
         cursor.executemany(
@@ -145,13 +114,7 @@ def _build(catalog: PostgresCatalog, episode_ids: list[str], name: str) -> str:
 
 
 def connection_floor(catalog: PostgresCatalog, *, repeats: int = 9) -> float:
-    """Median milliseconds of one repository call, measured in this process.
-
-    Every repository call opens its own connection, and on this host that is ~60 ms, so the raw
-    read number is mostly `connect()`. Measuring the floor beside it is the difference between
-    "the coverage query is slow" and "every route on this host pays this", and only one of those
-    is worth acting on.
-    """
+    """Median milliseconds of one repository call, measured in this process."""
     samples = []
     for _ in range(repeats):
         start = time.perf_counter()
@@ -174,7 +137,6 @@ def report_cost(catalog: PostgresCatalog, build_hash: str, *, repeats: int = 5) 
         start = time.perf_counter()
         report = coverage_report(build_hash, inputs)
         fold.append((time.perf_counter() - start) * 1000)
-        # The wire payload, not the object: this is what the page and the JSON route ship.
         payload = len(json.dumps(report.to_dict(), separators=(",", ":")).encode("utf-8"))
     assert report is not None
     task = report.axis("task")
@@ -197,7 +159,6 @@ def report_cost(catalog: PostgresCatalog, build_hash: str, *, repeats: int = 5) 
 
 
 def _print_row(label: str, row: dict[str, Any], *, floor_ms: float) -> None:
-    # The read opens two connections (values, then the vocabulary); the floor is what that costs.
     aggregation = row["read_p50_ms"] - 2 * floor_ms
     print(
         f"  {label:>10s}  {row['read_p50_ms']:>8.1f}  {row['read_max_ms']:>8.1f}  "
@@ -236,7 +197,6 @@ def main() -> int:
         f"in {time.perf_counter() - seeded:.1f}s"
     )
 
-    # Warm-up, so the first measured read is not paying for a cold connection pool.
     whole_hash = _build(catalog, ids, "coverage-bench-all")
     catalog.build_coverage_inputs(whole_hash)
     floor_ms = connection_floor(catalog)
@@ -266,9 +226,6 @@ def main() -> int:
         f"{whole['task_gaps_total']} named task(s) unfilled"
     )
 
-    # Judged on the largest size asked for and not on the run that happens to be last: the
-    # whole-catalog build is the same read as the largest size, and measuring it twice is how a
-    # budget gets passed by accident.
     largest = measured[max(sizes)]
     smallest = measured[min(sizes)]
     growth = largest["payload_bytes"] / max(smallest["payload_bytes"], 1)

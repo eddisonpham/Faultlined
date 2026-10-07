@@ -1,8 +1,4 @@
-"""Unit tests for triage: fingerprinting, the gates, dedup, cooldown, budget.
-
-Most of the system's precision is decided here rather than in any detector, so
-these tests are about *what gets suppressed* as much as about what opens.
-"""
+"""Unit tests for triage: fingerprinting, the gates, dedup, cooldown, budget."""
 
 from __future__ import annotations
 
@@ -60,8 +56,6 @@ class TestFingerprint:
         assert fingerprint(_signal()) == fingerprint(_signal())
 
     def test_ignores_the_numbers_that_change_every_tick(self) -> None:
-        # Including the evidence values would make dedup impossible: the whole
-        # point is that a still-open fault is recognised despite its numbers moving.
         first = _signal(evidence={"heartbeat_age_seconds": 900.0})
         second = _signal(evidence={"heartbeat_age_seconds": 1200.0})
         assert fingerprint(first) == fingerprint(second)
@@ -72,7 +66,6 @@ class TestFingerprint:
         )
 
     def test_separates_different_scopes(self) -> None:
-        # Two stalled jobs are two incidents, not one.
         assert fingerprint(_signal(scope="job-1")) != fingerprint(_signal(scope="job-2"))
 
     def test_includes_stable_identifying_evidence(self) -> None:
@@ -106,7 +99,6 @@ class TestFingerprint:
 
 class TestEvidenceGate:
     def test_a_signal_without_evidence_is_rejected(self) -> None:
-        # The promise is that no incident exists which cannot cite its numbers.
         outcome = _decide([_signal(evidence={})])[0]
         assert outcome.action == TriageAction.SUPPRESS_NO_EVIDENCE
         assert "evidence" in outcome.reason
@@ -146,7 +138,6 @@ class TestDedup:
         assert "occurrence 4" in outcome.reason
 
     def test_an_acknowledged_incident_still_dedups(self) -> None:
-        # Acknowledging is not resolving: the fault has not stopped.
         identity = fingerprint(_signal())
         existing = {
             identity: ExistingIncident(
@@ -181,7 +172,6 @@ class TestCooldown:
         assert outcome.action == TriageAction.SUPPRESS_COOLDOWN
 
     def test_a_resolved_fault_recurs_after_the_cooldown_opens_a_new_incident(self) -> None:
-        # This gap is the time-to-acknowledge proxy the plan reports on.
         identity = fingerprint(_signal())
         existing = {
             identity: ExistingIncident(
@@ -220,7 +210,6 @@ class TestBudget:
         assert "log-only" in outcomes[0].reason
 
     def test_a_bump_does_not_consume_budget(self) -> None:
-        # Re-firing an open incident is not news; only new rows are.
         identity = fingerprint(_signal())
         existing = {
             identity: ExistingIncident(

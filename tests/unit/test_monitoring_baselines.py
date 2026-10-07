@@ -1,9 +1,4 @@
-"""Unit tests for control limits: EWMA centre, median/MAD spread, and the freeze.
-
-Each behaviour here exists because its absence produces a specific, observable
-failure — a baseline that adapts to a fault, a cold scope that guesses, or a
-stale hold that pins an incident open forever.
-"""
+"""Unit tests for control limits: EWMA centre, median/MAD spread, and the freeze."""
 
 from __future__ import annotations
 
@@ -56,15 +51,11 @@ class TestRobustSpread:
         assert Baseline("x", samples=(2.0, 2.0, 2.0)).mad == 0.0
 
     def test_sigma_has_a_scale_aware_floor(self) -> None:
-        # A perfectly stable scope has MAD 0; without a floor the z-score would be
-        # infinite and any tiny change would read as an infinite deviation.
         constant = Baseline("x", samples=(100.0,) * 10)
         assert constant.sigma > 0.0
         assert constant.sigma == pytest.approx(0.05 * 100.0)
 
     def test_one_spike_does_not_widen_the_limits(self) -> None:
-        # This is the whole reason for median/MAD: a mean/std baseline would
-        # absorb the outlier and stop catching it next time.
         stable = Baseline("x", samples=(10.0,) * 25 + (10_000.0,))
         assert stable.median == 10.0
         assert stable.mad == 0.0
@@ -87,8 +78,6 @@ class TestColdStart:
         assert book.get("x").warm()  # type: ignore[union-attr]
 
     def test_a_cold_scope_reports_zero_z(self) -> None:
-        # Absence of evidence is not evidence of normality, so the value is 0.0
-        # and callers must check warm() before trusting it.
         book = BaselineBook()
         book.observe("x", 1.0)
         baseline = book.get("x")
@@ -125,8 +114,6 @@ class TestFreezeDuringBreach:
         assert baseline.breached
 
     def test_release_expired_frees_a_stuck_hold(self) -> None:
-        # Without this, a crash between the breach and the tick that would have
-        # released it pins the incident open indefinitely.
         book = BaselineBook()
         _warm(book, "x", 1.0)
         book.hold("x", now=0.0)
@@ -192,5 +179,4 @@ class TestRowRoundTrip:
         assert Baseline.from_row(row).observations == SAMPLE_WINDOW
 
     def test_an_oversized_evidence_blind_pass(self) -> None:
-        # Only a warm scope may be compared; a cold one must not answer.
         assert BaselineBook().get("never-seen") is None

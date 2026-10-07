@@ -1,8 +1,4 @@
-"""Lifecycle behaviour against a real PostgreSQL: retry, cancel, and deadlines.
-
-The state machine in `jobs/state.py` is only worth anything if the SQL that drives it
-holds, so these exercise the repository directly rather than a fake connection.
-"""
+"""Lifecycle behaviour against a real PostgreSQL: retry, cancel, and deadlines."""
 
 import errno
 import json
@@ -44,11 +40,7 @@ def _broken_episode() -> dict[str, Any]:
 
 
 def _claim_until(catalog: PostgresCatalog, job_id: str, limit: int = 50) -> dict[str, Any]:
-    """Claim jobs until `job_id` is the one in hand, settling the strays as failed.
-
-    The test database shares one queue with the rest of the suite, so `claim_job`
-    returns the oldest queued row, which is not necessarily the row under test.
-    """
+    """Claim jobs until `job_id` is the one in hand, settling the strays as failed."""
     for _ in range(limit):
         claimed = catalog.claim_job()
         if claimed is None:
@@ -60,10 +52,7 @@ def _claim_until(catalog: PostgresCatalog, job_id: str, limit: int = 50) -> dict
 
 
 def _drain(worker: IngestWorker, catalog: PostgresCatalog, job_id: str, limit: int = 50) -> None:
-    """Run the worker until `job_id` leaves the queue.
-
-    The test database is shared, so a claimed job is not necessarily this one.
-    """
+    """Run the worker until `job_id` leaves the queue."""
     for _ in range(limit):
         if worker.process_one() is None:
             break
@@ -74,11 +63,7 @@ def _drain(worker: IngestWorker, catalog: PostgresCatalog, job_id: str, limit: i
 def _run_until_attempt(
     worker: IngestWorker, catalog: PostgresCatalog, job_id: str, attempts: int, limit: int = 50
 ) -> dict[str, Any]:
-    """Run the worker until `job_id` has been attempted `attempts` times.
-
-    A retried job returns to the queue, so "is it still queued" is the wrong stopping
-    condition; the attempt counter is not.
-    """
+    """Run the worker until `job_id` has been attempted `attempts` times."""
     for _ in range(limit):
         if int(catalog.get_job(job_id)["attempts"]) >= attempts:
             return catalog.get_job(job_id)
@@ -108,8 +93,6 @@ def test_submit_job_records_retry_budget_and_deadline(tmp_path: Path) -> None:
     assert job["deadline_at"] is not None
     assert job["deadline_at"] > job["created_at"]
 
-    # The retry policy is part of the request identity: replaying with a different
-    # budget is a conflict, not a silent reuse of the original job.
     with pytest.raises(IdempotencyConflict):
         catalog.submit_job(
             "ingest", {"episode": _broken_episode()}, key, "test-correlation", max_attempts=5
@@ -164,15 +147,7 @@ def test_claim_job_never_returns_a_job_with_spent_attempts(tmp_path: Path) -> No
 
 @pytest.mark.integration
 def test_retry_budget_is_enforced_by_the_repository(tmp_path: Path) -> None:
-    """F6 against real SQL: the requeue/claim cycle spends the budget exactly once.
-
-    Driven through the repository rather than the worker, because the worker's
-    decision to retry is now conditional on the failure being transient
-    (`failure-handling.md` F1) and injecting a transient fault into a real worker
-    would need a seam that does not exist yet. What still needs Postgres to be true is
-    the SQL: that `requeue_for_retry` and `claim_job` advance `attempts` correctly and
-    that an exhausted job is never handed out again.
-    """
+    """F6 against real SQL: the requeue/claim cycle spends the budget exactly once."""
     settings = _settings(tmp_path)
     catalog = PostgresCatalog(settings)
     job, _ = catalog.submit_job(
@@ -192,7 +167,6 @@ def test_retry_budget_is_enforced_by_the_repository(tmp_path: Path) -> None:
 
     second = _claim_until(catalog, job["id"])
     assert second["attempts"] == 2
-    # Budget spent: the requeue is refused rather than silently allowing attempt three.
     catalog.finish_job(job["id"], JobState.RETRYING)
     with pytest.raises(ValueError, match="attempts exhausted"):
         catalog.requeue_for_retry(job["id"])
@@ -232,7 +206,6 @@ def test_cancel_marks_a_running_job_and_the_worker_settles_it(tmp_path: Path) ->
         "test-correlation",
         max_attempts=5,
     )
-    # Put the job into the state a worker would have left it in.
     with connect(settings) as connection:
         connection.execute(
             "UPDATE jobs SET state = %s WHERE id = %s", (JobState.RUNNING.value, job["id"])
@@ -324,14 +297,7 @@ def test_worker_times_out_a_job_whose_deadline_passed_before_it_ran(tmp_path: Pa
 def test_an_artifact_write_failure_fails_the_job_and_registers_nothing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """F9: a store that cannot write leaves a failed job, not a dangling row.
-
-    ENOSPC is injected at the artifact store, the last thing that can succeed
-    before the catalog write: `register_episode` runs only once the bytes exist, so
-    a failed write must leave artifacts, episodes and lineage exactly as they were.
-    One attempt is enough because a full disk fails the same way three times, and
-    the reason code the kernel gave us is the one the operator is shown.
-    """
+    """F9: a store that cannot write leaves a failed job, not a dangling row."""
     settings = _settings(tmp_path)
     catalog = PostgresCatalog(settings)
     job, _ = catalog.submit_job(
@@ -349,7 +315,6 @@ def test_an_artifact_write_failure_fails_the_job_and_registers_nothing(
         "test-correlation",
         max_attempts=1,
     )
-    # Sort ahead of the shared queue so the first claim is this job.
     with connect(settings) as connection:
         connection.execute(
             "UPDATE jobs SET created_at = now() - interval '1 day' WHERE id = %s",

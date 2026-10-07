@@ -1,28 +1,7 @@
 """Measure what the behavioural fingerprint can actually see (ADR 0032).
 
-The module's claim is narrow and testable: two recordings of the same motion are closer than
-two recordings of different motions. This script is the thing that decides whether the claim
-holds, and it is the reason the shipped threshold is a measured parameter rather than taste.
-
-Two measurements, deliberately separate:
-
-- **Accuracy** is measured against *ground truth that is planted*, not against a real corpus
-  with assumed labels. `--behaviours` distinct motions are generated, each recorded `--copies`
-  times with amplitude jitter and a time warp (real near-duplicates), and each is accompanied
-  by `--decoys` *hard negatives*: the same motion profile with the movement redistributed
-  across dimensions, so the aggregate trace looks alike and only the per-dimension character
-  separates them. A measure that cannot beat the base rate on those is not carrying
-  information, and the base rate is printed beside the score so the two cannot be confused
-  (a corpus that is 90% duplicates makes 0.9 precision look like skill).
-- **Cost** is measured through the real path - the catalog query and the report - against a
-  throwaway Postgres seeded through `analyze()`, because the interesting number is the whole
-  read+score a page pays, not the arithmetic.
-
-Nothing is written to the repository. The accuracy half needs no database at all; the latency
-half needs a throwaway one on the isolated cluster:
-
-    export DE_DATABASE_URL=postgresql://data_engine@127.0.0.1:55432/bb_fingerprint
-    uv run --all-extras python scripts/fingerprint_calibration.py --latency-episodes 1000 5000
+export DE_DATABASE_URL=postgresql://data_engine@127.0.0.1:55432/bb_fingerprint
+uv run --all-extras python scripts/fingerprint_calibration.py --latency-episodes 1000 5000
 """
 
 from __future__ import annotations
@@ -48,16 +27,7 @@ DIMS = 4
 
 
 def _behaviour(index: int) -> dict[str, list[float]]:
-    """One 'behaviour': a multijoint motion at its own speed.
-
-    The period is strictly increasing in `index`, because it is the only parameter the
-    descriptor can see. Every statistic it reads is divided by the dimension's own range, so a
-    per-joint amplitude is invisible to it by construction - an earlier version varied the
-    amplitudes and produced two behaviour indices that were *the same motion* while the corpus
-    called them different (indices 0 and 35 shared both a period and a weight vector). The
-    ground truth was wrong, not the measure, and every pair between them counted as a false
-    positive.
-    """
+    """One 'behaviour': a multijoint motion at its own speed."""
     period = 4.0 + index * 0.75
     weight = [0.35 + 0.08 * index + 0.05 * joint for joint in range(DIMS)]
     return {
@@ -88,20 +58,7 @@ def _record(
 
 
 def _decoy(rng: random.Random, index: int) -> dict[str, list[float]]:
-    """A hard negative: the same joints at the same speed, moving out of step.
-
-    Every joint keeps the amplitude and frequency it had in `_behaviour`, so its per-dimension
-    normalised character is unchanged and the *dynamics* component cannot tell this apart from
-    the original - while the joints are re-phased against each other, so the aggregate
-    per-frame motion profile, which is what the shape component reads, is different. It is the
-    honest test of what the shape component is for, and a corpus without it only ever asks the
-    easy question.
-
-    (An earlier version scaled the joints instead. That is a duplicate by construction: every
-    signal the descriptor reads is divided by the dimension's own range, so an affine rescale
-    is precisely the transformation the measure is built to ignore - it measured 0.0000
-    against its own original, which is what caught the mistake.)
-    """
+    """A hard negative: the same joints at the same speed, moving out of step."""
     period = 6.0 + (index % 7) * 2.5
     weight = [0.4 + ((index + joint) % 5) * 0.15 for joint in range(DIMS)]
     phase = [rng.uniform(0.0, 2 * math.pi) for _ in range(DIMS)]
@@ -132,14 +89,7 @@ def _row(episode_id: str, series: dict[str, list[float]], *, behaviour: int) -> 
 def build_corpus(
     behaviours: int, copies: int, decoys: int
 ) -> tuple[list[dict[str, Any]], dict[str, str], dict[str, str]]:
-    """Planted rows, the group each one truly belongs to, and what kind of row it is.
-
-    A *recording* is the descriptor's target: the same behaviour recorded again. A *decoy* is
-    its declared blind spot: the same joints moving out of step, which the aggregate motion
-    profile cannot distinguish from the original. They are kept apart in the scoring because a
-    single precision number would average the thing being claimed with the thing being
-    conceded, and the concession is the more useful half of the result.
-    """
+    """Planted rows, the group each one truly belongs to, and what kind of row it is."""
     rng = random.Random(SEED)
     rows: list[dict[str, Any]] = []
     truth: dict[str, str] = {}
@@ -172,13 +122,7 @@ def score(
     kinds: dict[str, str],
     threshold: float,
 ) -> dict[str, float]:
-    """Pairwise precision/recall of the report's partition, split by what kind of pair it is.
-
-    Three kinds, because one number would average the claim with the concession: a
-    *recording* pair is the descriptor's target, a *decoy* pair is its declared blind spot,
-    and a *foreign* pair is two different behaviours collapsing - the error that would make
-    the report useless if it dominated.
-    """
+    """Pairwise precision/recall of the report's partition, split by what kind of pair it is."""
     report = redundancy_report(rows, threshold=threshold)
     group_of: dict[str, str] = {}
     for group in report.groups:
@@ -229,12 +173,7 @@ def accuracy_report(behaviours: int, copies: int, decoys: int) -> list[dict[str,
 
 
 def _seed_catalog(episodes: int, *, copies: int, decoys: int) -> list[str]:
-    """Seed a throwaway catalog through the real writer, and return the episode ids.
-
-    The number of planted behaviours is derived from the number of episodes asked for, so the
-    cost leg can be measured at a scale the accuracy sweep (which is quadratic in pairs) would
-    never be run at.
-    """
+    """Seed a throwaway catalog through the real writer, and return the episode ids."""
     from data_engine.catalog.database import initialize_schema
     from data_engine.catalog.repository import PostgresCatalog
     from data_engine.config import load_settings

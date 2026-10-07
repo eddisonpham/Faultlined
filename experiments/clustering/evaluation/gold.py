@@ -1,37 +1,9 @@
-"""The hand-built gold set: 50 pairs of task strings with per-view labels.
-
-Stage 2.5 research record:
-[stage-2-5-ai-ml-integration.md](../../../agents/research/stage-2-5-ai-ml-integration.md)
-
-Every pair is labelled on **both** views, because a pair is not simply "same or
-different" - it is same-and-different at the same time:
-
-    "pick up the red cube"  vs  "pick up the blue cube"
-        same_action  = True    (both are "pick up")
-        same_object  = False   (red cube is not blue cube)
-
-A single boolean cannot express that, and it is precisely the case the two-view
-design exists to handle. Scoring the action view and the object view against one
-labelled set is also why the split below is worth doing carefully.
-
-`None` marks a genuinely ambiguous pair - a call a careful human could argue
-either way. These are not excluded and not treated as noise: they are the pairs
-where a clustering method's behaviour is most informative, and they are the ones
-a human should read in the audit. Counting them as either answer would let a
-method score well by accident. Roughly a quarter of the set is ambiguous, which
-is higher than it should feel and is the honest rate for task verbs.
-
-Labels were assigned by the agent, not by the owner, at the owner's instruction
-(stage 2.5 brief). They are a defensible starting point, not ground truth: the
-ambiguous rows are where a human's judgement would most change the numbers, and
-the evaluation reports them separately for exactly that reason.
-"""
+"""The hand-built gold set: 50 pairs of task strings with per-view labels."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-#: A label of `None` means "genuinely arguable", not "unknown".
 Label = bool | None
 
 
@@ -43,7 +15,6 @@ class GoldPair:
     b: str
     same_action: Label
     same_object: Label
-    #: Why the pair is ambiguous, when it is. Empty otherwise.
     note: str = ""
 
     @property
@@ -52,7 +23,6 @@ class GoldPair:
 
 
 GOLD_PAIRS: tuple[GoldPair, ...] = (
-    # -- Same action, same object. The easy positives. -------------------------
     GoldPair("pick up the red cube", "grab the red cube", True, True),
     GoldPair("place the bowl on the plate", "put the bowl on the plate", True, True),
     GoldPair("open the drawer", "pull open the drawer", True, True),
@@ -60,7 +30,6 @@ GOLD_PAIRS: tuple[GoldPair, ...] = (
     GoldPair("wipe the table", "wipe down the table", True, True),
     GoldPair("pick up the red cube", "take the red cube", True, True),
     GoldPair("close the door", "shut the door", True, True),
-    # -- Same action, DIFFERENT object. Decides the action view's merge rate. --
     GoldPair("pick up the red cube", "pick up the blue cube", True, False),
     GoldPair("pick up the red block", "pick up the green block", True, False),
     GoldPair("place the bowl on the plate", "place the cup on the plate", True, False),
@@ -78,7 +47,6 @@ GOLD_PAIRS: tuple[GoldPair, ...] = (
         False,
         "Differs only in the object adjective; the classic over-merge trap.",
     ),
-    # -- DIFFERENT action, same object. Decides the object view's merge rate. ---
     GoldPair("pick up the red cube", "push the red cube", False, True),
     GoldPair("open the drawer", "close the drawer", False, True),
     GoldPair("place the bowl", "lift the bowl", False, True),
@@ -86,13 +54,11 @@ GOLD_PAIRS: tuple[GoldPair, ...] = (
     GoldPair("fold the cloth", "unfold the cloth", False, True),
     GoldPair("press the button", "hold the button", False, True),
     GoldPair("open the bottle", "close the bottle", False, True),
-    # -- Different action, different object. The easy negatives. --------------
     GoldPair("open the drawer", "pick up the bowl", False, False),
     GoldPair("wipe the table", "screw in the bolt", False, False),
     GoldPair("pour the water", "fold the cloth", False, False),
     GoldPair("stack the plates", "open the microwave", False, False),
     GoldPair("hand over the tool", "unscrew the bolt", False, False),
-    # -- Ambiguous: is the verb the same skill? -------------------------------
     GoldPair(
         "pick up the red cube",
         "lift the red cube",
@@ -158,7 +124,6 @@ GOLD_PAIRS: tuple[GoldPair, ...] = (
         True,
         "Synonyms, with no strong reason to separate them.",
     ),
-    # -- Ambiguous: is the noun the same object? ------------------------------
     GoldPair(
         "pick up the red cube",
         "pick up the red block",
@@ -194,11 +159,9 @@ GOLD_PAIRS: tuple[GoldPair, ...] = (
         True,
         "The second is a compound task, not a rephrasing of the first.",
     ),
-    # -- Different action, same object (second batch, new verb pairs). ---------
     GoldPair("push the drawer", "close the drawer", False, True),
     GoldPair("open the microwave", "close the microwave", False, True),
     GoldPair("turn the valve", "close the valve", False, True),
-    # -- Ambiguous: more verb synonyms and a qualifier. -----------------------
     GoldPair(
         "press the pedal",
         "step on the pedal",
@@ -225,11 +188,7 @@ GOLD_PAIRS: tuple[GoldPair, ...] = (
 
 
 def gold_for(view: str) -> tuple[GoldPair, ...]:
-    """Pairs whose label for `view` is decided, i.e. not ambiguous.
-
-    A view is only measurable on the pairs where that view's label is actually
-    known. `view` is ``"action"`` or ``"object"``.
-    """
+    """Pairs whose label for `view` is decided, i.e. not ambiguous."""
     attribute = f"same_{view}"
     return tuple(pair for pair in GOLD_PAIRS if getattr(pair, attribute) is not None)
 

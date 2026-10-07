@@ -1,9 +1,4 @@
-"""Unit tests for completion contracts (ADR 0020 §8).
-
-The contract is the highest-value check in the notifier, and it is the one place
-where a wrong answer is worst: declaring a breach on a run that has not finished
-yet would fire an incident the moment a contract is written.
-"""
+"""Unit tests for completion contracts (ADR 0020 §8)."""
 
 from __future__ import annotations
 
@@ -77,9 +72,6 @@ class TestNoExpectation:
         assert evaluate(Expectation(), _settled(3, 3)) == (OUTCOME_PENDING, [])
 
     def test_an_unsettled_run_is_pending_not_breached(self) -> None:
-        # "I expect 200 episodes" is a claim about a finished run. A queued job
-        # has produced nothing *yet*, and calling that a breach would fire an
-        # incident the instant a contract is declared.
         outcome, signals = evaluate(Expectation(expected_episodes=200), _unsettled())
         assert outcome == OUTCOME_PENDING
         assert signals == []
@@ -107,8 +99,6 @@ class TestEpisodeCount:
         assert outcome == OUTCOME_SHORT
 
     def test_impossible_counts_are_clamped(self) -> None:
-        # Valid can never exceed produced; a bug upstream must not turn into an
-        # incident claiming the run over-delivered. Clamped to 5, it is short.
         outcome, signals = evaluate(Expectation(expected_episodes=10), _settled(5, 99))
         assert outcome == OUTCOME_SHORT
         assert signals[0].evidence["valid_episodes"] == 5
@@ -127,7 +117,6 @@ class TestValidFraction:
         )
 
     def test_an_empty_run_is_not_a_fraction_breach(self) -> None:
-        # Nothing produced is a count question, not a ratio question.
         assert evaluate(Expectation(expected_valid_fraction=0.9), _settled(0, 0))[0] == OUTCOME_MET
 
 
@@ -154,14 +143,12 @@ class TestTiming:
         assert evaluate(expectation, _settled(3, 3, duration_seconds=60.0))[0] == OUTCOME_MET
 
     def test_a_settled_run_past_its_deadline_is_not_reported_as_running_late(self) -> None:
-        # It finished; the deadline is a statement about unfinished work.
         expectation = Expectation(deadline_at=NOW - timedelta(minutes=5))
         assert evaluate(expectation, _settled(3, 3))[0] == OUTCOME_MET
 
 
 class TestFirstBreachWins:
     def test_a_short_and_late_run_reports_once(self) -> None:
-        # One fault must open one incident, not two overlapping ones.
         expectation = Expectation(expected_episodes=200, deadline_at=NOW - timedelta(minutes=5))
         outcome, signals = evaluate(expectation, _settled(10, 10))
         assert outcome == OUTCOME_SHORT

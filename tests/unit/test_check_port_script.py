@@ -1,9 +1,4 @@
-"""The `just run` port preflight.
-
-It exists because a second `just run` used to die with a bare `WinError 10048`
-- a message that reads as a fault in the project rather than as "a server you
-started earlier is still listening".
-"""
+"""The `just run` port preflight."""
 
 import importlib.util
 import socket
@@ -52,7 +47,6 @@ def test_an_occupied_port_is_reported_with_a_way_out(
     err = capsys.readouterr().err
     assert str(port) in err
     assert "4242" in err, "the owning process must be named"
-    # A diagnosis with no remedy is the failure mode this replaces.
     assert "taskkill" in err or "kill " in err
     assert "DE_API_PORT=" in err, "there must be a way to proceed instead"
 

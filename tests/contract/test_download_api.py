@@ -294,4 +294,4 @@ class TestDownloadContract:
         rows = list(csv.reader(StringIO(response.text)))
         assert rows[0] == ["metric", "t", "v", "count"]
         assert rows[1][0] == "jobs_queue_depth"
-        assert rows[1][2] == "2.0"  # bucketed mean of 1.0 and 3.0
+        assert rows[1][2] == "2.0"

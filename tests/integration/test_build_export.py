@@ -1,10 +1,4 @@
-"""End-to-end export against real PostgreSQL: episodes → build → export → read back.
-
-The unit tests pin the exporter against plain dicts; this one proves the wiring
-against the real catalog - registered episodes with content-addressed artifacts,
-a build recorded through `record_build`, and an export job processed by the real
-worker with a real `FileArtifactStore`.
-"""
+"""End-to-end export against real PostgreSQL: episodes → build → export → read back."""
 
 from __future__ import annotations
 
@@ -85,11 +79,8 @@ def test_build_export_round_trips_through_the_catalog_and_worker(tmp_path: Path)
     catalog.record_build(build, job_id="job-build-1")
 
     worker = IngestWorker(settings)
-    # Plant the payload the worker's claim step would return.
-    worker.catalog = catalog  # real catalog; drive the handler via process path
+    worker.catalog = catalog
     job = _export_job_payload(build.hash)
-    # Claim machinery is exercised by lifecycle tests; here the handler contract
-    # is what matters, so the job is dispatched the way `_run_handler` would.
     result = worker._run_handler(job, "export")
 
     assert result["build_hash"] == build.hash
@@ -100,7 +91,6 @@ def test_build_export_round_trips_through_the_catalog_and_worker(tmp_path: Path)
     manifest = json.loads((root / FAULTLINED_DIR / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["episode_count"] == 3
 
-    # The acceptance consumer: our own reader reads every episode back.
     from data_engine.ingest.readers.lerobot import LeRobotReader
 
     reader = LeRobotReader()
@@ -108,11 +98,9 @@ def test_build_export_round_trips_through_the_catalog_and_worker(tmp_path: Path)
     read_back = [reader.read(root, episode_key=f"episode_index={i}") for i in range(3)]
     assert sorted(ep.frame_count for ep in read_back) == [3, 4, 5]
     assert all(ep.robot_type == "so101" for ep in read_back)
-    # Frame counts match the catalog rows the build was made from.
     rows = catalog.get_episodes(episode_ids)
     stored = sorted(int((row.get("metadata") or {}).get("frame_count") or 0) for row in rows)
     assert sorted(ep.frame_count for ep in read_back) == stored
-    # A second export of the same build is the same tree at the same address.
     again = worker._run_handler(job, "export")
     assert again["path"] == result["path"]
     assert again["frame_count"] == result["frame_count"]

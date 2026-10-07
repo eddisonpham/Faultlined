@@ -1,41 +1,8 @@
 #!/usr/bin/env python3
 """Generate a corpus of *non-LeRobot* robot data, deterministically.
 
-Every reader in this repository was verified against LeRobot v2.1/v3.0 and against an
-MCAP this project's own generator wrote. Both are a narrow slice of what an operator
-has on their disk on day one. This script produces the shapes a robot-ML engineer meets
-constantly and that the engine has never been shown, so the honest question "what does
-the reader do with my data?" has an answer other than a shrug:
-
-| Fixture | What it imitates | Why it is here |
-|---|---|---|
-| `mcap_json` | Nested JSON channels | The shape the existing fixtures cover. |
-| `mcap_gripper_topic` | Joint topic named `.../gripper/...` | The topic name decides the verdict. |
-| `mcap_cdr` | `ros2 bag convert`, `cdr` encoding | What `ros2 bag` actually writes. |
-| `mcap_protobuf` | Foxglove/Protobuf MCAP | The other common encoding. |
-| `mcap_flat` | Flat, unshaped JSON channel | `{"x":..,"y":..}` rather than a nested JointState. |
-| `mcap_ragged` | Joint vector changes width mid-log | A real mis-publisher, live. |
-| `mcap_nonfinite` | NaN and Infinity in the payload | Legal JSON, poison for a mean. |
-| `mcap_empty` | Valid MCAP, zero messages | Did the recorder ever start? |
-| `truncated_mcap` | Cut mid-chunk | A killed recorder. |
-| `ros2_sqlite_bag` | `ros2 bag record` + `metadata.yaml` | **The default record output.** Unread. |
-| `umi_hdf5` | UMI handheld-gripper `data/*.hdf5` | The dominant non-LeRobot layout. |
-| `rlds_tfds` | `dataset_info.json` + tfrecord | Open X-Embodiment's on-disk contract. |
-| `zarr_droid` | DROID-style zarr store | The other major robot-data layout. |
-| `webdataset_tar` | Tars of `observation/*.npy` per step | Common in imitation-learning repos. |
-| `npz_flat` | One `.npz` of arrays | The oldest layout, still everywhere. |
-| `lerobot_v4` | `meta/info.json` claiming `v4.0` | Honest error, or silent wrongness? |
-| `lerobot_no_meta` | `data/` with no `meta/info.json` | The half-unzipped download. |
-| `video_only` | mp4 shards, no parquet | Video is where the bytes are. |
-| `zip_containing_mcap` | A `.zip` holding a readable bag | How a drive arrives by email. |
-| `not_a_dataset` | A `README.txt` and a `Makefile` | The mistaken submission. |
-
-Everything is closed-form - no RNG, no clock - so the same arguments produce
-byte-identical output, which is what lets a number measured today mean something
-tomorrow.
-
-    uv run --with h5py python scripts/foreign_data_corpus.py var/foreign-corpus
-    uv run --with h5py python scripts/foreign_data_corpus.py var/foreign-corpus --manifest-only
+uv run --with h5py python scripts/foreign_data_corpus.py var/foreign-corpus
+uv run --with h5py python scripts/foreign_data_corpus.py var/foreign-corpus --manifest-only
 """
 
 from __future__ import annotations
@@ -62,9 +29,6 @@ NANOSECONDS_PER_SECOND = 1_000_000_000
 JOINTS = ("shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll", "gripper")
 
 
-# --------------------------------------------------------------------------- MCAP
-
-
 def _json_payload(step: int, joints: int = 6) -> bytes:
     t = step / 50.0
     body: dict[str, Any] = {
@@ -86,12 +50,7 @@ def write_mcap(
     task: str = "pick up the red block and place it in the bin",
     robot_type: str = "so101_follower",
 ) -> dict[str, Any]:
-    """One MCAP file with a metadata session record, as a real recorder writes.
-
-    `channels` maps topic -> (hz, schema name). `messages_for(step, topic)` returns the
-    payload bytes, which is how the ragged / non-finite / CDR variants differ from the
-    nominal file without duplicating the writer.
-    """
+    """One MCAP file with a metadata session record, as a real recorder writes."""
     plan = channels or {"/joint_states": (50.0, "sensor_msgs/msg/JointState")}
     path.parent.mkdir(parents=True, exist_ok=True)
     start = 1_700_000_000 * NANOSECONDS_PER_SECOND
@@ -128,11 +87,7 @@ def write_mcap(
 
 
 def fixture_mcap_json(root: Path) -> dict[str, Any]:
-    """Nominal bag, JSON channels: the shape the existing fixtures already cover.
-
-    The gripper topic carries a scalar, as a real `std_msgs/Float64` does, so the
-    reader has an unambiguous busiest multi-dimensional topic to score.
-    """
+    """Nominal bag, JSON channels: the shape the existing fixtures already cover."""
     return write_mcap(
         root / "mcap_json" / "bag.mcap",
         channels={
@@ -148,14 +103,7 @@ def fixture_mcap_json(root: Path) -> dict[str, Any]:
 
 
 def fixture_mcap_gripper_topic(root: Path) -> dict[str, Any]:
-    """A bimanual robot whose busiest multi-dim topic is named `.../gripper/...`.
-
-    Real, and the reason this fixture exists: `analysis/quality.py` excludes any
-    dimension whose *name* matches `grip`, and the MCAP reader builds dimension names
-    as `<topic>.<path>`. So the topic name decides which dimensions are allowed to
-    judge motion, and a bag whose busiest joint topic is named after the gripper
-    reports `verdict: unknown` while ingesting successfully.
-    """
+    """A bimanual robot whose busiest multi-dim topic is named `.../gripper/...`."""
     return write_mcap(
         root / "mcap_gripper_topic" / "bag.mcap",
         channels={"/left_gripper/joint_states": (50.0, "sensor_msgs/msg/JointState")},
@@ -250,17 +198,13 @@ def fixture_truncated_mcap(root: Path) -> dict[str, Any]:
 
 
 def _cdr_joint_state(step: int) -> bytes:
-    """A CDR-encoded `sensor_msgs/msg/JointState`: the bytes `ros2 bag` really writes.
-
-    Little-endian encapsulation header, then name-length + names + positions +
-    velocities, exactly enough structure to be a real CDR body rather than filler.
-    """
-    out = bytearray(b"\x00\x01\x00\x00")  # encapsulation: CDR_LE
+    """A CDR-encoded `sensor_msgs/msg/JointState`: the bytes `ros2 bag` really writes."""
+    out = bytearray(b"\x00\x01\x00\x00")
     names = [name.encode("utf-8") + b"\x00" for name in JOINTS]
     out += struct.pack("<I", len(names))
     for name in names:
         out += struct.pack("<I", len(name)) + name
-    out += b"\x00" * ((4 - len(out) % 4) % 4)  # CDR aligns to 4
+    out += b"\x00" * ((4 - len(out) % 4) % 4)
     t = step / 50.0
     for index in range(len(JOINTS)):
         out += struct.pack("<d", math.sin(0.7 * t + 0.4 * index))
@@ -277,7 +221,7 @@ def _protobuf_transform(step: int) -> bytes:
         child = f"link_{index}".encode()
         out += b"\x0a" + _varint(len(child)) + child
         x = math.sin(t + index)
-        out += b"\x09" + struct.pack("<d", x)  # field 1, fixed64
+        out += b"\x09" + struct.pack("<d", x)
     return bytes(out)
 
 
@@ -291,16 +235,8 @@ def _varint(value: int) -> bytes:
             return bytes(out)
 
 
-# ---------------------------------------------------------------- ROS 2 sqlite3 bag
-
-
 def fixture_ros2_sqlite_bag(root: Path) -> dict[str, Any]:
-    """The *default* `ros2 bag record` output: a sqlite3 file plus `metadata.yaml`.
-
-    This is the single most common thing on a robot engineer's disk and the engine has
-    no reader for it at all. Built with stdlib `sqlite3` in the shape rosbag2 writes:
-    `topics` and `messages` tables, CDR blobs, a `metadata.yaml` describing versions.
-    """
+    """The *default* `ros2 bag record` output: a sqlite3 file plus `metadata.yaml`."""
     import sqlite3
 
     directory = root / "ros2_sqlite_bag"
@@ -372,16 +308,8 @@ def fixture_ros2_sqlite_bag(root: Path) -> dict[str, Any]:
     return {"path": str(directory), "bytes": db_path.stat().st_size, "messages": len(rows)}
 
 
-# ---------------------------------------------------------------------------- HDF5
-
-
 def fixture_umi_hdf5(root: Path) -> dict[str, Any]:
-    """UMI / handheld-gripper layout: `data/*.hdf5` with observations + action.
-
-    The canonical non-LeRobot robot dataset shape in the literature - `observations`
-    with `images/{cam,left,right}`, `qpos`, `qvel`, `eef_pos`, and a sibling
-    `task_description.json` carrying the instruction.
-    """
+    """UMI / handheld-gripper layout: `data/*.hdf5` with observations + action."""
     import h5py
 
     directory = root / "umi_hdf5"
@@ -396,7 +324,6 @@ def fixture_umi_hdf5(root: Path) -> dict[str, Any]:
         obs = handle.create_group("observations")
         images = obs.create_group("images")
         for camera in ("cam", "left", "right"):
-            # 8x8 grayscale stand-ins: the shape matters to the reader, not the pixels.
             images.create_dataset(camera, data=np.zeros((frames, 8, 8, 3), dtype=np.uint8))
         obs.create_dataset("qpos", data=qpos)
         obs.create_dataset("qvel", data=qvel)
@@ -422,9 +349,6 @@ def fixture_umi_hdf5(root: Path) -> dict[str, Any]:
     )
     (directory / "episode_lengths.json").write_text(json.dumps([frames]), encoding="utf-8")
     return {"path": str(directory), "bytes": demo_path.stat().st_size, "frames": frames}
-
-
-# ------------------------------------------------------------------------ RLDS/TFDS
 
 
 def fixture_rlds_tfds(root: Path) -> dict[str, Any]:
@@ -482,8 +406,6 @@ def fixture_rlds_tfds(root: Path) -> dict[str, Any]:
         encoding="utf-8",
     )
 
-    # TFRecord framing: [8-byte length][4-byte masked crc32c][payload][4-byte crc32c].
-    # The payload is a hand-rolled tf.Example; only the framing is load-bearing here.
     def record(payload: bytes) -> bytes:
         masked = _masked_crc32c(payload)
         return struct.pack("<Q", len(payload)) + masked + payload + masked
@@ -537,9 +459,6 @@ def _masked_crc32c(data: bytes) -> bytes:
     return struct.pack("<I", rotated & 0xFFFFFFFF)
 
 
-# ---------------------------------------------------------------------------- zarr
-
-
 def fixture_zarr_droid(root: Path) -> dict[str, Any]:
     """A DROID-style zarr store: v2 layout, so plain JSON + raw chunks on disk."""
     directory = root / "zarr_droid"
@@ -575,9 +494,6 @@ def fixture_zarr_droid(root: Path) -> dict[str, Any]:
     return {"path": str(directory), "bytes": total}
 
 
-# ---------------------------------------------------------------------- WebDataset
-
-
 def fixture_webdataset_tar(root: Path) -> dict[str, Any]:
     """Tars of per-step files - what a dozen imitation-learning repos ship."""
     directory = root / "webdataset"
@@ -597,9 +513,6 @@ def fixture_webdataset_tar(root: Path) -> dict[str, Any]:
                     payload = buffer.getvalue()
                     info = tarfile.TarInfo(f"{prefix}.{name}.npy")
                     info.size = len(payload)
-                    # `addfile` reads from wherever the stream is positioned and leaves it
-                    # at the end, so each member carries its own bytes rather than a shared
-                    # cursor that would hand the second member an empty file.
                     archive.addfile(info, io.BytesIO(payload))
     return {"path": str(directory), "bytes": sum(f.stat().st_size for f in directory.glob("*.tar"))}
 
@@ -617,9 +530,6 @@ def fixture_npz_flat(root: Path) -> dict[str, Any]:
         task=np.array("wipe the table"),
     )
     return {"path": str(path), "bytes": path.stat().st_size}
-
-
-# ------------------------------------------------------- malformed / non-datasets
 
 
 def fixture_lerobot_v4(root: Path) -> dict[str, Any]:
@@ -655,8 +565,6 @@ def fixture_video_only(root: Path) -> dict[str, Any]:
     videos = directory / "videos" / "observation.images.front"
     videos.mkdir(parents=True, exist_ok=True)
     for index in range(2):
-        # A real mp4 needs an encoder; what a reader sniffs is the box structure, so
-        # the fixture writes the ftyp box and a zeroed mdat.
         header = b"\x00\x00\x00\x18ftypmp42\x00\x00\x00\x00mp42isom"
         (videos / f"episode_{index:06d}.mp4").write_bytes(header + b"\x00" * 4096)
     (directory / "info.json").write_text(
@@ -689,9 +597,6 @@ def fixture_zip_containing_mcap(root: Path) -> dict[str, Any]:
     return {"path": str(path), "bytes": path.stat().st_size}
 
 
-# ------------------------------------------------------------------------ manifest
-
-
 FIXTURES = (
     ("mcap_json", fixture_mcap_json),
     ("mcap_gripper_topic", fixture_mcap_gripper_topic),
@@ -719,18 +624,14 @@ MANIFEST_NAME = "corpus.json"
 
 
 def build(root: Path) -> dict[str, Any]:
-    """Write every fixture under `root` and return the manifest.
-
-    One fixture failing does not abort the corpus: a generator that stops at the first
-    unexpected layout is exactly the fragility the corpus exists to expose.
-    """
+    """Write every fixture under `root` and return the manifest."""
     root.mkdir(parents=True, exist_ok=True)
     entries: list[dict[str, Any]] = []
     for name, builder in FIXTURES:
         try:
             summary = builder(root)
             entries.append({"name": name, "status": "built", **summary})
-        except Exception as exc:  # a corpus gap is data, not a crash
+        except Exception as exc:
             entries.append(
                 {"name": name, "status": "error", "error": f"{type(exc).__name__}: {exc}"}
             )

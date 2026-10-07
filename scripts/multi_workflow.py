@@ -1,35 +1,8 @@
 #!/usr/bin/env python3
 """Simulate the workflows that actually run at the same time, and measure the interference.
 
-The repo's scaling campaign measures workers against workers: N ingest jobs, one worker
-versus two, wall-clock speedup. That is the right question for a batch system and the
-wrong one for this product, because an operator does not run one workflow at a time.
-On a real machine the catalog is being read by a browser polling six pages, written by
-somebody curating task strings, drained by a worker doing ingest, and ticked by the
-monitor - all against one Postgres, at the same time.
-
-The question this answers is: **when several of those run together, what does each one
-pay?** A single-threaded measurement of every route in isolation cannot see it, and
-"it was 90 ms" is not an answer to "it is 90 ms while you are ingesting".
-
-Four legs, each run alone (the control) and then all four at once (the contention run):
-
-| Leg | Actor | What it does |
-|---|---|---|
-| `ingest` | 2 worker processes | drain real `ingest_source` jobs over real MCAP bags |
-| `read` | 1 API process, 1 client | poll the read routes the operator's pages use, every 3 s |
-| `curate` | 1 API process, 1 client | map / dismiss / undo strings, as a triaging operator would |
-| `monitor` | 1 process | `POST /api/v1/monitoring/tick` on the interval the worker uses |
-
-Latency is reported per leg for the control and the contention run, so the cost of
-sharing is a number rather than an impression. It also records whether correctness held
-- lost updates, jobs stuck, vocabulary events that will not undo - because a fast wrong
-answer is the worst outcome available here.
-
-    uv run python scripts/multi_workflow.py
-    uv run python scripts/multi_workflow.py --jobs 12 --seconds 90
-
-Numbers go to stdout as JSON. This script writes nothing to the repository.
+uv run python scripts/multi_workflow.py
+uv run python scripts/multi_workflow.py --jobs 12 --seconds 90
 """
 
 from __future__ import annotations
@@ -64,9 +37,6 @@ READ_PATHS = (
     "/api/v1/metrics",
     "/api/v1/vocabulary/unmapped?limit=50",
 )
-
-
-# ------------------------------------------------------------------- small helpers
 
 
 def free_port() -> int:
@@ -121,7 +91,7 @@ def http(
     except urllib.error.HTTPError as error:
         payload = error.read()
         status = error.code
-    except Exception as error:  # a transport failure is a sample, not a crash
+    except Exception as error:
         return 0, str(error).encode(), time.perf_counter() - started
     return status, payload, time.perf_counter() - started
 
@@ -176,9 +146,6 @@ def worker_main(dsn: str, stop_after_idle: int, ready_path: str) -> None:
             time.sleep(0.05)
         else:
             idle = 0
-
-
-# ------------------------------------------------------------------------ the legs
 
 
 class Sampler:
@@ -276,9 +243,6 @@ def _monitor(base_url: str, seconds: float, interval: float) -> Sampler:
     return sampler
 
 
-# ----------------------------------------------------------------------- the driver
-
-
 def seed(dsn: str, episodes: int, entries: int) -> dict[str, Any]:
     from scripts.feature_latency import seed_metrics, seed_vocabulary
     from scripts.scale_campaign import _seed_catalog
@@ -325,10 +289,6 @@ def run_leg(
     catalog = PostgresCatalog(settings)
     sources = fixture_paths(jobs)
     submitted = 0
-    #: Every job ever submitted that has not been observed terminal yet. New jobs join
-    #: this set the moment they are submitted - an earlier version appended them to a
-    #: separate list and never polled them, so the leg reported 12 completions for 825
-    #: submissions.
     outstanding: set[str] = set()
 
     def submit_batch(count: int) -> None:
@@ -348,8 +308,6 @@ def run_leg(
     if "ingest" in active:
         submit_batch(jobs)
     else:
-        # An isolation leg still needs its jobs submitted, it just must not keep a
-        # worker draining them, so the sampler is measured against an idle queue.
         submit_batch(0)
 
     ready_dir = ROOT / "var" / "multi" / "ready"
@@ -382,9 +340,6 @@ def run_leg(
 
     started = time.perf_counter()
     terminal: dict[str, int] = {}
-    # Steady state, not a burst. An operator does not hand over 12 jobs and go away;
-    # work arrives continuously, so the leg tops the queue back up until the window
-    # closes. A burst that drains in nine seconds measures nothing about contention.
     while time.perf_counter() - started < seconds:
         still_open = 0
         for job_id in list(outstanding):
@@ -395,9 +350,6 @@ def run_leg(
                 outstanding.discard(job_id)
             else:
                 still_open += 1
-        # Keep a small steady backlog - `workers * 2` jobs - and top up by exactly the
-        # deficit. Submitting on every tick floods the queue, which measures Postgres
-        # insert throughput rather than contention.
         deficit = workers * 2 - still_open
         if deficit > 0:
             submit_batch(deficit)

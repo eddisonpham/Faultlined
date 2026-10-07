@@ -1,10 +1,4 @@
-"""Contract tests for curated slices and the validation-failures read view.
-
-These are blackbox over the app: a fake catalog is wired into `create_app` and the
-tests drive it through `TestClient`, so routing, serialization, and the error
-handler are all exercised the way a client experiences them. The SQL behind these
-shapes is covered by `tests/integration/test_curation.py` against a real database.
-"""
+"""Contract tests for curated slices and the validation-failures read view."""
 
 from __future__ import annotations
 
@@ -175,9 +169,6 @@ def _client(catalog: CurationCatalogStub | None = None) -> TestClient:
     return TestClient(app)
 
 
-# ---------------------------------------------------------------- failures
-
-
 @pytest.mark.contract
 def test_failures_summary_reports_reason_codes_and_profiles() -> None:
     response = _client().get("/api/v1/failures")
@@ -214,9 +205,6 @@ def test_failing_episodes_rejects_unknown_codes_and_limits() -> None:
     assert client.get("/api/v1/failures/episodes?reason_code=NOPE").status_code == 422
     assert client.get("/api/v1/failures/episodes?limit=0").status_code == 422
     assert client.get("/api/v1/failures/episodes?limit=501").status_code == 422
-
-
-# ---------------------------------------------------------------- slices
 
 
 @pytest.mark.contract
@@ -335,9 +323,6 @@ def test_slice_listing_bounds_its_page() -> None:
     assert client.get("/api/v1/slices?limit=0").status_code == 422
     assert client.get("/api/v1/slices?limit=501").status_code == 422
     assert client.get("/api/v1/slices?before=not-a-timestamp").status_code == 422
-
-
-# ---------------------------------------------------------------- ui
 
 
 @pytest.mark.contract

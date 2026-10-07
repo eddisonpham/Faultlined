@@ -1,21 +1,8 @@
 #!/usr/bin/env python3
 """Crawl the live UI and count the clicks between the things an operator needs.
 
-"The more clicks the user does, the more exhausted they are" is usually argued from
-memory, and memory is exactly what is wrong when a team has spent months inside its
-own product. This script removes the argument: it fetches every reachable page from a
-real server over a real catalog, builds the link graph from the rendered HTML, and
-reports the shortest click path between the pages that make up the workflows the
-product exists for.
-
-It also reports, per page, the count of interactive controls, the nav depth, and the
-forms that have to be filled in - because a page with one button and a page with
-fourteen are not the same amount of *attention*, even at the same click count.
-
-    uv run python scripts/operator_walkthrough.py
-    uv run python scripts/operator_walkthrough.py --json var/walkthrough.json
-
-Every number is read off the served HTML. Nothing here is an estimate.
+uv run python scripts/operator_walkthrough.py
+uv run python scripts/operator_walkthrough.py --json var/walkthrough.json
 """
 
 from __future__ import annotations
@@ -39,7 +26,6 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT))
 
-#: Where an operator has to *be*, not what they have to type. Each is a real page.
 LANDMARKS = (
     ("status", "/ui"),
     ("jobs_list", "/ui/jobs"),
@@ -62,7 +48,6 @@ LANDMARKS = (
     ("experiments", "/ui/experiments"),
 )
 
-#: The journeys the product exists for, as (name, start landmark, goal landmark).
 WORKFLOWS = (
     ("submit a bag and watch it land", "status", "job_detail"),
     ("read why a job failed", "jobs_list", "job_detail"),
@@ -187,16 +172,9 @@ def crawl(base_url: str, seeds: list[str], max_pages: int = 120) -> dict[str, di
 
 
 def shortest_path(pages: dict[str, dict[str, Any]], start: str, goal: str) -> dict[str, Any] | None:
-    """Fewest page loads (clicks) from `start` to `goal` over the rendered link graph.
-
-    Each `<details>` nav group is a `<summary>` that must be clicked before its links
-    are reachable, so a link inside a collapsed group costs two clicks, not one. The
-    graph therefore treats a nav-group page as reachable only through its summary, and
-    an individual page as reachable from the group at one click.
-    """
+    """Fewest page loads (clicks) from `start` to `goal` over the rendered link graph."""
     if start not in pages or goal not in pages:
         return None
-    # Node set: page paths plus "open group" pseudo-nodes, so collapsed nav is priced.
     neighbours: dict[str, set[str]] = {
         path: set(info.get("links", [])) for path, info in pages.items()
     }
@@ -254,8 +232,6 @@ def main() -> None:
         _seed_seconds, episode_ids = _seed_catalog(dsn, args.episodes)
         seed_vocabulary(dsn, args.entries)
         catalog = PostgresCatalog(settings)
-        # A real job in each terminal state, so the Jobs page is not empty and the
-        # failure path is measured on a page that exists rather than a hypothetical.
         fixture = ROOT / "var" / "real-data" / "so101_pick_place.mcap"
         job_ids: list[str] = []
         for index in range(3):

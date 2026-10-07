@@ -1,11 +1,4 @@
-"""Behavioural fingerprints over a real catalog (ADR 0032).
-
-The unit tests build fingerprints from hand-written rows. This one is the round trip that can
-actually break: `analyze()` writes the trace and the dimension list into `jsonb`, Postgres
-gives them back as nested lists, and the descriptor has to read what the writer wrote. It also
-covers the join, which is where an episode that was never scored has to disappear rather than
-be defaulted into a fingerprint of nothing.
-"""
+"""Behavioural fingerprints over a real catalog (ADR 0032)."""
 
 from __future__ import annotations
 

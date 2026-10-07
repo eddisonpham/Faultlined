@@ -1,25 +1,4 @@
-"""Run the frozen configuration over a thousand strings and measure what breaks.
-
-Every previous experiment answered a question about 46 hand-written strings or 494
-constructed ones. Three things change once the input is a thousand strings, and all
-three are failure modes rather than accuracy gains:
-
-1. **Fragmentation.** A cluster's centroid is now estimated from tens of members
-   instead of two or three, so the same radius that separated 46 strings may split a
-   class that has grown, or absorb a class that has drifted.
-2. **Order.** A leader-follower is order-sensitive by construction. A thousand
-   arrivals give it a thousand chances to differ from another thousand arrivals.
-3. **Cost.** Encoding dominates, and the whole point of a local-first engine is that
-   this runs on the operator's machine rather than a GPU rental.
-
-**What is measured, and what the number means.** Synthetic strings carry gold labels,
-so purity, fragmentation and B-cubed are computable - and close to circular, because
-the grammar and the configuration were both written by the same person. They are
-reported as *behaviour under load*, not as quality. The real LeRobot sentences have
-no labels and cannot be scored at all; they are reported as cluster count, singleton
-rate and cohesion, which is the only honest way to ask whether the method falls apart
-on text nobody tuned it against.
-"""
+"""Run the frozen configuration over a thousand strings and measure what breaks."""
 
 from __future__ import annotations
 
@@ -43,8 +22,6 @@ class Config:
     colour_weight: float = 1.0
     mask_verbs: bool = True
     rule: str = "sliding_8"
-    #: High enough never to bind on a corpus this size. A cap that binds is not a
-    #: safety net, it is a truncation that reads as a cluster count.
     max_clusters: int = 4096
 
     def describe(self) -> str:
@@ -54,9 +31,6 @@ class Config:
         )
 
 
-#: The shipped object-view configuration, as decided in EXP-2.5-04 and re-derived in
-#: EXP-2.5-07. `radius` defaults to the constructed-set value; the hand set needs
-#: 0.30, which is why a scale run reports a sweep instead of one number.
 SHIPPED_CONFIG = Config()
 
 
@@ -74,7 +48,6 @@ class Run:
     cohesion: float
     centroid_updates: int
     arrival_labels: list[int] = field(default_factory=list)
-    #: Clusters frozen mid-stream, and how far their centroids moved afterwards.
     frozen: int = 0
     frozen_moved: int = 0
     unfrozen_moved: int = 0
@@ -95,7 +68,7 @@ class Run:
         return self.largest / self.n if self.n else 0.0
 
     def quality(self, gold: Sequence[str]) -> dict[str, float]:
-        """Label-aware numbers. Only meaningful for the synthetic half."""
+        """Label-aware numbers."""
         if not gold:
             return {}
         return {
@@ -107,12 +80,7 @@ class Run:
 
 
 def score_subset(run: Run, items: Sequence[corpus.Item], origin: str) -> dict[str, float]:
-    """Quality over the rows from one origin, ignoring the rest.
-
-    The mixed stream carries 1200 labelled synthetic strings and 46 real ones with no
-    labels. Scoring the whole stream would either fail on the length check or require
-    inventing a gold class for real text, so the rows are separated first.
-    """
+    """Quality over the rows from one origin, ignoring the rest."""
     labels = [
         label
         for label, item in zip(run.arrival_labels, items, strict=True)
@@ -154,7 +122,7 @@ def _intact_labels(labels: Sequence[int], gold: Sequence[str]) -> int:
 
 
 def _impure_clusters(labels: Sequence[int], gold: Sequence[str]) -> int:
-    """Clusters holding more than one gold class. These are the false merges."""
+    """Clusters holding more than one gold class."""
     per_cluster: dict[int, set[str]] = {}
     for label, name in zip(labels, gold, strict=True):
         per_cluster.setdefault(label, set()).add(name)
@@ -164,12 +132,7 @@ def _impure_clusters(labels: Sequence[int], gold: Sequence[str]) -> int:
 def encode(
     items: Sequence[corpus.Item], encoder: embeddings.Encoder, config: Config
 ) -> tuple[np.ndarray, float]:
-    """Batch-encode through the pipeline `final` scored. Returns the matrix and seconds.
-
-    One encode, reused by every pass below: at this size encoding dominates the run,
-    and a sweep that re-encoded per radius would be measuring the encoder, not the
-    clustering.
-    """
+    """Batch-encode through the pipeline `final` scored."""
     texts = [item.text for item in items]
     start = time.perf_counter()
     by_text = attributes.encode_for_clustering(
@@ -189,16 +152,7 @@ def stream(
     confirm_after: float = 0.5,
     confirm_top: int = 0,
 ) -> Run:
-    """Feed every vector through the online method, recording what happened.
-
-    Labels are the **arrival** assignments, not a re-derivation from the final
-    centroids. A point assigned to cluster 4 when it arrived and re-labelled 7 at the
-    end was in cluster 4, and reporting the re-derivation would hide exactly the
-    instability this experiment exists to look at.
-
-    `confirm_top` freezes the largest clusters once `confirm_after` of the stream has
-    been consumed, which is the operator action the freeze guarantee is about.
-    """
+    """Feed every vector through the online method, recording what happened."""
     model = OnlineCentroids(
         radius=config.radius,
         max_clusters=config.max_clusters,
@@ -224,9 +178,6 @@ def stream(
         else:
             before = len(model.clusters)
             model.observe(point, item.text)
-            # A spawn appends at `before`. At the cap there is no spawn and the point
-            # is absorbed by the nearest cluster, which is a different event and is
-            # labelled as one rather than being folded into the spawn count.
             if len(model.clusters) > before:
                 labels.append(before)
             else:
@@ -285,12 +236,7 @@ def scale_curve(
     config: Config,
     sizes: Sequence[int] = (50, 100, 200, 400, 800, 1200),
 ) -> list[Run]:
-    """The same configuration over growing prefixes of one arrival order.
-
-    A single run at 1200 says what happened at 1200. This says whether the method is
-    converging, oscillating or collapsing as data accumulates, which is the question an
-    operator actually has before trusting it on a long ingest.
-    """
+    """The same configuration over growing prefixes of one arrival order."""
     return [
         stream(items[:size], vectors[:size], config, name=f"n={size}", order="shuffled")
         for size in sizes
@@ -301,12 +247,7 @@ def scale_curve(
 def order_sensitivity(
     items: Sequence[corpus.Item], vectors: np.ndarray, config: Config
 ) -> dict[str, float]:
-    """How much the answer depends on the order the same strings arrive in.
-
-    Adjusted Rand between a shuffled arrival order and the adversarial one where
-    every member of a class arrives together. Near 1.0 means the configuration is
-    telling you about the data; near 0.0 means it is telling you about the schedule.
-    """
+    """How much the answer depends on the order the same strings arrive in."""
     shuffled_items = corpus.shuffled(items)
     grouped_items = corpus.grouped(items)
     position = {item.text: index for index, item in enumerate(items)}
@@ -314,8 +255,6 @@ def order_sensitivity(
     shuffled_run = stream(shuffled_items, vectors, config, name="shuffled", order="shuffled")
     grouped_run = stream(grouped_items, vectors, config, name="grouped", order="grouped")
 
-    # Both labelings are realigned to one item order before comparing, or the Rand
-    # index would be scoring the permutation rather than the clustering.
     aligned = [0] * len(items)
     for label, item in zip(grouped_run.arrival_labels, grouped_items, strict=True):
         aligned[position[item.text]] = label
@@ -335,12 +274,7 @@ def sweep(
     *,
     radii: Sequence[float] = (0.10, 0.15, 0.20, 0.30),
 ) -> list[Run]:
-    """Radius and verb masking over the full corpus, from pre-encoded matrices.
-
-    `matrices` is keyed by whether verbs are masked and must hold the same strings in
-    the same order for both entries. Encoding inside the sweep instead would let batch
-    composition - not the configuration under test - decide the answer.
-    """
+    """Radius and verb masking over the full corpus, from pre-encoded matrices."""
     ordered = corpus.shuffled(items)
     return [
         stream(
@@ -362,14 +296,7 @@ def batch_sensitivity(
     *,
     runs: int = 3,
 ) -> dict[str, object]:
-    """How much the cluster count moves when only the batch composition changes.
-
-    A transformer encoder pads to the longest text in each batch, so the same sentence
-    can land a hair differently depending on what it was batched with. Near a radius
-    threshold that is enough to move a point from one cluster to another. This is not
-    a curiosity: it decides whether the engine may encode in whatever batches arrive
-    or has to cache a vector per task string.
-    """
+    """How much the cluster count moves when only the batch composition changes."""
     ordered = corpus.shuffled(items)
     counts: list[float] = []
     for index in range(runs):
@@ -399,13 +326,7 @@ def rule_sweep(
     ),
     radii: Sequence[float] = (0.15, 0.30),
 ) -> list[Run]:
-    """The centroid rule at scale, at both radii that matter.
-
-    `sliding_8` was chosen on 46 strings, where a window of eight points is nearly the
-    whole corpus. At a thousand strings it is a window of eight out of twenty-five, and
-    a rule that forgets aggressively is a fragmentation mechanism. This is the
-    measurement that decides whether the earlier choice survives its own scale.
-    """
+    """The centroid rule at scale, at both radii that matter."""
     ordered = corpus.shuffled(items)
     runs: list[Run] = []
     for radius in radii:
@@ -421,15 +342,7 @@ ATTRIBUTES: tuple[str, ...] = ("colour", "modifier", "site", "verb")
 
 
 def axis_report(items: Sequence[corpus.Item], vectors: np.ndarray) -> dict[str, dict[str, float]]:
-    """Per axis: how far apart are two strings that differ *only* in that axis.
-
-    The comparison is the whole question. Keeping every other word identical, two
-    strings about the same object must be closer than two strings about different
-    objects - otherwise the representation has no room for object identity and no
-    threshold, radius or centroid rule can recover it. Reported per axis because the
-    axes fail differently: a colour the method lifts out is harmless, while an
-    adjective the embedding encodes faithfully is fatal.
-    """
+    """Per axis: how far apart are two strings that differ *only* in that axis."""
     out: dict[str, dict[str, float]] = {}
     for axis in ("colour", "modifier", "site", "verb"):
         same: list[float] = []
@@ -465,13 +378,7 @@ def axis_report(items: Sequence[corpus.Item], vectors: np.ndarray) -> dict[str, 
 def axis_isolation(
     encoder: embeddings.Encoder, config: Config = SHIPPED_CONFIG
 ) -> dict[str, dict[str, float]]:
-    """One axis varied at a time, measured as same-object against different-object.
-
-    The verdict per axis is a single number: `margin`, the gap between the distance of
-    two different objects and the distance of the same object across that axis. Positive
-    means the axis is survivable; zero or negative means object identity is not
-    recoverable along it at any threshold.
-    """
+    """One axis varied at a time, measured as same-object against different-object."""
     from experiments.clustering import corpus as corpus_module
 
     axes: dict[str, Sequence[str]] = {
@@ -508,15 +415,7 @@ def axis_isolation(
 def geometry_report(
     items: Sequence[corpus.Item], vectors: np.ndarray, radius: float
 ) -> dict[str, float]:
-    """The distance geometry that decides whether any radius could work.
-
-    Two distributions: pairs that share a gold object, and pairs that do not. If the
-    "same object" pairs sit further apart than the "different object" pairs, then no
-    threshold separates objects and every clustering that reports object purity is
-    reporting an artefact of the radius. Reported per variation axis, because the
-    corpus varies objects, adjectives, locations and verbs at once and the axis that
-    breaks separability is the finding.
-    """
+    """The distance geometry that decides whether any radius could work."""
 
     def distances(same: bool, axis: str | None) -> np.ndarray:
         rows: list[float] = []
@@ -524,8 +423,6 @@ def geometry_report(
             for j in range(i + 1, len(items)):
                 if (items[i].label == items[j].label) is not same:
                     continue
-                # For the "same object" distribution, hold one axis fixed so the
-                # distance is attributable to that axis alone.
                 if same and axis is not None and getattr(items[i], axis) == getattr(items[j], axis):
                     continue
                 rows.append(float(1.0 - vectors[i] @ vectors[j]))
@@ -539,8 +436,6 @@ def geometry_report(
         "same_object_p90": round(float(np.percentile(same_all, 90)), 4),
         "different_object_p10": round(float(np.percentile(different, 10)), 4),
     }
-    # A radius as an object classifier: of the pairs it calls "same object", how many
-    # are, and of the pairs that really are, how many it keeps.
     within_same = float((same_all <= radius).mean())
     within_different = float((different <= radius).mean())
     out["pairs_same_within_radius"] = round(within_same, 4)
@@ -565,13 +460,7 @@ def geometry_report(
 def fragmentation_by_attribute(
     run: Run, items: Sequence[corpus.Item], attribute: str
 ) -> dict[str, dict[str, float]]:
-    """Per attribute value: how many strings, how many clusters, how concentrated.
-
-    Fragmentation is a number; this is the diagnosis. If every value of `modifier`
-    lands in its own cluster, the radius is not wrong - the corpus is asking for an
-    embedding that ignores adjectives - and widening the radius only trades one
-    failure for the other.
-    """
+    """Per attribute value: how many strings, how many clusters, how concentrated."""
     buckets: dict[str, list[int]] = {}
     for label, item in zip(run.arrival_labels, items, strict=True):
         value = getattr(item, attribute) or "none"
@@ -592,12 +481,7 @@ def fragmentation_by_attribute(
 def subset_quality(
     run: Run, items: Sequence[corpus.Item], attribute: str, value: str
 ) -> dict[str, float]:
-    """Quality restricted to the rows with one attribute value.
-
-    The synthetic corpus deliberately includes adjectives the gold label ignores. If
-    quality collapses on `modifier=plastic` rows and holds on `modifier=none`, the
-    finding is about the representation, not about the radius.
-    """
+    """Quality restricted to the rows with one attribute value."""
     labels = [
         label
         for label, item in zip(run.arrival_labels, items, strict=True)
@@ -619,12 +503,7 @@ def core_run(
     encoder: embeddings.Encoder,
     config: Config = SHIPPED_CONFIG,
 ) -> Run:
-    """The same method on the extracted object core, for the headroom number.
-
-    The colour facet is switched off here because the core has already had its colours
-    removed: lifting a colour that is no longer in the text would re-inject the
-    distinction the extraction just deleted.
-    """
+    """The same method on the extracted object core, for the headroom number."""
     core_items = corpus.core_corpus(items)
     config = replace(config, colour_weight=0.0)
     vectors, _ = encode(core_items, encoder, config)
@@ -670,12 +549,7 @@ def summary(run: Run, gold: Sequence[str] | None = None) -> dict[str, object]:
 
 
 def coverage_note(items: Sequence[corpus.Item]) -> dict[str, object]:
-    """Verb coverage over the corpus, stated as a fraction with its own denominator.
-
-    EXP-2.5-07's 100% was measured on strings whose verbs were chosen from the same
-    lexicon that does the masking. This is the same measurement with verbs the lexicon
-    has never seen in the denominator.
-    """
+    """Verb coverage over the corpus, stated as a fraction with its own denominator."""
     recognised = [
         item
         for item in items

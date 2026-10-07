@@ -1,11 +1,4 @@
-"""Unit tests for the migration runner (ADR 0028).
-
-The ordering and version rules are pure and pinned here; the SQL against a real
-database (fresh-baseline, once-only application, ahead-of-code refusal) lives in
-`tests/integration/test_migrations.py`. The CLI paths are driven through
-`cli.main` the way an operator would type them, with the runner faked, because
-these tests are about the command surface, not the ledger.
-"""
+"""Unit tests for the migration runner (ADR 0028)."""
 
 from __future__ import annotations
 
@@ -31,9 +24,6 @@ class _FakeMigration:
 
 def _registry(*versions: str) -> tuple[Migration, ...]:
     return tuple(_FakeMigration(version) for version in versions)
-
-
-# ------------------------------------------------------------------ pure rules
 
 
 def test_compute_pending_skips_applied_and_keeps_registry_order() -> None:
@@ -82,9 +72,6 @@ def test_baseline_migration_runs_the_schema_ddl(monkeypatch: pytest.MonkeyPatch)
     sentinel = object()
     baseline.apply(sentinel)  # type: ignore[arg-type]
     assert calls == [sentinel]
-
-
-# ------------------------------------------------------------------- the CLI
 
 
 def test_migrate_status_prints_and_exits_nonzero_when_the_database_is_ahead(

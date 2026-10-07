@@ -1,18 +1,4 @@
-"""Shared test helpers.
-
-PostgreSQL-backed tests run against a dedicated `<name>_test` database rather than
-the development one. They share a job queue, and a worker from `just run` would
-otherwise claim the jobs a test submitted, making the suite flaky whenever the app
-happens to be running.
-
-Real-format fixtures are downloaded from the Hugging Face Hub on first use into the
-gitignored `var/real-data/`, and the download is a plain per-file HTTPS GET rather than
-the `huggingface_hub` SDK (see the 2026-09-29 re-verification pass in
-`agents/research/technology-matrix.md`). Only the tabular slice of each dataset is
-fetched; camera MP4 shards are hundreds of megabytes and are not part of a read test.
-Tests that need them are marked `network` and skip cleanly when offline, so the suite
-still runs on a plane.
-"""
+"""Shared test helpers."""
 
 from __future__ import annotations
 
@@ -41,17 +27,8 @@ USER_AGENT = (
     "Mozilla/5.0 (compatible; faultlined-test-fixtures/0.1; "
     "+https://github.com/eddisonpham/Faultlined)"
 )
-"""The Hub's CDN resets connections from non-browser agents for some repositories.
+"""The Hub's CDN resets connections from non-browser agents for some repositories."""
 
-`python-urllib/3.14` and `python-requests` both get `[WinError 10054]` on
-`yaak-ai/lerobot-driving-school`, while a `Mozilla/5.0 (compatible; ...)` agent
-succeeds. The `compatible;` form is the standard way to name a real client behind a
-browser token, and the project URL is in there so the identification is honest.
-"""
-
-# Two genuinely different on-disk layouts, both real Hub datasets. The v2 fixture is
-# an odd embodiment on purpose: it proves the reader keys off `codebase_version` and
-# the declared features, not off a hard-coded SO-101 schema.
 REAL_LEROBOT_FIXTURES = {
     "v3": (
         "lerobot/svla_so101_pickplace",
@@ -87,11 +64,7 @@ def _ensure_database(info: dict[str, str], dbname: str) -> None:
 
 
 def postgres_test_dsn() -> str:
-    """DSN for the test database, or empty when no database is configured.
-
-    Not named `test_*`: test modules import it, and pytest would collect the
-    helper itself as a test.
-    """
+    """DSN for the test database, or empty when no database is configured."""
     base = os.environ.get("DE_DATABASE_URL")
     if not base:
         return ""
@@ -103,19 +76,7 @@ def postgres_test_dsn() -> str:
 
 
 def pin_a_healthy_host(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Pin the host sample the monitor reads, for tests that assert on signals.
-
-    The resource detector reads *this machine*: `memory_used_ratio > 0.92` opens
-    a real `RESOURCE_DEGRADED` signal, and a development box running the suite
-    sits within a percentage point of that floor. A test that asserts a signal
-    set then passes or fails with whatever else is open, which is a test of the
-    laptop rather than of the software. Pin the input and the assertion means
-    what it says.
-
-    Only for tests where the host is an input rather than the subject: the
-    detector test that exercises `RESOURCE_DEGRADED` on purpose builds its own
-    feature vector and does not come through here.
-    """
+    """Pin the host sample the monitor reads, for tests that assert on signals."""
     monkeypatch.setattr(
         "data_engine.monitoring.service.sample_resources",
         lambda **_kwargs: TelemetrySample(
@@ -134,25 +95,11 @@ def pin_a_healthy_host(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 class FixtureUnavailable(RuntimeError):
-    """A real-data fixture could not be fetched intact.
-
-    A separate exception rather than a bare ``pytest.skip`` inside the fetcher, so
-    the retry logic is testable without a pytest outcome escaping through it.
-    """
+    """A real-data fixture could not be fetched intact."""
 
 
 def _download(url: str, target: Path) -> None:
-    """Fetch one file, retrying transient resets. Raises if it cannot be had whole.
-
-    Truncation is the failure this guards hardest. A CDN that drops the
-    connection mid-body raises ``IncompleteRead`` - an ``http.client`` exception,
-    not an ``OSError`` - so it used to escape the retry entirely and error the
-    run. A body that arrives short *without* an error used to be worse: it was
-    written as if complete, and the failure surfaced three layers down as a
-    Parquet error or, worse, as a plausible-looking wrong row count. Both now
-    fail the attempt and retry, because a fixture that is not the fixture is
-    worse than no fixture.
-    """
+    """Fetch one file, retrying transient resets."""
     target.parent.mkdir(parents=True, exist_ok=True)
     temporary = target.with_suffix(target.suffix + ".partial")
     last: Exception | None = None
@@ -166,9 +113,6 @@ def _download(url: str, target: Path) -> None:
                 try:
                     body = response.read()
                 except http.client.IncompleteRead as exc:
-                    # The body stopped early. Reported as an OSError so every
-                    # way of arriving short - reset mid-transfer, declared length
-                    # not met - retries and reports the same reason.
                     raise OSError(f"truncated body: {exc}") from exc
             if declared is not None and len(body) != int(declared):
                 raise OSError(f"truncated body: {len(body)} of {declared} bytes")
@@ -199,10 +143,6 @@ def real_lerobot_dataset() -> Callable[[str], Path]:
             try:
                 _download(HUB.format(repo=repo, path=relative), target)
             except FixtureUnavailable as exc:
-                # Skipped, never failed: the Hub being unreachable or serving a
-                # truncated body is a fact about the network, not about the code
-                # under test. A red build that says "Hugging Face was rude" sends
-                # the reader to the wrong place entirely.
                 pytest.skip(f"real-data fixture unavailable ({exc})")
         return root
 
@@ -211,13 +151,7 @@ def real_lerobot_dataset() -> Callable[[str], Path]:
 
 @pytest.fixture(scope="session")
 def mcap_log() -> Any:
-    """`scripts/make_mcap_log.py`, loaded once for the session.
-
-    The same generator backs the reader's unit tests and the B-002 benchmark
-    workload. A test that regenerated the log differently from the benchmark would be
-    measuring a different format than the one it claims, so there is exactly one
-    entry point and it is the committed script.
-    """
+    """`scripts/make_mcap_log.py`, loaded once for the session."""
     import importlib.util
 
     path = Path(__file__).resolve().parents[1] / "scripts" / "make_mcap_log.py"

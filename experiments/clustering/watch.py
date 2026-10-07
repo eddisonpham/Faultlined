@@ -1,28 +1,4 @@
-"""Watch a clustering form in real time, and freeze clusters by hand.
-
-Every experiment so far feeds a frozen set through the clustering in one pass and
-prints a number. That hides the only property that actually justifies an online
-method: **a cluster a human confirms stops moving**. Order-dependence and
-cluster-count instability are abstract until you watch a cluster you just named get
-silently renamed by the next episode that arrives.
-
-So this streams. One task string at a time, each fed through the frozen
-configuration, with the figures re-rendered after every arrival and a browser page
-updating itself. Clusters can be confirmed from the page; a confirmed cluster is
-frozen, and watching it refuse to move while its neighbours keep reshaping is the
-demonstration that the design decision in `methods/online_centroids.py` was right.
-
-**Why a server and not a terminal redraw.** A terminal view is smaller, but the
-figures already exist as SVG, the UI is server-rendered (ADR 0014), and a browser
-page is what a person can actually watch while typing. The server is stdlib
-`http.server` with a JSON endpoint and a page that polls it; no new dependency, no
-build step, nothing to install.
-
-**Not a benchmark.** Figures are re-rendered after every arrival, so rendering is
-O(n) per step and O(n^2) over a run. That is fine for watching a few hundred
-strings and wrong for a measurement, which is what `experiments/` is otherwise for.
-`max_clusters` caps growth so a runaway cannot exhaust memory.
-"""
+"""Watch a clustering form in real time, and freeze clusters by hand."""
 
 from __future__ import annotations
 
@@ -39,8 +15,6 @@ import numpy as np
 from experiments.clustering import attributes, centroid_experiment, embeddings, figures
 from experiments.clustering.methods.online_centroids import OnlineCentroids
 
-#: Arrivals kept in the page's log. Enough to see a pattern, bounded so a long
-#: session cannot grow without limit.
 LOG_LIMIT = 200
 
 
@@ -60,8 +34,6 @@ class Session:
     model: OnlineCentroids = field(init=False)
     arrivals: list[dict[str, Any]] = field(default_factory=list)
     started: float = field(default_factory=time.monotonic)
-    #: Guards `model` against the ingest thread and the HTTP thread confirming at
-    #: the same time. Without it a confirm can land mid-`observe` and be lost.
     lock: threading.Lock = field(default_factory=threading.Lock)
 
     def __post_init__(self) -> None:
@@ -71,14 +43,8 @@ class Session:
             rule_factory=centroid_experiment.RULES[self.rule],
         )
 
-    # ------------------------------------------------------------- ingestion
-
     def vector_for(self, text: str) -> np.ndarray:
-        """Encode one string through the same pipeline the experiments used.
-
-        Keyed by the original text, so `encode_for_clustering` keeps resolving
-        gold pairs against the string as written.
-        """
+        """Encode one string through the same pipeline the experiments used."""
         encoded = attributes.encode_for_clustering(
             self.encoder, [text], self.colour_weight, mask_verb=self.mask_verbs
         )[text]
@@ -115,8 +81,6 @@ class Session:
     def feed_all(self, texts: Iterable[str]) -> None:
         for text in texts:
             self.feed(text)
-
-    # ------------------------------------------------------------ inspection
 
     def snapshot(self) -> dict[str, Any]:
         with self.lock:
@@ -158,21 +122,15 @@ class Session:
         return [int(i) for i in np.argmax(matrix @ stacked.T, axis=1)]
 
     def confirm(self, index: int, label: str = "") -> bool:
-        """Freeze a cluster. Returns False when the index is not a real cluster."""
+        """Freeze a cluster."""
         with self.lock:
             if not 0 <= index < len(self.model.clusters):
                 return False
             self.model.confirm(index, label or f"task {index}")
             return True
 
-    # ---------------------------------------------------------------- figures
-
     def figures(self) -> dict[str, str]:
-        """Treemap, map and heatmap for the state right now.
-
-        Rendered under the lock: an HTTP thread draws while the ingest thread
-        feeds, and both walk the same lists.
-        """
+        """Treemap, map and heatmap for the state right now."""
         with self.lock:
             return self._render()
 
@@ -289,12 +247,12 @@ setInterval(tick, 700);
 
 
 def serve(session: Session, port: int) -> None:
-    """Serve the live view. Blocks until interrupted."""
+    """Serve the live view."""
     counter = {"n": 0}
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *_args: Any) -> None:
-            return  # the page polls constantly; a line per request is noise
+            return
 
         def _send(self, body: bytes, content_type: str) -> None:
             self.send_response(200)
@@ -310,8 +268,6 @@ def serve(session: Session, port: int) -> None:
                 return
             if self.path == "/state":
                 state = session.snapshot()
-                # The page needs to know which clusters are frozen to offer the
-                # confirm button, and `snapshot` only counts them.
                 with session.lock:
                     state["frozen_list"] = [
                         index
@@ -323,7 +279,6 @@ def serve(session: Session, port: int) -> None:
             name = self.path.split("?")[0].lstrip("/")
             if name.endswith(".svg"):
                 counter["n"] += 1
-                # Re-render every hit so the page never shows a stale figure.
                 self._send(
                     session.figures()[name.removesuffix(".svg")].encode("utf-8"), "image/svg+xml"
                 )
@@ -374,7 +329,7 @@ SEED = (
 
 
 def run(source: str | None, port: int, **options: Any) -> int:
-    """Start a session, feed it, and serve. `source` is a path or `-` for stdin."""
+    """Start a session, feed it, and serve."""
     import sys
 
     session = Session(**options)

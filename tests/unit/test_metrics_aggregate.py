@@ -147,8 +147,6 @@ def test_tail_read_returns_the_newest_records_in_chronological_order(tmp_path: P
 
 @pytest.mark.unit
 def test_tail_read_across_a_chunk_boundary_is_complete(tmp_path: Path) -> None:
-    # Each record ~50 bytes; 2,500 of them span several 1 MiB chunks, so the
-    # requested window must survive chunk boundaries without loss or a phantom.
     path = tmp_path / "runtime.jsonl"
     path.write_text(
         "\n".join(json.dumps(_record(f"m{i:05d}", float(i))) for i in range(30_000)) + "\n",
@@ -167,7 +165,6 @@ def test_tail_read_skips_corrupt_lines_like_the_forward_read(tmp_path: Path) -> 
         encoding="utf-8",
     )
     tail = read_metric_records(path, max_records=4)
-    # Newest four *valid* records: g6..g9 (g5 sits behind g6..g9 in the tail).
     assert [record["name"] for record in tail] == ["g6", "g7", "g8", "g9"]
 
 
@@ -175,8 +172,6 @@ def test_tail_read_skips_corrupt_lines_like_the_forward_read(tmp_path: Path) -> 
 def test_tail_read_is_a_tail_not_a_full_parse(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # The optimization is the point (EXP-0007): cost must track the window, not
-    # the history. Pin the load-bearing boundary, then verify the shrink.
     from data_engine.observability import aggregate
 
     monkeypatch.setattr(aggregate, "TAIL_MAX_BYTES", 4096)
@@ -225,7 +220,6 @@ def test_heartbeat_age_comes_from_newest_record() -> None:
     ]
     assert heartbeat_age_seconds(records, now=now) == pytest.approx(10.0)
     assert heartbeat_age_seconds([], now=now) is None
-    # A clock-skewed future heartbeat must not produce a negative age.
     future = [
         _record(
             "workers_heartbeat_age_seconds", 0.0, timestamp=(now + timedelta(seconds=5)).isoformat()
@@ -250,7 +244,6 @@ def test_newest_record_picks_the_latest_of_one_metric() -> None:
     assert newest_metric_at(records, name="monitor_tick_seconds") == base + timedelta(minutes=1)
     assert newest_record(records, name="absent") is None
     assert newest_metric_at(records, name="absent") is None
-    # A record with no readable timestamp cannot be reported as a time.
     assert newest_metric_at([_record("m", 1.0, timestamp="not a time")], name="m") is None
 
 

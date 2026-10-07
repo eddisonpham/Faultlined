@@ -1,15 +1,4 @@
-"""Harvest the task sentence from one LeRobot dataset on the Hub.
-
-Split out of `corpus.py` because it is the only part that touches the network, and
-because it has to be runnable on its own: the harvest is slow enough (each request
-is retried, and connections get closed under us regularly enough to matter) that it
-runs once, writes a JSON file, and every later run reads that file.
-
-**No exceptions escape.** A Hub that is unreachable, rate-limited or simply does not
-have the file produces an empty result and a recorded reason. The alternative - a
-crash, or worse, quietly falling back to synthetic strings labelled as real - is how
-a report ends up claiming coverage it does not have.
-"""
+"""Harvest the task sentence from one LeRobot dataset on the Hub."""
 
 from __future__ import annotations
 
@@ -22,10 +11,6 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-#: Well-known LeRobot datasets, one task sentence each. A fixed list rather than a
-#: Hub search, because search is exactly the endpoint this network fails on and a
-#: list makes the harvest reproducible: same ids, same sentences, every time.
-#: Ids that no longer resolve are recorded as failures, not silently dropped.
 REPOS: tuple[str, ...] = (
     "lerobot/pusht",
     "lerobot/pusht_keyboard",
@@ -76,13 +61,10 @@ REPOS: tuple[str, ...] = (
     "lerobot/dROID",
 )
 
-#: Where a task sentence lives, per LeRobot version. Tried in order.
 LAYOUTS: tuple[str, ...] = ("meta/tasks.parquet", "meta/tasks.jsonl", "meta/tasks.csv")
 
 CACHE = Path("experiments/clustering/results/real_tasks.json")
 
-#: The Hub closes connections under this network often enough that one attempt is not
-#: a measurement of whether a dataset exists.
 ATTEMPTS = 2
 BACKOFF_SECONDS = 1.5
 
@@ -106,7 +88,6 @@ def _texts_from(path: Path) -> list[str]:
         import pyarrow.parquet as pq
 
         table = pq.read_table(path)
-        # v2.1/v3 keep the sentence in the index column next to a numeric id.
         column = "__index_level_0__" if "__index_level_0__" in table.column_names else None
         if column is None:
             column = "task" if "task" in table.column_names else table.column_names[0]
@@ -129,7 +110,7 @@ def _texts_from(path: Path) -> list[str]:
 
 
 def _usable(text: str) -> bool:
-    """Reject placeholders. A digit-only task is an id that leaked into a text column."""
+    """Reject placeholders."""
     text = text.strip()
     return bool(text) and not text.isdigit() and len(text) > 3
 
@@ -181,9 +162,6 @@ def harvest(
                     seen.append(f"{filename}: {type(error).__name__}")
                     if attempt + 1 < ATTEMPTS:
                         time.sleep(BACKOFF_SECONDS * (attempt + 1))
-            # A repository-level failure explains every layout, so stop asking and
-            # record it once. Gated and missing repositories are different facts and
-            # a report needs to be able to tell them apart.
             if any(_is_repo_level(entry) for entry in seen):
                 break
             if path is None:

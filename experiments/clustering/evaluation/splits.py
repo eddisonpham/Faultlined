@@ -1,42 +1,4 @@
-"""Splitting the gold set so that reported numbers are not leakage-inflated.
-
-The obvious split - half the pairs to tune on, half to report - is wrong in a way
-that is invisible in the results. The pairs are not independent. Two kinds of
-leakage exist here, and both have to be closed:
-
-1. **Pair leakage.** Half a pair is meaningless, so the two strings of a pair
-   must always land on the same side.
-2. **Near-duplicate leakage.** "grab the red cube" and "pick up the red cube" are
-   the same content. If one is in dev and the other in test, the method has
-   effectively already seen a test item.
-
-The first version of this file grouped *strings* by lexical overlap and then
-assigned each pair by its first string. That leaked: a pair whose two strings sat
-in different lexical groups was assigned to one side while a different pair
-sharing one of those groups went to the other, and the same group ended up on
-both sides.
-
-The fix is to treat the **pair** as the unit of leakage. Components are induced
-by two edge types over strings:
-
-- a *pair edge*, because a pair's two strings must never be separated;
-- a *lexical edge* between near-identical strings, at a high threshold.
-
-Union-find over both edge types gives components that provably contain every pair
-whole. Splitting whole components is then guaranteed clean.
-
-The dominant edge type turned out to be the pair edge, not the lexical one. The
-gold set is deliberately built from adjacent families, so pairs like
-("open the drawer", "pick up the bowl") chain "open the drawer" to the whole
-"pick up" family. That is correct behaviour - over-grouping is the safe
-direction - but it is why components are large and the split cannot be balanced
-finer than whole components allow. The lexical threshold is a secondary guard.
-
-Using words here is deliberate and is not a violation of the no-word-NLP rule.
-That rule governs the clustering methods under test, not the harness. Embeddings
-are deliberately not used for grouping, because they are one of the things under
-evaluation: a harness that leaned on them could flatter them.
-"""
+"""Splitting the gold set so that reported numbers are not leakage-inflated."""
 
 from __future__ import annotations
 
@@ -46,13 +8,8 @@ from dataclasses import dataclass
 
 from experiments.clustering.evaluation.gold import GOLD_PAIRS, GoldPair
 
-#: Token overlap above which two strings are treated as near-identical and kept
-#: together. High on purpose: a false merge only costs evaluation size, while a
-#: false split leaks a test item into dev. Unrelated short task strings score
-#: around 0.20 here, so 0.8 only catches genuine rephrasings.
 JACCARD_THRESHOLD = 0.8
 
-#: Share of strings targeted for the dev side, where the method is tuned.
 DEV_FRACTION = 0.5
 
 
@@ -62,22 +19,11 @@ class Split:
 
     dev: tuple[GoldPair, ...]
     heldout: tuple[GoldPair, ...]
-    #: Components represented on each side, passed in rather than recomputed from
-    #: the pairs: a pair can span two components, so it has no single "component".
     dev_components: frozenset[int]
     heldout_components: frozenset[int]
-    #: Number of leakage components the gold set collapsed into.
     components: int
-    #: Largest component, in pairs. Large values mean the set is highly
-    #: interconnected and no split can be balanced.
     largest_component: int
-    #: Leakage component of each pair in `dev`, positionally aligned.
-    #: Carried so that cross-validation inside dev can use the *component* as its
-    #: fold unit - pairs inside one component are paraphrases of each other, so
-    #: holding out a single pair while its siblings stay in training makes the
-    #: validation score meaningless.
     dev_pair_groups: tuple[int, ...] = ()
-    #: Leakage component of each pair in `heldout`, positionally aligned.
     heldout_pair_groups: tuple[int, ...] = ()
 
     @property
@@ -104,12 +50,7 @@ def _tokens(text: str) -> frozenset[str]:
 
 
 def jaccard(left: str, right: str) -> float:
-    """Token overlap of two task strings, in [0, 1].
-
-    Public because the threshold is a methodological choice worth testing
-    directly: a lexical edge that fires on shared function words would collapse
-    unrelated families into one component.
-    """
+    """Token overlap of two task strings, in [0, 1]."""
     a, b = _tokens(left), _tokens(right)
     union = a | b
     return len(a & b) / len(union) if union else 0.0
@@ -183,8 +124,6 @@ def split() -> Split:
         for component in components:
             sizes[component] = sizes.get(component, 0) + 1
 
-    # Heaviest components to dev first, so tuning is not starved. Ties break on
-    # the component id, which keeps the partition reproducible run to run.
     ranked = sorted(sizes.items(), key=lambda item: (-item[1], item[0]))
     target = sum(sizes.values()) * (1.0 - DEV_FRACTION)
 

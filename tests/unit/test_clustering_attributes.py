@@ -1,11 +1,4 @@
-"""Tests for the colour facet.
-
-EXP-2.5-05 fixed the object view's only two false merges, both of which were
-pairs differing by a colour adjective. The temptation was to strip the colour word
-before embedding, which would send "press the red button" and "press the blue
-button" to the same string and make the merge certain. These tests exist mainly to
-keep that mistake from being reintroduced.
-"""
+"""Tests for the colour facet."""
 
 from __future__ import annotations
 
@@ -15,12 +8,7 @@ from experiments.clustering import attributes
 
 
 class _ColourBlind:
-    """An encoder that cannot see the difference between two sentences.
-
-    Deliberately the worst case: it returns one fixed vector for everything, which
-    is what a colour-blind representation looks like to the clustering. Any
-    separation the facet achieves here is entirely the facet's doing.
-    """
+    """An encoder that cannot see the difference between two sentences."""
 
     name = "colour_blind"
     dim = 6
@@ -38,9 +26,6 @@ class _ColourBlind:
 
 def _cosine(left: np.ndarray, right: np.ndarray) -> float:
     return float(left @ right / (np.linalg.norm(left) * np.linalg.norm(right)))
-
-
-# ---------------------------------------------------------------- splitting
 
 
 def test_colour_is_lifted_out_of_the_text_and_returned() -> None:
@@ -72,16 +57,8 @@ def test_a_string_of_only_colour_words_is_not_emptied() -> None:
     assert bare
 
 
-# ---------------------------------------------------------------- the facet
-
-
 def test_the_facet_separates_colours_an_encoder_cannot() -> None:
-    """The whole point, stated as a test.
-
-    Stripping colour alone would send both of these to the identical string "press
-    the button", so a colour-blind encoder makes them the same point. The facet has
-    to keep them apart on its own.
-    """
+    """The whole point, stated as a test."""
     encoder = _ColourBlind()
     texts = ["press the red button", "press the blue button"]
 
@@ -107,18 +84,11 @@ def test_zero_weight_reproduces_the_plain_encoder() -> None:
     assert set(off) == set(texts)
     for text in texts:
         assert float(np.linalg.norm(off[text])) == pytest.approx(1.0, abs=1e-9)
-    # No colour facet is appended at all, so the dimension is the encoder's.
     assert off[texts[0]].shape == (encoder.dim,)
 
 
 def test_vectors_come_back_unit_length() -> None:
-    """The clustering compares against a radius in cosine units.
-
-    Augmented vectors have a longer norm than the encoder's output, and the method
-    computes `1 - dot(point, centroid)`, which only reads as a cosine distance when
-    the point is a unit vector. Unnormalised, the reported distances run negative and
-    the radius stops meaning what it says.
-    """
+    """The clustering compares against a radius in cosine units."""
     encoder = _ColourBlind()
     for weight in (0.0, 0.5, 1.0, 4.0):
         vectors = attributes.encode_for_clustering(
@@ -143,7 +113,6 @@ def test_uncoloured_strings_get_the_empty_slot_not_a_colour() -> None:
     encoder = _ColourBlind()
     texts = ["press the red button", "open the drawer"]
     faceted = attributes.encode_for_clustering(encoder, texts, 2.0)
-    # Distinct vectors: the uncoloured sentence is not pushed into some colour's slot.
     assert _cosine(faceted[texts[0]], faceted[texts[1]]) < 0.999
 
 
@@ -164,9 +133,6 @@ def test_colour_space_has_a_slot_for_every_colour_plus_uncoloured() -> None:
 def test_the_audit_can_name_a_colour() -> None:
     assert attributes.colour_of("press the red button") == "red"
     assert attributes.colour_of("open the drawer") == "-"
-
-
-# ------------------------------------------------------------ verb masking
 
 
 def test_a_single_word_verb_is_masked() -> None:
@@ -199,12 +165,7 @@ def test_masking_keeps_the_rest_of_the_sentence_intact() -> None:
 
 
 def test_two_phrasings_of_one_object_mask_to_the_same_text() -> None:
-    """This is the whole mechanism.
-
-    `place the bowl` and `lift the bowl` are the failure EXP-2.5-04 left behind. If
-    they do not collapse to one input, the object view can still split them for
-    disagreeing about the verb, and the feature does nothing.
-    """
+    """This is the whole mechanism."""
     assert attributes.mask_verbs("place the bowl")[0] == attributes.mask_verbs("lift the bowl")[0]
     assert attributes.mask_verbs("hand over the pen")[0] == attributes.mask_verbs("give the pen")[0]
 
@@ -238,7 +199,6 @@ def test_masking_and_colour_compose() -> None:
     texts = ["press the red button", "press the blue button"]
     faceted = attributes.encode_for_clustering(encoder, texts, 2.0, mask_verb=True)
     assert _cosine(faceted[texts[0]], faceted[texts[1]]) < 0.95
-    # Same verb, different object: still distinct.
     other = ["press the green button"]
     mixed = attributes.encode_for_clustering(encoder, [*texts, *other], 2.0, mask_verb=True)
     assert _cosine(mixed[other[0]], mixed[texts[0]]) < 0.95
@@ -249,8 +209,6 @@ def test_an_unmasked_verb_still_gets_its_colour_handled() -> None:
     encoder = _ColourBlind()
     texts = ["frobnicate the red widget", "press the red widget"]
     faceted = attributes.encode_for_clustering(encoder, texts, 2.0, mask_verb=True)
-    # They differ by verb alone, which masking leaves in, so they may or may not
-    # separate - but both must still be unit vectors of the augmented width.
     for vector in faceted.values():
         assert float(np.linalg.norm(vector)) == pytest.approx(1.0, abs=1e-9)
         assert vector.shape[0] == encoder.dim + attributes.colour_space()

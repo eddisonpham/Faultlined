@@ -1,22 +1,4 @@
-"""Wipe the development catalog, its artifacts, and its metrics log.
-
-`just run` has no "start over", and the first-run panel on `/ui` is gated on a
-genuinely empty system - so re-running the demo needs a way back to empty that is
-not a pile of ad-hoc `DELETE FROM` statements typed against whatever table names
-happened to exist that week.
-
-Two things this script refuses to do, because the failure mode is not recoverable
-locally:
-
-- **Touch a `*_test` database.** The test suite owns those. Resetting the
-  development catalog must never be a way to lose a test run.
-- **Run without `--yes`.** It deletes data. A script that can wipe a catalog on
-  invocation is a footgun in a repository where `just` recipes are muscle memory.
-
-It truncates rather than drops the schema, so the catalog keeps its shape and
-`initialize_schema` is not what rebuilds it - the tables are the same ones the
-running system created, which is the point of a reset.
-"""
+"""Wipe the development catalog, its artifacts, and its metrics log."""
 
 from __future__ import annotations
 

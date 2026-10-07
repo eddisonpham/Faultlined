@@ -40,7 +40,6 @@ def test_initialize_schema_executes_each_nonempty_statement() -> None:
         len([s for s in script.split(";") if s.strip()])
         for script in (database._SCHEMA, database._MIGRATIONS)
     )
-    # The DDL statements plus the baseline ledger row (ADR 0028).
     assert len(connection.statements) == expected + 1
     assert all(statement.strip() for statement in connection.statements)
     assert "CREATE TABLE IF NOT EXISTS jobs" in connection.statements[0]

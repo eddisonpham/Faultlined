@@ -54,9 +54,6 @@ def _episode(
     )
 
 
-# ------------------------------------------------------------------- profiles
-
-
 @pytest.mark.unit
 def test_profile_hash_is_stable_and_order_independent() -> None:
     """A profile's identity must not depend on the order its author typed keys in."""
@@ -122,9 +119,6 @@ def test_profile_rejects_a_channel_that_is_required_and_forbidden() -> None:
 def test_profile_rejects_text_that_is_not_json() -> None:
     with pytest.raises(InvalidProfile, match="not valid JSON"):
         profile_from_json("{oops")
-
-
-# ---------------------------------------------------------------------- rules
 
 
 class _Catalog:
@@ -284,9 +278,6 @@ def test_an_unknown_rule_name_is_ignored_rather_than_fatal() -> None:
     """A profile from a newer engine must still validate; unknown rules simply do not run."""
     result = _evaluate(_episode(), _profile(enabled_rules=["duration", "no_such_rule"]))
     assert result.passed is True
-
-
-# -------------------------------------------------------------------- service
 
 
 @pytest.mark.unit

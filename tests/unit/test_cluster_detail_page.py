@@ -1,11 +1,4 @@
-"""White-box tests for the per-cluster detail view (ADR 0027).
-
-The route is contract-tested in `tests/contract/test_cluster_api.py` and the SQL
-under it in `tests/integration/test_clusters.py`; here the rendering functions are
-exercised directly so every branch of the detail markup - open vs confirmed vs
-preview, merged cores, missing verbs and colours, escaping, the truncation note,
-and the "and N more" link back into this view - is pinned in isolation.
-"""
+"""White-box tests for the per-cluster detail view (ADR 0027)."""
 
 from __future__ import annotations
 
@@ -43,9 +36,6 @@ def _members() -> list[dict[str, Any]]:
     ]
 
 
-# --------------------------------------------------------------------- tiles
-
-
 def test_detail_tiles_show_identity_volume_and_open_status() -> None:
     html = cluster_page.detail_tiles(_proposal())
     assert "mug" in html
@@ -64,9 +54,6 @@ def test_detail_tiles_count_merged_cores() -> None:
     assert '<span class="de-stat-value">2</span>' in html
 
 
-# -------------------------------------------------------------------- members
-
-
 def test_detail_members_render_the_extraction_facts() -> None:
     html = cluster_page.detail_members(_members())
     assert "pick up the red mug" in html
@@ -77,7 +64,6 @@ def test_detail_members_render_the_extraction_facts() -> None:
 
 def test_detail_members_show_a_placeholder_for_missing_verb_and_colours() -> None:
     html = cluster_page.detail_members(_members())
-    # chr(8212) is the em dash used elsewhere for "no value".
     assert f"<td>{chr(8212)}</td>" in html
 
 
@@ -99,9 +85,6 @@ def test_detail_members_escape_task_strings() -> None:
 def test_detail_members_say_so_when_empty() -> None:
     html = cluster_page.detail_members([])
     assert "no task strings recorded" in html
-
-
-# -------------------------------------------------------------------- control
 
 
 def test_detail_control_offers_confirm_for_an_open_proposal() -> None:
@@ -131,9 +114,6 @@ def test_detail_control_renders_an_escaped_error_banner() -> None:
     assert 'role="alert"' in html
 
 
-# ----------------------------------------------------------------------- body
-
-
 def test_detail_body_links_back_and_lists_merged_cores() -> None:
     html = cluster_page.detail_body(_proposal(merged_cores=["mug", "cup"]), _members())
     assert 'href="/ui/clusters"' in html
@@ -158,9 +138,6 @@ def test_detail_body_carries_the_control_and_members() -> None:
     assert "pick up the red mug" in html
 
 
-# ------------------------------------------------------- page and fragment
-
-
 def test_detail_page_is_a_full_document_on_the_clusters_nav() -> None:
     html = cluster_detail_page(_proposal(), _members(), "amber")
     assert html.startswith("<!doctype html>")
@@ -180,17 +157,8 @@ def test_detail_fragment_is_a_body_not_a_document() -> None:
     assert 'href="/ui/clusters"' in html
 
 
-# ------------------------------------------------- the "and N more" link
-
-
 def test_proposal_table_reports_the_true_hidden_count_into_the_detail_view() -> None:
-    """Ten members must say "and 6 more", not a capped count.
-
-    `rows_for` used to truncate the member list at 8 before the table showed its
-    own first 4, so a 20-member cluster claimed "and 4 more" and 12 task strings
-    were reachable only through the API. The cap belonged to the display, not
-    the row model.
-    """
+    """Ten members must say "and 6 more", not a capped count."""
     colours = (
         "red",
         "blue",

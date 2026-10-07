@@ -1,9 +1,4 @@
-"""Dataset builds: the determinism property everything else rests on.
-
-NFR-004 is a hard gate - "identical content hash on rebuild, 100% or the release
-fails" - so these are not ordinary unit tests. Each one pins a specific way the
-hash can change without the data changing.
-"""
+"""Dataset builds: the determinism property everything else rests on."""
 
 from __future__ import annotations
 
@@ -27,24 +22,15 @@ def _episodes() -> list[dict]:
     return [_episode("ep-b"), _episode("ep-a"), _episode("ep-c")]
 
 
-# ---------------------------------------------------------------- determinism
-
-
 def test_rebuilding_the_same_selection_gives_the_same_hash() -> None:
-    """The whole promise. Same inputs, same address, forever."""
+    """The whole promise."""
     first = DatasetBuilder(code_commit="abc123").build(_episodes(), name="baseline")
     second = DatasetBuilder(code_commit="abc123").build(_episodes(), name="baseline")
     assert first.hash == second.hash
 
 
 def test_selection_order_does_not_change_the_hash() -> None:
-    """A manifest is a sequence, so the builder sorts it.
-
-    This is the failure that would never be noticed by eye and would break every
-    rebuild: a database returning rows in a different order after a vacuum, a
-    plan change, or a different version, silently producing a different "same"
-    dataset.
-    """
+    """A manifest is a sequence, so the builder sorts it."""
     forwards = DatasetBuilder(code_commit="abc123").build(_episodes(), name="baseline")
     backwards = DatasetBuilder(code_commit="abc123").build(
         list(reversed(_episodes())), name="baseline"
@@ -54,12 +40,7 @@ def test_selection_order_does_not_change_the_hash() -> None:
 
 
 def test_the_manifest_carries_no_timestamp() -> None:
-    """A build made at 09:14 and one at 09:15 are the same build.
-
-    `created_at` is a column on the build, recorded once and never hashed. If it
-    ever moves into the manifest, determinism is gone and every rebuild looks
-    like a change.
-    """
+    """A build made at 09:14 and one at 09:15 are the same build."""
     manifest = DatasetBuilder(code_commit="abc123").build(_episodes(), name="x").manifest
     for volatile in ("created_at", "built_at", "timestamp", "now", "generated_at"):
         assert volatile not in manifest, f"{volatile} in the manifest breaks determinism"
@@ -86,7 +67,7 @@ def test_a_different_selection_makes_a_different_build() -> None:
 
 
 def test_changing_an_episode_artifact_changes_the_hash() -> None:
-    """Identity is content, not a label. A re-ingested episode is a new build."""
+    """Identity is content, not a label."""
     before = DatasetBuilder(code_commit="a").build(_episodes(), name="x")
     mutated = _episodes()
     mutated[0]["artifact_hash"] = "art-CHANGED"
@@ -94,15 +75,8 @@ def test_changing_an_episode_artifact_changes_the_hash() -> None:
     assert before.hash != after.hash
 
 
-# ------------------------------------------------------------------- identity
-
-
 def test_the_hash_is_a_stable_content_address() -> None:
-    """Recomputing from the stored manifest must reproduce the stored hash.
-
-    This is what makes a build verifiable after the fact by anyone holding the
-    manifest, and it is why the manifest is stored verbatim.
-    """
+    """Recomputing from the stored manifest must reproduce the stored hash."""
     result = DatasetBuilder(code_commit="abc123").build(_episodes(), name="baseline")
     assert build_hash(result.manifest) == result.hash
     assert result.hash.startswith("bld_")
@@ -114,23 +88,14 @@ def test_the_manifest_cites_the_validation_policy_by_content_address() -> None:
     cited = result.manifest["validation_profile"]
     assert cited["hash"] == "vp_abc"
     assert result.profile_hash == "vp_abc"
-    # Changing the policy changes the build: same episodes, different policy,
-    # is genuinely a different dataset claim.
     other = DatasetBuilder(code_commit="a").build(
         _episodes(), name="x", profile={**profile, "hash": "vp_xyz"}
     )
     assert result.hash != other.hash
 
 
-# --------------------------------------------------------------------- errors
-
-
 def test_an_empty_selection_is_refused() -> None:
-    """A build of zero episodes is not a dataset.
-
-    Producing one silently is how an empty training run gets shipped, so it is an
-    error the caller has to see.
-    """
+    """A build of zero episodes is not a dataset."""
     with pytest.raises(BuildError, match="at least one episode"):
         DatasetBuilder(code_commit="a").build([], name="empty")
 

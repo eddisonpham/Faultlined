@@ -1,11 +1,4 @@
-"""Tests for the separability diagnostic, the supervised ceiling, and the verify gate.
-
-These exist because each one changed a decision, and each encodes a way the
-measurement could quietly lie.
-
-All of them run on the `null` encoder or on small hand-built fixtures. None needs
-a model downloaded, so none can fail for a reason unrelated to the code.
-"""
+"""Tests for the separability diagnostic, the supervised ceiling, and the verify gate."""
 
 from __future__ import annotations
 
@@ -15,22 +8,12 @@ from experiments.clustering import embeddings
 from experiments.clustering.evaluation import separability as sep
 from experiments.clustering.evaluation.gold import GoldPair
 
-#: Six strings arranged as three tight pairs: two positives and one negative that
-#: sits far from both. Crucially each string appears in exactly one pair. An
-#: earlier fixture reused a string in a positive *and* a negative pair, which
-#: gives it two labels and makes any nearest-neighbour ceiling meaningless - the
-#: non-independence documented in EXP-2.5-01.
 _POS_A = np.array([1.0, 0.0], dtype=np.float32)
 _POS_B = np.array([0.99, 0.14], dtype=np.float32)
 _POS_C = np.array([0.0, 1.0], dtype=np.float32)
 _POS_D = np.array([0.14, 0.99], dtype=np.float32)
 _NEG_A = np.array([-1.0, 0.0], dtype=np.float32)
 _NEG_B = np.array([0.0, -1.0], dtype=np.float32)
-#: A *second* negative pair for the ceiling test, where the two negatives sit
-#: close together. Separability and the supervised ceiling want opposite
-#: geometry - a threshold separates classes when negatives are far apart, while
-#: leave-one-out 1-NN scores well only when each class forms its own cluster -
-#: so they get separate fixtures rather than one compromise that lies to both.
 _NEG_C = np.array([-0.71, -0.70], dtype=np.float32)
 _NEG_D = np.array([-0.95, -0.31], dtype=np.float32)
 
@@ -75,11 +58,7 @@ def test_separable_classes_are_reported_as_clean() -> None:
 
 @pytest.mark.unit
 def test_interleaved_classes_are_reported_as_not_clean() -> None:
-    """The finding in EXP-2.5-01: overlap must be visible, not averaged away.
-
-    `g` is placed next to `a`, so the negative pair (a, g) scores as high as the
-    positive pair (a, b) and no threshold can separate them.
-    """
+    """The finding in EXP-2.5-01: overlap must be visible, not averaged away."""
     vectors = _two_classes()
     vectors["g"] = _unit(_POS_A + 0.02 * _POS_C)
     pairs = (
@@ -97,12 +76,7 @@ def test_a_view_with_no_decided_pairs_is_refused() -> None:
 
 
 def _probe_fixture():
-    """Eight same-task pairs and eight different-task pairs, cleanly split.
-
-    A same pair is a point and a near-copy of itself; a different pair is a point
-    and its negation. Both classes are present on both sides of the split, because
-    balanced accuracy is undefined with only one.
-    """
+    """Eight same-task pairs and eight different-task pairs, cleanly split."""
     rng = np.random.default_rng(4)
     vectors: dict[str, np.ndarray] = {}
     same: list[GoldPair] = []
@@ -125,11 +99,7 @@ def _probe_fixture():
 
 @pytest.mark.unit
 def test_the_probe_reproduces_a_learnable_pattern() -> None:
-    """Sanity check on the diagnostic itself: a separable set must probe at 1.0.
-
-    Without this, a probe of 0.82 in the experiment record could just mean the
-    measurement is broken rather than the representation being good.
-    """
+    """Sanity check on the diagnostic itself: a separable set must probe at 1.0."""
     vectors, _pairs, (dev_same, dev_diff), (held_same, held_diff) = _probe_fixture()
     dev = dev_same + dev_diff
     heldout = held_same + held_diff
@@ -142,12 +112,7 @@ def test_the_probe_reproduces_a_learnable_pattern() -> None:
 
 @pytest.mark.unit
 def test_the_probe_scores_pairs_not_strings() -> None:
-    """The label belongs to the pair, so the counts are pairs.
-
-    The first implementation scored a per-string nearest neighbour, which stamped
-    each pair's label onto both of its strings. 27% of the constructed set's
-    strings carry both labels that way, so it answered at chance and was wrong.
-    """
+    """The label belongs to the pair, so the counts are pairs."""
     vectors, _pairs, (dev_same, dev_diff), (held_same, held_diff) = _probe_fixture()
     dev = dev_same + dev_diff
     heldout = held_same + held_diff
@@ -219,16 +184,7 @@ def test_verification_rejects_a_non_deterministic_encoder() -> None:
 
 @pytest.mark.unit
 def test_verification_cannot_catch_an_inverted_encoder_so_none_is_faked() -> None:
-    """Documents a limit of the gate rather than pretending past it.
-
-    An encoder that scored unrelated text *above* identical text would be the
-    classic mis-wired-mean-pooling failure. It cannot be constructed from text
-    alone here, because the gate probes with two identical strings and any
-    deterministic encoder scores those 1.0 by construction. Detecting inversion
-    needs a second reference implementation, not a hand-built fake, so the gate
-    covers shape, finiteness, determinism and the ordering of one identical pair
-    against one unrelated pair - and this test records why that is the boundary.
-    """
+    """Documents a limit of the gate rather than pretending past it."""
     result = embeddings.verify(embeddings.NullEncoder())
     assert result.ok
     assert result.failures == ()

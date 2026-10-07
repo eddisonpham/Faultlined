@@ -1,9 +1,4 @@
-"""Unit tests for the synonym-candidate ranker (ADR 0029 §5).
-
-The ranker is pure and its rule is deliberately narrow (core equality), so the
-tests pin the three cases and the properties that make the queue trustworthy:
-determinism, rank order, and the silence where a guess would be wrong.
-"""
+"""Unit tests for the synonym-candidate ranker (ADR 0029 §5)."""
 
 from __future__ import annotations
 
@@ -20,7 +15,6 @@ def _unmapped(task: str, episodes: int) -> dict[str, object]:
 
 class TestRanker:
     def test_a_shared_core_attaches_to_the_one_entry_that_has_it(self) -> None:
-        # "pick up the red mug" and "grab the blue mug" both extract to "mug".
         ranked = candidates(
             [_unmapped("pick up the red mug", 3), _unmapped("grab the blue mug", 1)],
             [_entry("voc_a", "mugs", "mug"), _entry("voc_b", "plates", "plate")],
@@ -65,7 +59,6 @@ class TestRanker:
         assert first == second
 
     def test_a_string_with_no_surviving_core_proposes_nothing(self) -> None:
-        # "the" extracts to nothing usable; an empty core must never become a group.
         assert candidates([_unmapped("the the the", 4)], []) == []
 
     def test_the_suggestion_serializes_for_the_api(self) -> None:

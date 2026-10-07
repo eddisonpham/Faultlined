@@ -1,10 +1,4 @@
-"""Invariants of the stage 2.5 gold set and its leakage-safe split.
-
-The split is the piece most likely to rot silently. A leak does not raise; it
-just makes every number optimistic, and the failure is invisible in the results.
-So cleanliness is asserted here rather than trusted, and the component logic is
-tested against a case that leaked in the first implementation.
-"""
+"""Invariants of the stage 2.5 gold set and its leakage-safe split."""
 
 from __future__ import annotations
 
@@ -55,7 +49,7 @@ def test_both_views_have_enough_decided_pairs_to_measure() -> None:
 
 @pytest.mark.unit
 def test_the_split_never_shares_a_leakage_component() -> None:
-    """The core guarantee. This failed in the first implementation."""
+    """The core guarantee."""
     result = splits.split()
     assert result.clean, result.report()
     assert result.report()["shared_components"] == 0
@@ -106,12 +100,7 @@ def test_near_duplicate_strings_are_grouped_together() -> None:
 
 @pytest.mark.unit
 def test_unrelated_strings_are_not_lexically_merged() -> None:
-    """The lexical guard must not fire on short strings sharing function words.
-
-    Components are allowed to over-group - that is the safe direction, and the
-    gold set chains families together on purpose. The lexical similarity itself
-    is the thing that must stay low, so that is what is asserted here.
-    """
+    """The lexical guard must not fire on short strings sharing function words."""
     unrelated = [
         ("open the door", "close the drawer"),
         ("fold the cloth", "pour the water"),
@@ -124,12 +113,7 @@ def test_unrelated_strings_are_not_lexically_merged() -> None:
 
 @pytest.mark.unit
 def test_the_split_is_not_degenerate() -> None:
-    """Both sides must carry decided pairs in both views, or a held-out score is
-    meaningless. Note that distinctness of *families* is deliberately not
-    asserted: the gold set links adjacent families on purpose ("wipe the table"
-    with "screw in the bolt", via pairs meant to be different tasks), so
-    over-grouping across families is the expected, safe direction.
-    """
+    """Both sides must carry decided pairs in both views, or a held-out score is meaningless."""
     result = splits.split()
     for side, pairs in (("dev", result.dev), ("heldout", result.heldout)):
         for view, label in (("action", "same_action"), ("object", "same_object")):

@@ -1,23 +1,8 @@
 #!/usr/bin/env python3
 """Run every foreign-corpus fixture through the real ingest path and record the outcome.
 
-The question this answers is not "does the reader work" - the repo's own tests answer
-that for MCAP-JSON and LeRobot. It is **what an operator gets when the data they
-actually have meets the engine**, and the answer has three shapes:
-
-1. *Accepted with a correct description* - the reader claims it and the numbers are right.
-2. *Refused with an honest error* - also acceptable, and the design goal for an
-   unsupported format. The error must name the format and what was tried.
-3. **Silently accepted, or wrong** - the failure mode that matters. A reader that
-   claims a file it half-understands puts wrong numbers in the catalog, and every
-   downstream consumer inherits them.
-
-Everything runs through the unmodified worker path (`ingest_source` job -> real
-`EpisodeIngestService` -> real catalog rows in a throwaway database), so this measures
-the product rather than the reader in isolation.
-
-    uv run python scripts/foreign_data_probe.py var/foreign-corpus
-    uv run python scripts/foreign_data_probe.py var/foreign-corpus --in-process
+uv run python scripts/foreign_data_probe.py var/foreign-corpus
+uv run python scripts/foreign_data_probe.py var/foreign-corpus --in-process
 """
 
 from __future__ import annotations
@@ -36,9 +21,6 @@ sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT))
 
 ADMIN_DSN = "postgresql://data_engine@127.0.0.1:55432/postgres"
-
-
-# ------------------------------------------------------------------ database setup
 
 
 def _psycopg() -> Any:
@@ -76,17 +58,8 @@ def initialize(dsn: str) -> None:
     initialize_schema(Settings(_env_file=None, database_url=dsn))
 
 
-# ----------------------------------------------------------------------- the probe
-
-
 def probe_reader(path: Path) -> dict[str, Any]:
-    """What the reader registry alone does with this path.
-
-    The reader layer is measured separately from the job layer because the two fail
-    differently: the registry raises a `ReaderError` naming the formats it tried,
-    whereas a job that fails inside the worker becomes a `failed` row with a reason
-    code an operator has to go and read.
-    """
+    """What the reader registry alone does with this path."""
     from data_engine.ingest.readers.registry import READERS, read_episode, reader_for
 
     reader = reader_for(path)

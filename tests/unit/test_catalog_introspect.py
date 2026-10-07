@@ -1,14 +1,4 @@
-"""Live catalog introspection (ADR 0024).
-
-The page built on this claims it cannot drift from the database, because it asks
-the database. These tests cover the half of that claim which is ours: turning
-`pg_catalog` rows into the model the page renders. The SQL itself is PostgreSQL's
-job, and the end-to-end run checks the rest.
-
-The failure cases carry more weight than the happy path here. A schema page that
-500s when the catalog is down is worse than no schema page, and a page that
-draws a table it could not count is quietly lying about what is in here.
-"""
+"""Live catalog introspection (ADR 0024)."""
 
 from __future__ import annotations
 
@@ -93,13 +83,7 @@ def test_the_model_groups_columns_under_their_table() -> None:
 
 
 def test_a_referenced_table_is_listed_under_referenced_by() -> None:
-    """`builds` is referenced *by* `jobs`, not the reverse.
-
-    The first version attached the list to the foreign key's own table, which
-    reads as "episodes is referenced by episode_quality" when the constraint says
-    the opposite - and the only reason this column exists is to tell an operator
-    which side of a relationship owns the link.
-    """
+    """`builds` is referenced *by* `jobs`, not the reverse."""
     with _scripted(
         [
             [_column("id", 1, table="builds")],

@@ -167,7 +167,7 @@ def test_candidate_acceptance_uses_one_atomic_store_operation(client: TestClient
     )
     assert response.status_code == 303
     assert response.headers["location"] == "/ui/vocabulary"
-    assert client.app.state  # the HTTP interface was exercised, not just the store mock
+    assert client.app.state
 
 
 def test_mapping_and_undo_are_exposed_without_changing_the_episode_task(client: TestClient) -> None:

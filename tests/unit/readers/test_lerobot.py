@@ -1,15 +1,4 @@
-"""LeRobot reader tests.
-
-Two layers, deliberately:
-
-* **Offline** — hand-built directories that reproduce each on-disk layout, so the
-  structural rules (version detection, v3 row-range slicing, stats preference) are
-  tested with no network and with values small enough to assert exactly.
-* **Real** — the actual Hub datasets named in `agents/research/technology-matrix.md`.
-  These are the tests that would catch a reader that is confidently wrong about the
-  format, which is the failure this module exists to prevent. Marked `network`; they
-  skip cleanly when offline.
-"""
+"""LeRobot reader tests."""
 
 from __future__ import annotations
 
@@ -27,9 +16,6 @@ from data_engine.ingest.readers.lerobot import LeRobotReader
 from data_engine.ingest.readers.registry import read_episode, reader_for
 
 pytestmark = [pytest.mark.unit]
-
-
-# --------------------------------------------------------------------- builders
 
 
 def _info(**overrides: Any) -> dict[str, Any]:
@@ -91,15 +77,9 @@ def _v2_dataset(root: Path, *, version: str = "v2.1") -> Path:
 
 
 def _v3_dataset(root: Path, *, two_files: bool = False) -> Path:
-    """A v3.0 dataset: episodes are row ranges, and they are packed into shared files.
-
-    Mirrors the real layout — the published `lerobot/svla_so101_pickplace` puts all 50
-    episodes in one `file-000.parquet` — so the second episode always starts mid-file.
-    """
+    """A v3.0 dataset: episodes are row ranges, and they are packed into shared files."""
     _write_json(root / "meta" / "info.json", _info(total_episodes=2))
     if two_files:
-        # Two data files, so the second episode's global row range has to be rebased
-        # against a file that does not start at global row 0.
         _write_parquet(root / "data" / "chunk-000" / "file-000.parquet", _frames(3))
         _write_parquet(root / "data" / "chunk-000" / "file-001.parquet", _frames(2, offset=3))
         records = [
@@ -138,9 +118,6 @@ def _v3_record(
     }
 
 
-# ------------------------------------------------------------------ v3 behaviour
-
-
 def test_sniff_only_requires_the_info_file(tmp_path: Path) -> None:
     reader = LeRobotReader()
     assert reader.sniff(tmp_path) is False
@@ -156,7 +133,6 @@ def test_v3_slices_the_global_row_range_to_the_right_episode(tmp_path: Path) -> 
     assert extraction.format_version == "v3.0"
     assert extraction.frame_count == 3
     assert extraction.task == "task 1"
-    # Global rows 3..6, so the timestamps run 3, 4, 5 rather than 0, 1, 2.
     assert extraction.duration_seconds == pytest.approx(2.0)
 
 
@@ -171,8 +147,6 @@ def test_v3_rebases_the_offset_when_episodes_span_files(tmp_path: Path) -> None:
     assert first.frame_count == 3
     assert second.frame_count == 2
     assert second.duration_seconds == pytest.approx(1.0)
-    # The second file's own rows are 3 and 4, not 0 and 1: a naive slice would start
-    # at global row 3 of a 2-row file and fail, or silently read the wrong episode.
     assert next(c for c in second.channels if c.name == "action").min == pytest.approx(3.0)
 
 
@@ -221,15 +195,9 @@ def test_quality_signals_are_computed_from_the_sliced_rows(tmp_path: Path) -> No
     assert quality is not None
     assert quality.frame_count == 3
     assert {dim.name for dim in quality.dims} == {"action[0]", "action[1]"}
-    # Rows 3..6: action[0] steps 1.0 and action[1] steps 2.0 per transition.
     assert quality.movement_score == pytest.approx(5**0.5)
     assert quality.stall_ratio == 0.0
-    # Three unique values per dim read as discrete, and discrete dims are not
-    # judged; the verdict buckets are unit-tested on longer series in test_quality.
     assert quality.verdict == "unknown"
-
-
-# ------------------------------------------------------------------ v2 behaviour
 
 
 def test_v2_reads_one_file_per_episode_and_jsonl_index(tmp_path: Path) -> None:
@@ -270,9 +238,6 @@ def test_column_without_numbers_reports_no_statistics(tmp_path: Path) -> None:
     assert channel.count == 0
     assert channel.mean is None
     assert channel.min is None
-
-
-# ----------------------------------------------------------------- failure modes
 
 
 def test_rejects_an_unknown_codebase_version(tmp_path: Path) -> None:
@@ -335,21 +300,8 @@ def test_registry_reports_the_formats_it_tried(tmp_path: Path) -> None:
     assert reader_for(_v3_dataset(tmp_path / "ds")) is not None
 
 
-# ------------------------------------------------------------------ real datasets
-
-"""
-The real-dataset assertions deliberately cross-check the reader against the
-dataset's *own published index* rather than against constants copied out of it.
-
-These datasets are live repositories. A hard-coded frame count is only correct
-until somebody re-uploads a shard, at which point the test fails for a reason
-that has nothing to do with the code - and, worse, a truncated download that
-still parses can produce a plausible wrong count that a constant would have
-caught by accident. Reading the expected values from the same index the reader
-reads makes the assertion both stronger (it proves the slicing agrees with the
-dataset's own record of where each episode starts and ends) and immune to the
-dataset changing underneath us.
-"""
+"""The real-dataset assertions deliberately cross-check the reader against the dataset's *own
+published index* rather than against constants copied out of it."""
 
 
 def _v3_index(root: Path) -> dict[int, dict[str, Any]]:
@@ -376,7 +328,6 @@ def test_real_v3_dataset_reads_the_published_so101_episode(
     assert extraction.fps == pytest.approx(float(_v3_info(root)["fps"]))
     assert extraction.dataset["has_video"] is True
 
-    # The slice is exactly the row range the dataset declares for this episode.
     record = _v3_index(root)[0]
     assert extraction.frame_count == record["length"]
     assert extraction.frame_count > 1
@@ -422,8 +373,6 @@ def test_real_v2_dataset_reads_with_a_different_embodiment(
 
     assert extraction.format == "lerobot-v2"
     assert extraction.format_version == "v2.1"
-    # The point of this fixture: a different robot, so the reader cannot be
-    # assuming the SO-101 schema it was built against.
     assert extraction.robot_type != "so100_follower"
 
     records = [

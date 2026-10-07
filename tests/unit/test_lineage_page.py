@@ -1,10 +1,4 @@
-"""The lineage graph (ADR 0007, drawn in ADR 0024).
-
-The graph is the point, so the tests are about the graph: that it has one node
-per member, that every node is a link, and - the case that actually matters -
-that a build whose manifest cannot be read back says so rather than drawing a
-complete-looking picture of nothing.
-"""
+"""The lineage graph (ADR 0007, drawn in ADR 0024)."""
 
 from __future__ import annotations
 
@@ -42,13 +36,10 @@ def _build(count: int = 3, *, manifest: bool = True) -> dict:
     }
 
 
-# ---------------------------------------------------------------------- graph
-
-
 @pytest.mark.unit
 def test_the_graph_draws_a_node_per_episode_plus_the_build_itself() -> None:
     svg = lineage_svg(_build(3))
-    assert svg.count("de-node-link") == 1 + 3 * 2  # build, then episode+artifact per member
+    assert svg.count("de-node-link") == 1 + 3 * 2
 
 
 @pytest.mark.unit
@@ -92,9 +83,6 @@ def test_a_build_with_no_manifest_renders_without_pretending_it_has_members() ->
     assert "0 episodes" in svg
 
 
-# -------------------------------------------------------------------- pages
-
-
 @pytest.mark.unit
 def test_the_detail_page_links_to_the_job_that_made_the_build() -> None:
     body = lineage_page(_build(2), "vt220")
@@ -133,9 +121,6 @@ def test_the_index_says_what_would_create_a_build_when_there_are_none() -> None:
 def test_the_index_links_each_build_to_its_page() -> None:
     body = _index_body({"items": [_build(2)]})
     assert f'href="/ui/builds/{"b" * 64}"' in body
-
-
-# ------------------------------------------------------------ redundancy (ADR 0032)
 
 
 def _report(**overrides: object) -> dict:
@@ -183,8 +168,8 @@ def test_the_redundancy_section_links_both_sides_of_a_duplicate_pair() -> None:
 
 @pytest.mark.unit
 def test_the_redundancy_section_states_the_measure_and_that_nothing_was_removed() -> None:
-    """A report that proposed collapses without saying it is read-only would read as a
-    decision already taken."""
+    """A report that proposed collapses without saying it is read-only would read as a decision
+    already taken."""
     body = lineage_page({**_build(2), "redundancy": _report()}, "vt220")
     assert "threshold 0.10" in body
     assert "read-only" in body
@@ -215,7 +200,7 @@ def test_a_build_with_one_episode_says_there_is_nothing_to_compare() -> None:
         "vt220",
     )
     assert "fewer than two scored episodes" in body
-    assert "de-table" in body  # the members table is still there
+    assert "de-table" in body
 
 
 @pytest.mark.unit
@@ -231,9 +216,6 @@ def test_a_fully_distinct_build_says_so_rather_than_showing_an_empty_table() -> 
     )
     assert "every scored episode is distinct" in body
     assert "Near-duplicate episodes in this build" not in body
-
-
-# --------------------------------------------------------------- coverage (ADR 0033)
 
 
 def _coverage(**overrides: object) -> dict:

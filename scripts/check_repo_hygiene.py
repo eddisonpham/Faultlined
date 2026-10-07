@@ -58,7 +58,7 @@ SKIP_DIRS = {
     ".next",
     "htmlcov",
 }
-SKIP_FILES = {".env", ".env.local"}  # gitignored local secrets are never scanned or read
+SKIP_FILES = {".env", ".env.local"}
 MAX_SCAN_BYTES = 2_000_000
 LINK_RE = re.compile(r"(?<!\!)\[[^\]]*\]\(([^)\s]+)\)")
 ADR_RE = re.compile(r"^(\d{4})-[a-z0-9][a-z0-9-]*\.md$")

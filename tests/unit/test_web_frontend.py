@@ -1,9 +1,4 @@
-"""Frontend contract tests for the instrument UI.
-
-These cover the properties that are invisible in a screenshot but decide whether
-the UI is usable: failure visibility, keyboard reachability, escaping, and the
-theme hook contract with the vendored stylesheets.
-"""
+"""Frontend contract tests for the instrument UI."""
 
 from __future__ import annotations
 
@@ -65,9 +60,6 @@ def _client() -> TestClient:
     return TestClient(create_app(initialize_database=False), raise_server_exceptions=False)
 
 
-# ---------------------------------------------------------------- shell
-
-
 @pytest.mark.unit
 def test_every_page_shares_one_accessible_shell() -> None:
     for html in _pages():
@@ -95,7 +87,6 @@ def test_nav_has_no_api_link() -> None:
     html = status_page({}, "vt220")
     assert '"/docs"' not in html
     assert ">API<" not in html
-    # The brand wordmark is a real link back to the landing page, not decoration.
     assert '<a class="de-brand" href="/ui">' in html
 
 
@@ -129,9 +120,6 @@ def test_page_title_is_escaped_in_both_title_tag_and_heading() -> None:
     assert "&lt;script&gt;" in html
 
 
-# ---------------------------------------------------------------- failure visibility
-
-
 @pytest.mark.unit
 def test_failure_banner_is_present_hidden_and_reachable_by_a_role() -> None:
     html = status_page({}, "vt220")
@@ -144,16 +132,10 @@ def test_failure_banner_is_present_hidden_and_reachable_by_a_role() -> None:
 
 @pytest.mark.unit
 def test_every_failure_path_is_announced_not_merely_drawn() -> None:
-    """The banner is a hazard stripe; a screen reader never sees it.
-
-    Each way the poll can fail must reach the aria-live region, and recovery
-    must be announced too - otherwise a user cannot tell "fixed" from
-    "never broke".
-    """
+    """The banner is a hazard stripe; a screen reader never sees it."""
     script = _no_comments(app_script())
     assert script.count("announce(") >= 5, "offline, transient, permanent, and recovery"
     assert "Live updates restored." in script
-    # announce() writes to the live region the shell ships.
     html = status_page({}, "vt220")
     assert 'aria-live="polite"' in html and "data-live" in html
 
@@ -170,17 +152,12 @@ def test_clock_is_marked_not_stale_on_load_and_updatable() -> None:
 
 @pytest.mark.unit
 def test_link_health_led_is_silent_until_it_is_news() -> None:
-    """A permanently-visible "live" badge reads as branding, not as a status.
-
-    The LED is for the states that need attention; when everything is fine it
-    should not be on screen at all.
-    """
+    """A permanently-visible "live" badge reads as branding, not as a status."""
     html = status_page({}, "vt220")
     assert "data-led" in html
     assert "data-led-text" in html
     assert 'data-state="ok"' in html
     assert "<span data-led-text></span>" in html, "no hardcoded word in the markup"
-    # Hidden at rest, and revealed by app.js when the state is not ok.
     script = _no_comments(app_script())
     assert 'if (state === "ok") led.setAttribute("hidden", "");' in script
     assert 'else led.removeAttribute("hidden");' in script
@@ -201,7 +178,6 @@ def test_poller_never_discards_the_last_good_render() -> None:
     """An empty panel is a stronger lie than an obviously stale one."""
     script = app_script()
     assert "last good render" in script
-    # The success path only assigns innerHTML when it actually got a body.
     assert 'if (html === null || html === "") return;' in script
 
 
@@ -219,9 +195,6 @@ def test_poller_does_not_poll_a_hidden_tab() -> None:
     assert "doc.hidden" in script
     assert "visibilitychange" in script
     assert "paused" in script, "a hidden tab should show a paused LED, not a live one"
-
-
-# ---------------------------------------------------------------- accessibility
 
 
 @pytest.mark.unit
@@ -268,9 +241,6 @@ def test_skip_link_is_the_first_focusable_thing_in_the_document() -> None:
     assert html.index("de-skip", body) < html.index('class="de-nav', body)
 
 
-# ---------------------------------------------------------------- escaping
-
-
 @pytest.mark.unit
 def test_untrusted_values_cannot_break_out_of_a_data_attribute() -> None:
     """data-copy carries a full id into an attribute; quotes there are the risk."""
@@ -298,9 +268,6 @@ def test_incident_evidence_cannot_inject_a_row() -> None:
     assert "&lt;script&gt;" in row
 
 
-# ---------------------------------------------------------------- empty + error states
-
-
 @pytest.mark.unit
 def test_empty_states_name_the_thing_and_the_way_out() -> None:
     empty = _empty("no jobs recorded", "submit one")
@@ -315,8 +282,6 @@ def test_error_page_renders_html_with_a_way_back() -> None:
     assert "abc-123" in html
     assert "<main" in html
     assert 'type="submit"' in html, "the operator needs a retry control, not a dead end"
-    # The runtime still loads: the clock and shortcuts are how you check whether
-    # the server has come back, which is exactly the question an error page raises.
     assert "/ui/app.js" in html
 
 
@@ -328,39 +293,18 @@ def test_error_page_keeps_the_requested_theme_and_falls_back_safely() -> None:
 
 @pytest.mark.unit
 def test_the_theme_probe_never_outlives_the_swap() -> None:
-    """The glow that came back, and the one line that fixes it.
-
-    Switching themes appends a probe <link> to the end of <head> to confirm the
-    new sheet parses before the real link is repointed at it. That position is
-    *after* `faultlined.css`, so a probe left behind wins the cascade and
-    switches the vendored phosphor `text-shadow` back on for every readout. It
-    was reported as a glow that only a theme change cleared, because a theme
-    change is a form submit and therefore a full document load - the one case
-    where no probe is created.
-
-    The override that kills the glow is an ordinary rule in our stylesheet, so
-    it only holds while exactly one theme sheet is loaded before it.
-    """
+    """The glow that came back, and the one line that fixes it."""
     script = app_script()
     probe_load = script.split("probe.onload = function () {")[1].split("};")[0]
     assert "probe.remove();" in probe_load, "the probe must go once it has been committed"
-    # Removed on the failure path too, so a missing theme file leaves nothing
-    # behind and the working theme keeps its place in the cascade.
     probe_error = script.split("probe.onerror = function () {")[1].split("};")[0]
     assert "probe.remove()" in probe_error
-    # And the probe must not masquerade as the real sheet: two elements with
-    # the marker would make the next lookup find the throwaway one.
     assert 'probe.setAttribute("data-de-theme"' not in script
 
 
 @pytest.mark.unit
 def test_the_no_halo_override_beats_a_theme_sheet_loaded_after_it() -> None:
-    """The override is only as good as its position in the cascade.
-
-    It matches the vendor's specificity and relies on being linked later. That
-    is a real constraint on the document, not a detail of the stylesheet, so it
-    is asserted on the served order: the theme sheet before ours, always.
-    """
+    """The override is only as good as its position in the cascade."""
     html = status_page({}, "vt220")
     order = [html.index(href) for href in (CORE_URL, "theme-vt220.css", "faultlined.css")]
     assert order == sorted(order), (
@@ -416,9 +360,6 @@ def test_the_client_runtime_is_served_with_a_script_content_type() -> None:
     assert response.headers["content-type"].startswith("text/javascript")
 
 
-# ---------------------------------------------------------------- theme hooks
-
-
 @pytest.mark.unit
 def test_markup_carries_the_hooks_the_vendored_themes_target() -> None:
     """Adopting the hooks is the whole reason the CRT themes render at all."""
@@ -436,20 +377,10 @@ def test_markup_carries_the_hooks_the_vendored_themes_target() -> None:
 
 @pytest.mark.unit
 def test_layout_stylesheet_kills_the_halo_but_not_the_neon() -> None:
-    """The one theme rule we override is the glow - and only the glow.
-
-    The vendored CRT themes put a phosphor `text-shadow` on the big readouts and
-    the headings. It reads as an AI-generated affectation on a dense instrument
-    page, so it is deliberately off (faultlined.css rule 2). This test used to
-    ban `text-shadow: none` outright; the decision changed, the test with it.
-
-    What must *not* happen in the same breath is neutralising the theme itself:
-    the colours are the point, so the override must stop at text-shadow and
-    leave every `color` alone.
-    """
+    """The one theme rule we override is the glow - and only the glow."""
     css = layout_css()
     assert css.count("text-shadow: none") >= 1, "the halo override is gone"
-    halo_block = css.split("no halos", 1)[1]
+    halo_block = css.split("[data-theme] .current-value", 1)[1]
     assert "text-shadow: none" in halo_block
     assert not re.search(r"text-shadow:\s*none[^}]*color:", halo_block), (
         "the halo override must not also set colour; the neon stays"
@@ -467,43 +398,23 @@ def test_layout_sheet_keeps_our_own_names_and_adopts_no_remote_assets() -> None:
 
 @pytest.mark.unit
 def test_motion_is_opt_in_everywhere() -> None:
-    """Every animation must be declared *inside* a no-preference guard.
-
-    Not cancelled by a reduce override. An earlier pass declared the entrance
-    animation unconditionally and switched it off in a reduced-motion block,
-    which reads as correct and silently is not: the block never applies, so the
-    animation runs anyway. Opting in is the only form that cannot be forgotten.
-    """
+    """Every animation must be declared *inside* a no-preference guard."""
     css = layout_css()
     guards = css.count("prefers-reduced-motion: no-preference")
     assert guards >= 2
-    # Any selector block that declares `animation:` must sit inside a guard, so
-    # find declarations and confirm each is preceded by one.
     for match in re.finditer(r"animation:", css):
         before = css[: match.start()]
         if "@keyframes" in before[before.rfind("}") :] and before.count("{") == before.count("}"):
-            continue  # inside a keyframes block, which is fine
+            continue
         assert before.rfind("@media (prefers-reduced-motion: no-preference)") > (
             before.rfind("}") - 4000
         ), "an animation declared outside a no-preference guard will misfire"
-    # The entrance must additionally be one-shot; see the poll-replay test.
     assert "html:not([data-booted])" in css
 
 
 @pytest.mark.unit
 def test_nothing_is_drawn_over_the_page_while_it_navigates() -> None:
-    """The indicator is gone, and this is why.
-
-    Three shapes were tried: an in-flow panel that pushed the page down, a
-    centred box that covered it, and a 2px rule at the top. The document is
-    server-rendered, so the content is already on screen before any script runs,
-    and every one of them was decoration drawn over a page that was already
-    correct. The last was reported as a glow that appeared on navigation and
-    vanished on refresh - exactly what a class-driven effect does.
-
-    Nothing replaces it: the browser's own load state is the progress indicator,
-    and it is tied to the real document load rather than to a timer.
-    """
+    """The indicator is gone, and this is why."""
     html = status_page({}, "vt220")
     css = layout_css()
     script = _no_comments(app_script())
@@ -511,7 +422,6 @@ def test_nothing_is_drawn_over_the_page_while_it_navigates() -> None:
         assert name not in html, f"{name} is drawn over the page"
         assert name not in css, f"{name} still has styles"
         assert name not in script, f"{name} still has behaviour"
-    # The integrator went with it: springs exist only to move that rule.
     assert "function Spring(" not in script
     assert "requestAnimationFrame" not in script.split("initShortcuts")[0], (
         "nothing left to animate per frame except the transition itself"
@@ -520,67 +430,38 @@ def test_nothing_is_drawn_over_the_page_while_it_navigates() -> None:
 
 @pytest.mark.unit
 def test_a_poll_cannot_replay_the_entrance_animation() -> None:
-    """The reported flicker, at its actual cause.
-
-    The poll replaces the live region's innerHTML, which creates *new* elements,
-    and a new element restarts its CSS animation from 0%. With an unconditional
-    entrance animation the Status page re-ran it every poll: measured, panel
-    opacity sat at 0 for ~1.4 s of each 3 s window and the page appeared to
-    strobe. Gating the animation on a one-shot attribute on <html> makes replay
-    structurally impossible, because the animation is only ever *selectable*
-    before the first frame has been painted.
-    """
+    """The reported flicker, at its actual cause."""
     css = layout_css()
     assert "html:not([data-booted])" in css, "the entrance must be gated on first paint"
     assert re.search(r"html:not\(\[data-booted\]\)[^{]*\{\s*animation:", css), (
         "the entrance animation must be the thing that is gated"
     )
     assert 'setAttribute("data-booted", "")' in _no_comments(app_script())
-    # The refresh cue must not be an opacity animation, because a dip in opacity
-    # on live data is indistinguishable from a fault.
     refresh = css.split("@keyframes de-refresh")[1].split("}")[0]
     assert "opacity" not in refresh, "an opacity pulse on live data reads as a flicker"
 
 
 @pytest.mark.unit
 def test_the_poll_only_writes_the_dom_when_the_payload_really_changed() -> None:
-    """The other half of the flicker, and the subtler one.
-
-    The guard compared the response against `root.innerHTML`. That looks like a
-    correct comparison and is not: the browser re-serialises the DOM, so the two
-    strings differ in entity escaping and self-closing tags regardless of what
-    the server sent. The guard was therefore always true, every poll rewrote the
-    region, and the page pulsed once a second - the exact period reported.
-    Comparing against the last payload applied is both correct and cheaper, since
-    it avoids re-serialising the whole region on every poll.
-    """
+    """The other half of the flicker, and the subtler one."""
     script = _no_comments(app_script())
     assert "html !== root.innerHTML" not in script, (
         "innerHTML re-serialisation makes this comparison always false-negative"
     )
     assert "html !== shown" in script
     assert "var shown = root.innerHTML" in script, "seed from what the server rendered"
-    # shown advances only when the DOM is written, or the guard goes stale.
     assert script.count("root.innerHTML = html") == 1
     assert "shown = html" in script
 
 
 @pytest.mark.unit
 def test_the_deadline_countdown_keeps_exactly_one_timer() -> None:
-    """A poll write re-runs initDeadlines, so it must not stack intervals.
-
-    Only visible after an hour of uptime - the kind of defect that gets shipped
-    because nothing fails in the first ten minutes. Each stranded interval also
-    holds a closure over nodes that are no longer in the document, so it is both
-    a leak and wasted work.
-    """
+    """A poll write re-runs initDeadlines, so it must not stack intervals."""
     script = _no_comments(app_script())
     assert "var deadlineTimer = null;" in script
     fn = script.split("function initDeadlines(")[1].split("\n  }")[0]
     assert "if (deadlineTimer) window.clearInterval(deadlineTimer);" in fn
     assert fn.count("window.setInterval(") == 1, "one countdown timer, not one per poll"
-    # The clock runs once at boot from a node outside the polled region, so it
-    # is not a leak and must not be folded into the same timer.
     assert (
         script.split("function initClock(")[1].split("\n  }")[0].count("window.setInterval(") == 1
     )
@@ -588,17 +469,7 @@ def test_the_deadline_countdown_keeps_exactly_one_timer() -> None:
 
 @pytest.mark.unit
 def test_sticky_table_headers_are_not_offset_by_the_nav() -> None:
-    """The reported overlap, at its actual cause.
-
-    `overflow-x: auto` forces `overflow-y` to compute to `auto`, which quietly
-    made the table plate a scrollport. The header was then sticky against *it*,
-    so its `top` was measured from the top of the table rather than the top of
-    the page: measured on the incidents page, `th.top` was 483 while its own
-    `tr.top` was 438 - the header sat 45px into its own row, over the data it
-    labels. The fix removes the nav coupling entirely rather than re-measuring a
-    number that was wrong for a second reason too: it varied with theme metrics
-    and viewport, and had already been wrong twice.
-    """
+    """The reported overlap, at its actual cause."""
     css = layout_css()
     assert "de-nav-h" not in css, "the header must not depend on the nav's height"
     assert "de-nav-h" not in app_script()
@@ -606,22 +477,15 @@ def test_sticky_table_headers_are_not_offset_by_the_nav() -> None:
     wrap = css.split(".de-table-wrap {")[1].split("}")[0]
     assert "overflow: auto" in wrap, "the plate must be its own scrollport"
     assert "max-height" in wrap, "a scrollport with no bound is a page-height box"
-    # `.de-table th` appears twice: once for the display face, once for layout.
-    # The layout one is the last, and the one that must carry the sticky offset.
     th = css.split(".de-table th {")[-1].split("}")[0]
     assert "position: sticky" in th
     assert re.search(r"\btop: 0\b", th), "the header pins to the top of its own plate"
-    # A header and the cell beneath it must share one line-box height, or the
-    # labels sit off the baseline of the values they name. It has to be a length,
-    # not a ratio: a ratio scales with each cell's own font-size, which is exactly
-    # the skew this replaces.
     assert re.search(r"--de-row-line: [\d.]+rem", css), (
         "a unitless ratio scales with each cell's font-size and re-introduces the skew"
     )
     for selector in (".de-table th {", ".de-table td {"):
         rule = css.split(selector)[-1].split("}")[0]
         assert "line-height: var(--de-row-line)" in rule, f"{selector} must share the metric"
-    # And one padding source, so the two cannot drift apart again.
     assert css.count("padding: var(--de-cell-pad);") >= 2
 
 
@@ -630,47 +494,26 @@ def test_page_transition_is_a_fade_and_never_leaves_the_page_hidden() -> None:
     script = _no_comments(app_script())
     assert "de-leaving" in script
     assert "if (reduce.matches) return;" in script
-    # A cancelled or same-document navigation must un-hide, or the page goes blank.
     assert "pageshow" in script
     assert script.count('classList.remove("de-leaving")') >= 2
-    # Only same-origin document navigations: an API link or a download must not fade.
     assert "url.origin !== window.location.origin" in script
     assert 'link.hasAttribute("download")' in script
 
 
 @pytest.mark.unit
 def test_the_ui_never_names_its_own_endpoints() -> None:
-    """The browser surface is an operator console, not an API browser.
-
-    Every panel used to name the transport it was built on: a heading reading
-    "API latency by route", route templates like `/api/v1/metrics` rendered
-    verbatim into table cells, and empty states whose only instruction was
-    "submit one with POST /api/v1/jobs". A person deciding whether this system
-    is healthy cannot act on any of that, and it publishes the shape of the
-    surface to anyone who loads the page.
-    """
+    """The browser surface is an operator console, not an API browser."""
     for make in ALL_PAGES:
         html = make()
         body = html.split("<main", 1)[-1]
-        # The <link> to the stylesheet and the asset URLs are not prose; the
-        # assertion is about what the operator is asked to read.
         assert "/api/v1" not in body, "an endpoint path is visible in the page body"
-        # The word check is about *our* prose: headings, captions, empty states,
-        # hints. A <code> span is a machine identifier quoted verbatim - a
-        # benchmark workload really is called `api-metrics-endpoint`, and
-        # renaming it to satisfy a style rule would be lying about what was
-        # measured. So code spans are excluded from the word check only; the
-        # route-path check above still sees them, so no code span may name a
-        # route.
         prose = re.sub(r"<code>.*?</code>", "", body, flags=re.DOTALL)
         for word in ("POST /api", "GET /api", "endpoint", "API latency"):
             assert word not in prose, f"{word!r} appears in operator-facing copy"
 
-    # Latency is reported per operation, in words.
     assert _operation("/api/v1/episodes") == "episode listing"
     assert _operation("/api/v1/monitoring/tick") == "monitoring window"
     assert _operation("/api/v1/jobs/{job_id}/report") == "job listing"
-    # An unmapped route must degrade, not fall through to the raw template.
     unmapped = _operation("/api/v1/some_new_thing")
     assert "/" not in unmapped and "{" not in unmapped
     assert _operation("-") == "unknown" and _operation("") == "unknown"
@@ -678,11 +521,7 @@ def test_the_ui_never_names_its_own_endpoints() -> None:
 
 @pytest.mark.unit
 def test_an_empty_state_never_tells_the_operator_to_use_a_transport() -> None:
-    """ "submit one with POST /api/v1/jobs" is not a way out of an empty page.
-
-    It is the only instruction the empty state gave, and it assumed a reader who
-    already knows the API. Each hint now names the thing to do instead.
-    """
+    """ "submit one with POST /api/v1/jobs" is not a way out of an empty page."""
     html = jobs_page({"items": []}, None, "vt220")
     assert "no jobs recorded" in html
     assert "/api/v1" not in html
@@ -693,56 +532,32 @@ def test_an_empty_state_never_tells_the_operator_to_use_a_transport() -> None:
 
 @pytest.mark.unit
 def test_the_transition_actually_recedes_the_page() -> None:
-    """The class must change something, not merely declare a transition on it.
-
-    It previously carried `transition: opacity ...` and no rule ever set an
-    opacity, so the whole transition was a no-op: the page snapped and only the
-    indicator moved. A transition property with nothing to transition is
-    invisible in review and in a screenshot, which is exactly why it survived.
-    """
+    """The class must change something, not merely declare a transition on it."""
     css = layout_css()
     block = css.split("body.de-leaving {")[1].split("}")[0]
     assert re.search(r"\bopacity:\s*0\.", block), "the outgoing page must dim"
-    # Every animated property must be listed, or it snaps instead of easing.
     for prop in ("opacity", "transform"):
         assert prop in block, f"{prop} is animated but not transitioned"
 
 
 @pytest.mark.unit
 def test_the_page_is_never_blurred_while_it_is_leaving() -> None:
-    """Rule 2 (no halos) applies to motion, not only to text.
-
-    The outgoing page was dimmed to 25% *and* blurred by 3px. On a neon
-    terminal a blurred copy of the whole page is a full-screen glow: it was
-    reported as a phosphor halo that had come back, and it only appeared on
-    navigation, because a refresh adds no class. Nothing else may reintroduce
-    it either, so no blur is allowed anywhere on the page.
-    """
+    """Rule 2 (no halos) applies to motion, not only to text."""
     css = _no_comments(layout_css())
     block = css.split("body.de-leaving {")[1].split("}")[0]
     assert "filter" not in block, "a full-page blur is a glow, not a transition"
     for selector in ("body {", "body.de-leaving {"):
         rule = css.split(selector)[1].split("}")[0]
         assert "filter" not in rule, f"{selector} must not filter the page"
-    # The nav blurred the rows scrolling under it, which is the same decoration
-    # one element lower. It is opaque instead - the fix the sticky table header
-    # already used for the identical problem.
     nav = css.split(".de-nav {")[1].split("}")[0]
     assert "backdrop-filter" not in nav, "the nav must not blur the content under it"
     assert "transparent)" not in nav, "an opaque strip cannot fade to transparent"
-    # Nothing anywhere may blur. Comments are stripped first, because the sheet
-    # documents both removals and a docstring is not a declaration.
     assert "filter:" not in css, "a blur anywhere in the sheet is a glow on screen"
 
 
 @pytest.mark.unit
 def test_the_only_navigation_motion_is_the_fade() -> None:
-    """One transition, no companion effect.
-
-    The fade is the honest signal that the document is being replaced. Anything
-    else during a navigation is a second thing moving for no informational
-    reason, and it is what the operator saw as a glow.
-    """
+    """One transition, no companion effect."""
     css = layout_css()
     block = css.split("body.de-leaving {")[1].split("}")[0]
     assert re.search(r"\bopacity:\s*0\.", block)
@@ -756,30 +571,21 @@ def test_the_only_navigation_motion_is_the_fade() -> None:
 def test_motion_tokens_are_the_published_material_3_values() -> None:
     """Read from material-web v0.192, not written from memory."""
     css = layout_css()
-    assert "cubic-bezier(0.2, 0, 0, 1)" in css  # emphasized
-    assert "cubic-bezier(0.05, 0.7, 0.1, 1)" in css  # emphasized-decelerate
-    assert "cubic-bezier(0.3, 0, 0.8, 0.15)" in css  # emphasized-accelerate
-    assert "cubic-bezier(0.3, 0, 1, 1)" in css  # standard-accelerate
-    assert "500ms" in css and "200ms" in css  # duration tokens
+    assert "cubic-bezier(0.2, 0, 0, 1)" in css
+    assert "cubic-bezier(0.05, 0.7, 0.1, 1)" in css
+    assert "cubic-bezier(0.3, 0, 0.8, 0.15)" in css
+    assert "cubic-bezier(0.3, 0, 1, 1)" in css
+    assert "500ms" in css and "200ms" in css
 
 
 @pytest.mark.unit
 def test_status_colours_are_desaturated_and_theme_scoped() -> None:
-    """One ramp per theme, none of them the accent, none fully saturated.
-
-    The bug: `--fine-use-success` is #00ff00 and core.css applied it at full
-    weight, so a single "ok" in a row of grey numbers read as a highlighted
-    button. The ramp is derived from Okabe-Ito and pulled toward each theme.
-    """
+    """One ramp per theme, none of them the accent, none fully saturated."""
     css = layout_css()
     for theme in ("vt220", "amber", "github-dark", "monochrome"):
         block = css.split(f'[data-theme="{theme}"]')[1].split("}")[0]
         for name in ("--de-ok", "--de-warn", "--de-err", "--de-info", "--de-muted"):
             assert name in block, f"{theme} is missing {name}"
-    # No pure-saturated channel survives in the chromatic themes: every value has
-    # at least one channel pulled well below 255. Monochrome is exempt by design -
-    # its whole premise is that *weight* carries the alarm, not hue, so --de-err
-    # being #ffffff there is the correct answer, not a failure.
     values = re.findall(r'\[data-theme="([^"]+)"\]\s*\{([^}]*)\}', css)
     checked = 0
     for theme, block in values:
@@ -788,18 +594,11 @@ def test_status_colours_are_desaturated_and_theme_scoped() -> None:
         for hex in re.findall(r"--de-(?:ok|warn|err|info|muted):\s*(#[0-9a-f]{6})", block):
             r, g, b = (int(hex[i : i + 2], 16) for i in (1, 3, 5))
             assert max(r, g, b) < 250, f"{theme} {hex} is effectively pure/saturated"
-            # Saturation proxy: a full-strength channel with a near-zero neighbour
-            # is exactly the "neon primary" the sore-thumb complaint was about.
             assert max(r, g, b) - min(r, g, b) < 200, f"{theme} {hex} reads as a neon primary"
             checked += 1
     assert checked >= 15, f"only {checked} chromatic values checked"
-    # The classes bind to the ramp, not to the vendored saturated tokens.
     assert ".text-success { color: var(--de-ok); }" in css
-    # And the ramp must not be the same value as the vendored token it replaces.
     assert "--de-ok: var(--fine-use-success" not in css
-
-
-# ---------------------------------------------------------------- runtime
 
 
 @pytest.mark.unit
@@ -812,10 +611,8 @@ def test_client_runtime_is_self_contained_and_deferred() -> None:
 
 @pytest.mark.unit
 def test_client_runtime_does_not_own_rendering() -> None:
-    """One renderer. If app.js built rows, the server and the client would drift."""
+    """One renderer."""
     script = _no_comments(app_script())
-    # One *write*, not one mention: reading innerHTML to seed the change guard is
-    # not rendering. Any second assignment would be a second source of truth.
     assert script.count("innerHTML =") == 1, "the only DOM write is the poll swap"
     assert script.count("insertAdjacentHTML") == 0
     assert script.count("outerHTML") == 0

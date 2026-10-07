@@ -1,10 +1,4 @@
-"""The bounded statement timeout must actually cancel a runaway query.
-
-A unit test can only prove the ``options`` string reaches libpq. The guarantee
-that matters is behavioural: a query that would otherwise pin a connection
-until the API exhausts its worker threads is abandoned, and the connection stays
-usable afterwards rather than being poisoned by the abort.
-"""
+"""The bounded statement timeout must actually cancel a runaway query."""
 
 from __future__ import annotations
 
@@ -34,14 +28,7 @@ def test_a_runaway_query_is_cancelled_rather_than_held(settings: Settings) -> No
 
 @pytest.mark.integration
 def test_the_next_connection_is_unaffected(settings: Settings) -> None:
-    """A cancelled statement must not leave lasting damage behind.
-
-    psycopg aborts the surrounding transaction when a statement times out, so the
-    connection that raised is unusable afterwards. That is contained by design:
-    ``connect`` yields a short-lived connection that is closed on exit, and no
-    caller continues issuing statements after catching an error. What must hold
-    is that the failure does not escape the context manager or poison later work.
-    """
+    """A cancelled statement must not leave lasting damage behind."""
     with pytest.raises(psycopg.errors.QueryCanceled), connect(settings) as connection:
         connection.execute("SELECT pg_sleep(30)").fetchone()
 

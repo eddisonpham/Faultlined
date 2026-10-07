@@ -1,11 +1,4 @@
-"""Tests for the live clustering session behind `just cluster watch`.
-
-The point of the live view is one property that no offline metric shows: a
-cluster a person confirms stops moving while its neighbours keep reshaping. These
-tests assert that property directly, and pin the rest of the session contract -
-what an arrival reports, what the page is told, and what happens before the first
-string arrives - so the demo cannot drift into lying about the state it shows.
-"""
+"""Tests for the live clustering session behind `just cluster watch`."""
 
 from __future__ import annotations
 
@@ -16,18 +9,11 @@ import numpy as np
 import pytest
 from experiments.clustering import watch
 
-#: Wide enough that the test vocabulary never collides on an axis.
 DIM = 256
 
 
 class _WordAxes:
-    """A deterministic stand-in for a sentence encoder.
-
-    Every distinct word gets its own axis with weight 1, so cosine similarity
-    between two sentences is the fraction of words they share. Nothing about a
-    model's training run can change the outcome here: what is under test is the
-    method, not the encoder.
-    """
+    """A deterministic stand-in for a sentence encoder."""
 
     name = "word_axes"
     dim = DIM
@@ -58,9 +44,6 @@ def _session(**options: object) -> watch.Session:
     return watch.Session(**defaults)  # type: ignore[arg-type]
 
 
-# ------------------------------------------------------------------ ingestion
-
-
 def test_the_first_arrival_starts_a_cluster() -> None:
     session = _session()
     event = session.feed("pick up the red cube")
@@ -88,11 +71,7 @@ def test_a_near_duplicate_joins_the_cluster_it_resembles() -> None:
 
 
 def test_masking_verbs_collapses_two_verbs_onto_one_input() -> None:
-    """The EXP-2.5-07 effect, on the configuration the demo actually runs.
-
-    Without masking these two share two words out of three and sit outside the
-    radius, so they split. With masking they are the same string and must not.
-    """
+    """The EXP-2.5-07 effect, on the configuration the demo actually runs."""
     kept = _session()
     kept.feed("lift the bowl")
     kept.feed("place the bowl")
@@ -119,9 +98,6 @@ def test_feed_all_accepts_a_generator() -> None:
     assert len(session.texts) == 2
 
 
-# ------------------------------------------------------------------- freezing
-
-
 def test_confirming_a_cluster_freezes_it() -> None:
     session = _session()
     session.feed("pick up the cube")
@@ -131,12 +107,7 @@ def test_confirming_a_cluster_freezes_it() -> None:
 
 
 def test_a_frozen_centroid_does_not_move_when_more_members_arrive() -> None:
-    """The demonstration this whole demo exists to make.
-
-    Two later arrivals both belong to the same cluster and would normally drag its
-    centroid. Confirmed, they join it and the centroid stays exactly where the
-    person put it.
-    """
+    """The demonstration this whole demo exists to make."""
     session = _session()
     session.feed("pick up the cube")
     session.confirm(0)
@@ -168,8 +139,8 @@ def test_an_unfrozen_neighbour_keeps_moving_while_a_frozen_one_does_not() -> Non
 
     held = session.model.clusters[0].centroid.copy()
     free_before = session.model.clusters[1].centroid.copy()
-    session.feed("pick up the big cube")  # frozen cluster 0
-    session.feed("wipe the long counter")  # cluster 1, still free
+    session.feed("pick up the big cube")
+    session.feed("wipe the long counter")
 
     np.testing.assert_array_equal(session.model.clusters[0].centroid, held)
     assert not np.array_equal(session.model.clusters[1].centroid, free_before)
@@ -184,11 +155,7 @@ def test_confirming_an_index_that_is_not_a_cluster_is_refused() -> None:
 
 
 def test_freezing_does_not_widen_the_radius() -> None:
-    """A confirmed cluster still refuses points far outside it; those spawn.
-
-    Worth pinning because the alternative reading - "confirmed means absorbing" -
-    is the one that silently corrupts a curated label with the wrong members.
-    """
+    """A confirmed cluster still refuses points far outside it; those spawn."""
     session = _session()
     session.feed("pick up the cube")
     session.confirm(0)
@@ -196,9 +163,6 @@ def test_freezing_does_not_widen_the_radius() -> None:
     assert event["outcome"] == "new cluster"
     assert event["cluster"] == 1
     assert session.model.clusters[0].count == 1
-
-
-# ------------------------------------------------------------------ the state
 
 
 def test_the_snapshot_reports_arrivals_clusters_and_freezes() -> None:
@@ -243,9 +207,6 @@ def test_the_log_arrives_newest_first() -> None:
     session = _session()
     session.feed_all(["alpha one", "beta two"])
     assert [entry["text"] for entry in session.snapshot()["log"]] == ["beta two", "alpha one"]
-
-
-# ------------------------------------------------------------------- figures
 
 
 def test_figures_render_before_the_first_arrival() -> None:

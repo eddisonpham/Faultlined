@@ -1,9 +1,4 @@
-"""Tests for the dev port/PID scripts (`check_port`, `stop_server`).
-
-The parsers are tested against synthetic tool output; `listening_pid` and
-`process_image` are tested against a real bound socket, which is the whole
-point of the scripts - agreeing with what actually holds the port.
-"""
+"""Tests for the dev port/PID scripts (`check_port`, `stop_server`)."""
 
 from __future__ import annotations
 
@@ -46,11 +41,7 @@ class TestPortFromEnv:
         assert portpid.port_from_env() == 8000
 
     def test_agrees_with_the_port_the_server_binds(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """F19: the check must read the same variable the application binds.
-
-        It used to read `DE_PORT`, which the settings never read, so the advice
-        it printed was a port the server would not use.
-        """
+        """F19: the check must read the same variable the application binds."""
         monkeypatch.setenv("DE_API_PORT", "9124")
         assert portpid.port_from_env() == Settings().api_port
 
@@ -82,7 +73,6 @@ class TestParseNetstat:
         assert portpid._parse_netstat("garbage", 8000) is None
 
     def test_suffix_ports_do_not_collide(self) -> None:
-        # Port 080 would rsplit to "080" != "80"; likewise 80000 vs 8000.
         text = "  TCP    127.0.0.1:80000        0.0.0.0:0              LISTENING       5\n"
         assert portpid._parse_netstat(text, 8000) is None
 
@@ -114,7 +104,6 @@ class TestListeningPid:
         sock.bind(("127.0.0.1", 0))
         free = sock.getsockname()[1]
         sock.close()
-        # Closed: nobody is listening on it.
         assert portpid.listening_pid(free) is None
 
 
@@ -136,7 +125,7 @@ class TestLooksLikeOurs:
             ("python3.14.exe", True),
             ("de.exe", True),
             ("uvicorn.exe", True),
-            ("my-python-notebook.exe", True),  # substring match, deliberately loose
+            ("my-python-notebook.exe", True),
             ("chrome.exe", False),
             ("nginx.exe", False),
         ],

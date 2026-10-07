@@ -1,10 +1,4 @@
-"""Unit tests for the LeRobot v3 build exporter (ADR 0025).
-
-The acceptance consumer is our own `LeRobotReader`: several tests read the
-exported tree back through it, because an export our own reader rejects is a
-defective export by definition. No database is needed - the exporter takes
-plain dicts and a real `FileArtifactStore` over `tmp_path`.
-"""
+"""Unit tests for the LeRobot v3 build exporter (ADR 0025)."""
 
 from __future__ import annotations
 
@@ -96,7 +90,7 @@ def test_export_writes_a_lerobot_v3_tree(tmp_path: Path) -> None:
     root = tmp_path / "exports" / "bld_one"
     assert result["path"] == str(root)
     assert result["episode_count"] == 2
-    assert result["frame_count"] == 7  # 3 + 4
+    assert result["frame_count"] == 7
     info = json.loads((root / "meta" / "info.json").read_text(encoding="utf-8"))
     assert info["codebase_version"] == "v3.0"
     assert info["total_episodes"] == 2
@@ -132,7 +126,6 @@ def test_our_own_reader_reads_the_export_back(tmp_path: Path) -> None:
     assert first.task == "pick"
     assert first.robot_type == "so101"
     assert second.frame_count == 5
-    # The worst failure mode available here is frames from the wrong episode.
     assert second.task == "place"
     assert first.source_path.name == "file-000.parquet"
     assert second.source_path.name == "file-001.parquet"
@@ -151,7 +144,7 @@ def test_export_is_idempotent_at_the_content_address(tmp_path: Path) -> None:
 
     assert second["path"] == first["path"]
     after = sorted((str(p.relative_to(tree)), p.stat().st_mtime_ns) for p in tree.rglob("*"))
-    assert after == before  # the existing tree was not rewritten
+    assert after == before
     assert list((tmp_path / "exports").glob(".pending-*")) == []
 
 
@@ -174,7 +167,6 @@ def test_manifest_order_resolves_members_not_list_order(tmp_path: Path) -> None:
     exporter, artifacts = _exporter(tmp_path)
     h_a = artifacts.put_bytes(_synthetic_blob(frames=3, task="pick"))
     h_b = artifacts.put_bytes(_synthetic_blob(frames=2, task="place"))
-    # The manifest's order is the identity: b first.
     build = _build("bld_ord", [_manifest_entry("ep-b", h_b), _manifest_entry("ep-a", h_a)])
     exporter.export(
         build,
@@ -227,7 +219,7 @@ def test_a_shared_lerobot_source_file_is_sliced_by_episode_index(tmp_path: Path)
             _member("ep-b", digest, episode_key="episode_index=1"),
         ],
     )
-    assert result["frame_count"] == 4  # 2 + 2, each its own file
+    assert result["frame_count"] == 4
 
     file0 = pq.read_table(
         tmp_path / "exports" / "bld_slice" / "data" / "chunk-000" / "file-000.parquet"
@@ -290,7 +282,7 @@ def test_a_ragged_synthetic_artifact_fails_rather_than_exporting_a_lie(tmp_path:
             "task": "pick",
             "robot": "so101",
             "timestamps": [0.0, 0.1, 0.2],
-            "observations": [[0.1], [0.2]],  # one frame short
+            "observations": [[0.1], [0.2]],
             "actions": [[1.0], [1.1], [1.2]],
         }
     )

@@ -1,19 +1,7 @@
 #!/usr/bin/env python3
 """Stage-4 scaling campaign driver: NFR-005, NFR-008 concurrency leg, NFR-010.
 
-One throwaway database per leg, real Postgres from the environment, real queue
-rows - the black-box counterpart to the in-memory benchmark workloads. The legs:
-- ``job-scaling``        submit N ingest_source jobs for one real MCAP, then drain
-   with 1 vs 2 worker processes: wall-clock speedup (NFR-008) and
-   enqueue->start latency at 100 queued (NFR-005a).
-- ``cancel``           enqueue->start p95 with 100 already-queued jobs ahead of
-   the measured one (NFR-005a) and cancel-effect latency
-   for a queued job (NFR-005b).
-- ``api-latency``      10 rps against a live API for the CRUD/list contract
-                       (NFR-010). Needs `just api` running separately.
-
-Numbers go to stdout as JSON; this script writes nothing to the repo. It refuses
-a non-throwaway database name so a mistake can never touch the dev catalog.
+uv run --all-extras python scripts/scale_campaign.py --leg job-scaling
 """
 
 from __future__ import annotations
@@ -298,9 +286,10 @@ def leg_depth_curve(catalog, dsn: str, _tmpdir: Path) -> dict[str, object]:
 
 
 def leg_catalog_scale(catalog, dsn: str, _tmpdir: Path) -> dict[str, object]:
-    """10k-episode catalog (NFR-003, NFR-008 read side): query p95 over the
-    real repository, and a real validate job over all 10k episodes through a
-    real worker process (NFR-002's system-scale reading)."""
+    """10k-episode catalog (NFR-003, NFR-008 read side): query p95 over the real repository, and a
+    real validate job over all 10k episodes through a real worker process (NFR-002's system-scale
+    reading).
+    """
     initialize(dsn)
     seed_seconds, episode_ids = _seed_catalog(dsn, 10_000)
 
@@ -348,7 +337,7 @@ def leg_catalog_scale(catalog, dsn: str, _tmpdir: Path) -> dict[str, object]:
 
 
 def leg_cancel(catalog, dsn: str, _tmpdir: Path) -> dict[str, object]:
-    """Cancel a queued job; effect <= 2s (NFR-005b). Real effect via the worker."""
+    """Cancel a queued job; effect <= 2s (NFR-005b)."""
     backlogs = _enqueue(catalog, 60, prefix="cancel-backlog")
     measured = _enqueue(catalog, 10, prefix="cancel-measured")
     samples: list[float] = []
@@ -438,14 +427,7 @@ def _sha(text: str) -> str:
 
 
 def _seed_catalog(dsn: str, count: int = 10_000) -> tuple[float, list[str]]:
-    """Seed `count` episodes the way real rows look, in batches, one connection.
-
-    Artifacts, episodes (with reader-shaped metadata so the validation path can
-    run), quality rows, and lineage edges, all with spread created_at so the
-    newest-first reads see a realistic ordering. Batching is the seeding
-    method, not the measured subject; the per-row repository path is what the
-    latency samples then read.
-    """
+    """Seed `count` episodes the way real rows look, in batches, one connection."""
     from psycopg.types.json import Jsonb
 
     job_id = str(uuid.uuid4())
@@ -545,12 +527,6 @@ def _seed_catalog(dsn: str, count: int = 10_000) -> tuple[float, list[str]]:
                 "smooth",
                 "action[0]",
                 12,
-                # `motion_trace` is a list of *runs*, each run a list of
-                # (seconds, score) pairs - the shape `EpisodeQuality.to_dict()` writes
-                # and `web/pages._motion_trace` iterates. Seeding a flat list of floats
-                # instead produced rows the episode-detail page could not render, so
-                # every seeded episode was a 500 on `/ui/episodes/{id}`; the campaign
-                # never noticed because it only ever measured repository queries.
                 Jsonb([[((i + d) / 50.0, ((i + d) % 13) / 500.0) for d in range(12)]]),
             )
         )
@@ -701,11 +677,8 @@ def _run_leg(catalog, dsn: str, args: argparse.Namespace) -> dict[str, object]:
 
 
 def leg_production_workers(catalog, dsn: str, _tmpdir: Path) -> dict[str, object]:
-    """NFR-005 E5: re-run the depth-100 enqueue->start point with 2 workers so the
-    queue-position wait is also depth-capacity confirmed (wait ratio 1w : 2w).
-
-    Uses the same shape as the existing enqueue-start leg's first-claim measurement
-    but with 2 workers and a fresh backlog.
+    """NFR-005 E5: re-run the depth-100 enqueue->start point with 2 workers so the queue-position
+    wait is also depth-capacity confirmed (wait ratio 1w : 2w).
     """
     _enqueue(catalog, 100, prefix="backlog-2w")
     measured = _enqueue(catalog, 1, prefix="two-worker")
@@ -743,17 +716,12 @@ def leg_production_workers(catalog, dsn: str, _tmpdir: Path) -> dict[str, object
 
 
 def leg_cancel_running(catalog, dsn: str, _tmpdir: Path) -> dict[str, object]:
-    """NFR-005 E6b: cancel takes effect for a *running* job (cooperative path),
-    in addition to the already-measured queued-job cancel.
-
-    Enqueues 30 small jobs, lets 1 worker start the first, then cancels a
-    running job (find one in state=running via list_jobs), and records the
-    effect latency. Also re-confirms the queued path on the same battery.
+    """NFR-005 E6b: cancel takes effect for a *running* job (cooperative path), in addition to the
+    already-measured queued-job cancel.
     """
     backlogs = _enqueue(catalog, 28, prefix="cancel-running-backlog")
     procs, _ready = _start_workers(dsn, 1)
     try:
-        # wait until one job is actually running
         running_job = None
         deadline = time.time() + 60.0
         while time.time() < deadline:
@@ -772,7 +740,6 @@ def leg_cancel_running(catalog, dsn: str, _tmpdir: Path) -> dict[str, object]:
             row, effective = _cancel_one(running_job, catalog, time.perf_counter() + 30.0)
             if effective is not None:
                 measured_running.append(effective)
-        # queued cancels: submit fresh, cancel immediately, before the worker can reach them
         for _i in range(12):
             job_id = select_one(catalog)
             requested = time.perf_counter()

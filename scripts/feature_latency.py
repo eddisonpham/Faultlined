@@ -1,28 +1,8 @@
 #!/usr/bin/env python3
 """Measure the latency of every shipped feature against a live API, at several scales.
 
-The repo already has API latency numbers: EXP-0010e measured six endpoints at 10 rps
-over a 10k catalog. Six endpoints out of roughly forty is not a picture of the product,
-and "10 rps" is a load generator, not a latency distribution - it says nothing about
-what a single operator waiting on a page actually experiences.
-
-This measures the thing a person waits for. One client, sequential requests, warmup
-discarded, percentile distribution over the whole shipped surface:
-
-* every `/api/v1` read route, including the ones only the UI calls;
-* every `/ui` page, because the pages are the product;
-* the streamed download variants, which are the ones that grow with row count;
-* the write paths an operator performs by hand - submit a job, create an entry, map a
-  string, dismiss a string, undo an action.
-
-Run at three catalog scales (default 20 / 1,000 / 10,000 episodes) because a route that
-is fine at 20 rows and slow at 10,000 is the whole question. Each scale gets its own
-throwaway database and its own server process; nothing touches the dev catalog.
-
-    uv run python scripts/feature_latency.py --scales 20 1000 10000
-    uv run python scripts/feature_latency.py --scales 1000 --trials 30 --json var/lat.json
-
-Numbers go to stdout as JSON. This script writes nothing to the repository.
+uv run python scripts/feature_latency.py --scales 20 1000 10000
+uv run python scripts/feature_latency.py --scales 1000 --trials 30 --json var/lat.json
 """
 
 from __future__ import annotations
@@ -45,16 +25,9 @@ sys.path.insert(0, str(ROOT))
 
 ADMIN_DSN = "postgresql://data_engine@127.0.0.1:55432/postgres"
 
-#: Warmup requests per route, discarded. Methodology rule 2.
 WARMUP = 3
-#: Measured requests per route. Methodology rule 3 asks for >= 10 micro-benchmarks.
 TRIALS = 20
-#: Sits under the product's own 300 ms API target (requirements NFR-010) and the
-#: 200 ms catalog target (NFR-003); a route above both is worth a page in the record.
 REPORT_OVER_MS = 200.0
-
-
-# --------------------------------------------------------------------- the surface
 
 
 def read_routes() -> list[tuple[str, str]]:
@@ -109,14 +82,11 @@ def ui_routes() -> list[tuple[str, str]]:
 
 
 def download_routes() -> list[tuple[str, str]]:
-    """The streamed exports. These are the routes whose cost grows with the catalog."""
+    """The streamed exports."""
     return [
         ("download.episodes.csv", "/api/v1/episodes/export?format=csv"),
         ("download.episodes.jsonl", "/api/v1/episodes/export?format=jsonl"),
     ]
-
-
-# ------------------------------------------------------------------ measure helper
 
 
 def _percentile(ordered: list[float], q: float) -> float:
@@ -147,7 +117,7 @@ def request(
     except urllib.error.HTTPError as error:
         payload = error.read()
         status = error.code
-    except Exception as error:  # a refused connection is a measurement, not a crash
+    except Exception as error:
         return 0, str(error).encode(), time.perf_counter() - started
     return status, payload, time.perf_counter() - started
 
@@ -176,9 +146,6 @@ def measure(url: str, *, trials: int, warmup: int = WARMUP) -> dict[str, Any]:
     }
 
 
-# --------------------------------------------------------------- server lifecycle
-
-
 def free_port() -> int:
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
@@ -186,11 +153,7 @@ def free_port() -> int:
 
 
 def start_server(dsn: str, port: int, metrics_path: Path) -> subprocess.Popen[bytes]:
-    """A real uvicorn process serving the real app against `dsn`.
-
-    Env vars outrank the `.env` file in pydantic-settings, so passing `DE_DATABASE_URL`
-    explicitly is enough to point the process at the throwaway catalog.
-    """
+    """A real uvicorn process serving the real app against `dsn`."""
     env = dict(os.environ)
     env.update(
         {
@@ -228,16 +191,8 @@ def wait_ready(base_url: str, proc: subprocess.Popen[bytes], timeout: float = 60
     return False
 
 
-# ---------------------------------------------------------------------- seeding
-
-
 def seed_metrics(path: Path, records: int = 4000) -> None:
-    """Pre-fill the runtime sink so `/api/v1/metrics` aggregates real history.
-
-    An empty sink measures the reader's floor. Every operator arrives at the metrics
-    page after the system has been running, so the number that matters is the one over
-    a populated file.
-    """
+    """Pre-fill the runtime sink so `/api/v1/metrics` aggregates real history."""
     import datetime as dt
 
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -284,9 +239,6 @@ def seed_vocabulary(dsn: str, entries: int = 40) -> dict[str, Any]:
     started = time.perf_counter()
     created = 0
     mapped = 0
-    # No blanket `except` here: an earlier version swallowed every error and reported
-    # success, so a keyword-only signature change silently produced a *completely
-    # empty* vocabulary and the page under test was measured in its empty state.
     for index in range(entries):
         entry = vocabulary.create_entry(
             settings, preferred_label=f"task family {index % len(tasks)}", notes="seeded"
@@ -304,9 +256,6 @@ def seed_vocabulary(dsn: str, entries: int = 40) -> dict[str, Any]:
         "mappings": mapped,
         "seconds": round(time.perf_counter() - started, 2),
     }
-
-
-# ------------------------------------------------------------------- write legs
 
 
 def write_leg(base_url: str, episode_source: str) -> dict[str, Any]:
@@ -386,9 +335,6 @@ def write_leg(base_url: str, episode_source: str) -> dict[str, Any]:
     timed("write.vocabulary.dismiss_task", dismiss_task)
 
     return results
-
-
-# ------------------------------------------------------------------------- driver
 
 
 def run_scale(scale: int, trials: int) -> dict[str, Any]:

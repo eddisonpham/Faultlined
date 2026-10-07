@@ -1,11 +1,4 @@
-"""The schema page: layout, flow, and the states where the catalog is not there.
-
-The page's whole claim is that it reflects the running database rather than a
-drawing, so the tests that matter are the ones where the model's contents and
-the page's contents could disagree - a table with no columns, a foreign key
-pointing at a table that is not in the model, a flow step naming a table this
-catalog does not have.
-"""
+"""The schema page: layout, flow, and the states where the catalog is not there."""
 
 from __future__ import annotations
 
@@ -123,9 +116,6 @@ MODEL = {
 }
 
 
-# ------------------------------------------------------------------- layering
-
-
 @pytest.mark.unit
 def test_a_table_that_references_nothing_is_the_first_layer() -> None:
     layers = _layers(MODEL["tables"], MODEL["foreign_keys"])
@@ -151,9 +141,6 @@ def test_layering_terminates_on_a_self_referencing_table() -> None:
         {"source": "a", "target": "a"},
     ]
     assert set(_layers(tables, keys)) == {"a", "b"}
-
-
-# ---------------------------------------------------------------------- graph
 
 
 @pytest.mark.unit
@@ -200,15 +187,12 @@ def test_a_graph_with_no_tables_renders_nothing_rather_than_an_empty_frame() -> 
     assert graph_svg({"tables": [], "foreign_keys": []}) == ""
 
 
-# ----------------------------------------------------------------------- flow
-
-
 @pytest.mark.unit
 def test_a_flow_step_naming_a_missing_table_is_dropped_and_reported() -> None:
     """Drawing a step that 500s when clicked is worse than admitting it is behind."""
     body = schema_fragment(MODEL)
     assert "How data moves" in body
-    assert "does not" in body and "have" in body  # the honesty note is present
+    assert "does not" in body and "have" in body
 
 
 @pytest.mark.unit
@@ -217,9 +201,6 @@ def test_the_flow_names_the_real_tables_in_order() -> None:
     ingest = body[body.find(">ingest<") : body.find(">ingest<") + 400]
     assert ingest.index("jobs") < ingest.index("episodes")
     assert ingest.index("episodes") < ingest.index("episode_quality")
-
-
-# ----------------------------------------------------------------- table focus
 
 
 @pytest.mark.unit
@@ -243,9 +224,6 @@ def test_the_page_puts_the_focused_table_first() -> None:
     assert body.index(">jobs</h2>") < body.index("Entity graph")
 
 
-# ------------------------------------------------------------- unreachable db
-
-
 @pytest.mark.unit
 def test_an_unreachable_catalog_renders_a_state_rather_than_a_500() -> None:
     """A schema view that errors is worse than no schema view."""
@@ -260,5 +238,5 @@ def test_an_unreachable_catalog_renders_a_state_rather_than_a_500() -> None:
 @pytest.mark.unit
 def test_the_page_reports_the_totals_it_read() -> None:
     body = schema_fragment(MODEL)
-    assert ">4<" in body  # tables
-    assert ">2<" in body  # foreign keys
+    assert ">4<" in body
+    assert ">2<" in body

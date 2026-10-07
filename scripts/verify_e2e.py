@@ -1,14 +1,6 @@
 """The end-to-end run, driven from an empty catalog to prove the fixes.
 
-Every step asserts something. This is not a smoke test - it is the second half of
-the observation that found the defects in the first place, and a fix that is not
-re-observed against the running system is a fix that has only been compiled.
-
-The run counts absolute state (five episodes, two builds, one quarantined), so
-it refuses to start against a populated catalog instead of failing confusingly
-halfway through: wipe first with `just reset --yes`, then re-run. That command
-is destructive, which is why the driver never runs it on the caller's behalf,
-and it is why a completed run is not re-runnable in place.
+uv run --all-extras python scripts/verify_e2e.py
 """
 
 import json
@@ -149,8 +141,6 @@ for label, form in (
     ("lerobot v2", {"kind": "path", "source": "var/real-data/lerobot-v2-driving"}),
     ("synthetic", {"kind": "episode", "task": "wipe_table", "robot": "so101", "frames": "240"}),
 ):
-    # urllib follows the 303, so the status alone proves nothing; the job is the
-    # evidence that the submission was accepted.
     before = len(jobs())
     call("POST", "/ui/jobs", form=form, raw=True)
     check(f"form accepts {label}", len(jobs()) > before)
@@ -272,9 +262,7 @@ check(
     isinstance(build["profile_hash"], str) and len(build["profile_hash"]) == 64,
     build["profile_hash"],
 )
-profile_hash = (
-    call("GET", "/api/v1/profiles")[1] if False else None
-)  # not a route; use the manifest
+profile_hash = call("GET", "/api/v1/profiles")[1] if False else None
 manifest_profile = call("GET", f"/api/v1/builds/{staged_hash}")[1]["manifest"]["validation_profile"]
 check(
     "the manifest cites the same address",
@@ -390,8 +378,6 @@ for path in (
 
 print()
 print("=== 11. ADR 0023: the metrics are honest about time ===")
-# Every reader now supplies a clock, so `integrity` must be a real verdict for
-# all five episodes, not the "unknown" a caller without timestamps gets.
 qualities = {}
 for episode in call("GET", "/api/v1/episodes?limit=50")[1]["items"]:
     qualities[episode["id"]] = call("GET", f"/api/v1/episodes/{episode['id']}/quality")[1]
@@ -493,8 +479,6 @@ check(
 
 print()
 print("=== 13. the visual layer renders against real data ===")
-# The charts and graphs are server-rendered, so the honest check is what the
-# server actually emits against a real catalog, not a screenshot.
 insights = call("GET", "/ui/insights", raw=True)[1].decode()
 check(
     "the motion chart is plotted, not a bare scatter",
@@ -525,13 +509,6 @@ check(
 )
 
 schema = call("GET", "/ui/schema", raw=True)[1].decode()
-# The graph states its own numbers in its accessible name, and those come from
-# the database. Comparing the drawing against them is the same claim the two
-# constants below used to make - "the graph is the catalog" - except the
-# constants rotted: they read `14` nodes and `9` edges, while the catalog had
-# grown to 23 tables and 11 foreign keys across ADR 0029, and the `"<path"`
-# count was including the brand mark's two paths. A gate that fails because it
-# remembers an old schema teaches people to ignore it.
 stated = re.search(r"catalog entity graph: (\d+) tables, (\d+) foreign keys", schema)
 nodes, edges = schema.count('class="de-node-link"'), schema.count('class="de-edge"')
 check(
@@ -590,7 +567,6 @@ for episode in call("GET", "/api/v1/episodes?limit=50")[1]["items"]:
     label = f"{episode['format']} {episode['episode_key'] or 'default'}"
     check(f"{label}: a motion trace exists", len(points) > 0, f"{len(points)} points")
     check(f"{label}: the trace is bounded", len(points) <= TRACE_CAP, len(points))
-    # The list row carries no duration; the detail's metadata does.
     meta = call("GET", f"/api/v1/episodes/{episode['id']}")[1].get("metadata") or {}
     span = float(meta.get("duration_seconds") or 0.0)
     check(
@@ -622,7 +598,6 @@ gapped_payload = {
 }
 call("POST", "/api/v1/jobs", data={"type": "ingest", "payload": gapped_payload})
 wait_for_idle()
-# Synthetic episodes carry no episode_key; the task lives in the metadata.
 gapped = pick(
     call("GET", "/api/v1/episodes?limit=50")[1]["items"],
     lambda e: (

@@ -1,17 +1,6 @@
 """Generate a deterministic MCAP sensor log - the project's real-data fixture.
 
-Two consumers, one generator:
-
-- the reader's tests, which need a *shaped* bag (known topic rates, known value
-  ranges, a deliberate non-JSON channel) to assert against;
-- backlog B-002, which needs a versioned file on disk to measure ingest throughput
-  against, since re-synthesising the workload per trial would time the generator.
-
-Everything is closed-form - no RNG, no clock - so the same arguments produce
-byte-identical output. That is what lets a benchmark number mean something on a
-different day, and what lets the reader's tests pin exact statistics.
-
-    python scripts/make_mcap_log.py var/real-data/so101_pick_place.mcap --seconds 20
+python scripts/make_mcap_log.py var/real-data/so101_pick_place.mcap --seconds 20
 """
 
 from __future__ import annotations
@@ -24,8 +13,6 @@ from pathlib import Path
 
 from mcap.writer import CompressionType, Writer
 
-#: topic -> (messages per second, schema name, encoding). The joint stream is the
-#: busiest, so it is what the reader reports as the episode's frame rate.
 TOPICS: dict[str, tuple[float, str, str]] = {
     "/joint_states": (50.0, "sensor_msgs/msg/JointState", "json"),
     "/gripper/command": (50.0, "std_msgs/msg/Float64", "json"),
@@ -107,13 +94,7 @@ def write_log(
     compression: CompressionType = CompressionType.ZSTD,
     attachment_mib: float = 0.0,
 ) -> dict[str, object]:
-    """Write one bag and return a description of what is in it.
-
-    `attachment_mib` adds one binary attachment, which is how a real camera log
-    spends most of its bytes. The benchmark needs both shapes: a metadata-only log
-    is the worst case for a reader that decodes JSON, and an attachment-heavy one
-    is what a real episode looks like.
-    """
+    """Write one bag and return a description of what is in it."""
     path.parent.mkdir(parents=True, exist_ok=True)
     ids: dict[str, int] = {}
     counts: dict[str, int] = {}

@@ -1,11 +1,4 @@
-"""Monitor health must answer for whichever process actually ticked (ADR 0031).
-
-The tick runs in the worker loop; `/api/v1/monitoring/health` is served by the API
-process. An in-memory answer therefore reported `last_tick_at: null` and rendered
-`blind: no` about a monitor that was running - the exact false negative the health
-surface exists to prevent. These tests pin the read-back from the shared metric
-sink, with no database and no second process.
-"""
+"""Monitor health must answer for whichever process actually ticked (ADR 0031)."""
 
 from __future__ import annotations
 
@@ -86,12 +79,7 @@ def test_health_says_never_rather_than_healthy_when_nothing_has_ticked(
 def test_health_reads_the_sink_once_for_both_facts(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Two facts, one read: `/ui/incidents` polls, and a read parses up to 20k records.
-
-    `last_tick_at` and `blind` came from two separate tail reads, so every page render
-    parsed the same window twice - measured at 42 ms p50 on a 5k-record sink and 97 ms
-    at the bound, half of it duplicated work.
-    """
+    """Two facts, one read: `/ui/incidents` polls, and a read parses up to 20k records."""
     from data_engine.monitoring import service as monitor_service
 
     ticked_at = datetime(2026, 10, 6, 12, 0, 0, tzinfo=UTC)
@@ -132,7 +120,6 @@ def test_health_does_not_read_the_sink_when_this_process_has_ticked(
 
     monkeypatch.setattr(monitor_service, "read_metric_records", forbidden)
     service = MonitorService(object(), metrics_path=tmp_path / "runtime.jsonl")
-    # What `tick()` leaves behind in this process.
     service._last_tick = datetime(2026, 10, 6, 12, 0, 0, tzinfo=UTC)
     service._last_blind = True
 
@@ -155,6 +142,4 @@ def test_health_reads_the_sink_only_to_the_bounded_tail(tmp_path: Path) -> None:
 
     health = MonitorService(object(), metrics_path=path).health()
 
-    # The only tick record is older than the tail window, so it is honestly
-    # reported as not observed rather than found by scanning the whole file.
     assert health["last_tick_at"] is None

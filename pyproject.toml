@@ -15,16 +15,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# GPU telemetry only (nvidia-ml-py); everything else works without it (ADR 0008).
 gpu = ["nvidia-ml-py>=13"]
-# Stage 2.5 clustering experiments only. Nothing in the engine imports numpy, model2vec,
-# torch or sentence-transformers, so none of them are runtime dependencies: the engine
-# must stay installable without them.
-#
-# torch is pinned to the **CPU** wheel index. NFR-007 requires a working GPU-absent path
-# and the CUDA wheel is ~2.5 GB of download for hardware this stage does not use; the
-# extra index is declared in `[tool.uv.sources]` below so `uv sync --all-extras` resolves
-# CPU torch without anyone having to remember a flag.
 experiments = [
     "numpy>=2",
     "model2vec>=0.4",
@@ -108,7 +99,6 @@ source = ["src/data_engine"]
 branch = true
 
 [tool.coverage.report]
-# Ratchet policy: ADR 0011 — this number may only increase.
 fail_under = 70
 omit = [
     "src/data_engine/jobs/contracts.py",

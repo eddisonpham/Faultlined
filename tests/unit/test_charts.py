@@ -1,10 +1,4 @@
-"""Chart primitives: the assertions are coordinates, not screenshots (ADR 0024).
-
-A chart is a string, so the things most likely to be wrong in it - a scale that
-flattens four orders of magnitude, a gap drawn as a connection, a division by
-zero on a flat series - are all assertable without a browser. These tests exist
-because the alternative is a visual regression nobody notices until a user does.
-"""
+"""Chart primitives: the assertions are coordinates, not screenshots (ADR 0024)."""
 
 from __future__ import annotations
 
@@ -23,9 +17,6 @@ from data_engine.web.charts import (
 )
 
 pytestmark = pytest.mark.unit
-
-
-# ------------------------------------------------------------------- formatting
 
 
 @pytest.mark.unit
@@ -49,9 +40,6 @@ def test_a_tick_label_fits_its_tick(value: float, shown: str) -> None:
     assert format_value(value) == shown
 
 
-# ----------------------------------------------------------------- scale choice
-
-
 @pytest.mark.unit
 def test_a_narrow_series_stays_linear() -> None:
     scale = choose_scale([1.0, 2.0, 3.0])
@@ -61,12 +49,7 @@ def test_a_narrow_series_stays_linear() -> None:
 
 @pytest.mark.unit
 def test_a_series_spanning_four_decades_goes_logarithmic_on_its_own() -> None:
-    """The reference run's raw speeds span 0.022 to 1.0e8.
-
-    Linear, four of the five episodes are the same point on the floor. The chart
-    is not misdrawn - it is showing nothing - which is the failure this exists
-    to prevent, and it has to be prevented without the caller remembering.
-    """
+    """The reference run's raw speeds span 0.022 to 1.0e8."""
     scale = choose_scale([0.022, 3.54, 2.31, 0.16, 1.0e8])
     assert scale.logarithmic
     assert math.log10(scale.hi / scale.lo) > DECADES_BEFORE_LOG
@@ -111,16 +94,9 @@ def test_a_log_scale_keeps_its_ordering_across_the_domain() -> None:
     assert scale.pixel(1.0e3, 100.0, 0.0) == pytest.approx(50.0)
 
 
-# ------------------------------------------------------------------------- gaps
-
-
 @pytest.mark.unit
 def test_a_gap_breaks_the_trace_instead_of_connecting_across_it() -> None:
-    """Connecting a dropout draws motion through a hole in the recording.
-
-    That is the exact false statement the temporal signal was built to stop this
-    product from making, so the renderer refuses to make it.
-    """
+    """Connecting a dropout draws motion through a hole in the recording."""
     samples: list[tuple[float, float | None]] = [
         (0, 1.0),
         (1, 2.0),
@@ -132,7 +108,6 @@ def test_a_gap_breaks_the_trace_instead_of_connecting_across_it() -> None:
     scale = choose_scale([1.0, 2.0, 5.0, 6.0])
     runs = polyline_points(samples, scale, x0=0.0, x1=100.0, top=0.0, bottom=100.0)
 
-    # x is a position along the series, so six samples span 0..5 across 0..100.
     assert len(runs) == 2
     assert [round(x) for x, _ in runs[0]] == [0, 20]
     assert [round(x) for x, _ in runs[1]] == [80, 100]
@@ -151,9 +126,6 @@ def test_a_single_surviving_point_is_kept_so_a_sparse_recording_is_still_visible
     samples: list[tuple[float, float | None]] = [(0, None), (1, None), (2, 4.0), (3, None)]
     runs = polyline_points(samples, choose_scale([4.0]), x0=0.0, x1=30.0, top=0.0, bottom=10.0)
     assert len(runs) == 1 and len(runs[0]) == 1
-
-
-# ------------------------------------------------------------------ line_chart
 
 
 @pytest.mark.unit
@@ -208,9 +180,6 @@ def test_a_chart_with_every_value_identical_still_renders() -> None:
     assert "<polyline" in svg
 
 
-# ------------------------------------------------------------------- bar_chart
-
-
 @pytest.mark.unit
 def test_a_bar_chart_never_goes_logarithmic() -> None:
     """A log axis has no meaning when the quantity being counted is a population."""
@@ -242,9 +211,6 @@ def test_an_empty_bar_chart_says_no_data() -> None:
     assert "no data" in bar_chart([], label="verdicts")
 
 
-# ----------------------------------------------------------------- structural
-
-
 @pytest.mark.unit
 def test_every_chart_opens_and_closes_exactly_one_svg() -> None:
     for svg in (
@@ -263,17 +229,9 @@ def test_every_chart_is_labelled_for_a_screen_reader() -> None:
         assert re.search(r'aria-label="[^"]{4,}"', svg), svg[:120]
 
 
-# ------------------------------------------------------- caption escaping
-
-
 @pytest.mark.unit
 def test_a_caption_is_escaped_and_its_link_is_not() -> None:
-    """One escaped argument cannot carry a link; one unescaped is a hole.
-
-    The metrics page puts its drilldown target in the caption, and the first
-    version of this rendered `&lt;a href=...` on screen - a link that looked like
-    markup and went nowhere. Hence two arguments and two rules.
-    """
+    """One escaped argument cannot carry a link; one unescaped is a hole."""
     svg = line_chart(
         [(0, 1.0), (1, 2.0)],
         label="latency",
@@ -290,9 +248,6 @@ def test_a_chart_with_neither_caption_nor_link_emits_no_note() -> None:
     assert "de-chart-note" not in line_chart([(0, 1.0), (1, 2.0)], label="x")
 
 
-# ------------------------------------------------------------ tick anchoring
-
-
 @pytest.mark.unit
 @pytest.mark.parametrize(
     ("x", "anchor"),
@@ -306,13 +261,7 @@ def test_a_tick_label_hangs_from_the_end_nearest_the_frame(x: float, anchor: str
 
 @pytest.mark.unit
 def test_the_first_and_last_x_labels_do_not_hang_past_the_frame() -> None:
-    """A centred label at the right edge loses its last characters.
-
-    Found by a real-browser audit, not by reading the source: every metrics
-    plot was clipping "04:22" to "04:". The label has to hang from the end
-    nearest the frame, or the plot's right margin has to be widened to fit
-    half a timestamp.
-    """
+    """A centred label at the right edge loses its last characters."""
     svg = line_chart(
         [(i, float(i)) for i in range(10)],
         x_ticks=[(52.0, "04:20"), (381.0, "04:21"), (710.0, "04:22")],
@@ -320,15 +269,7 @@ def test_the_first_and_last_x_labels_do_not_hang_past_the_frame() -> None:
     assert 'text-anchor="start">04:20<' in svg
     assert 'text-anchor="end">04:22<' in svg
     assert 'text-anchor="middle">04:21<' in svg
-    # The last label is now inside the 720-wide viewBox rather than past it.
     assert "04:22" in svg
-
-
-# --------------------------------------------------- x mapped by value
-#
-# The motion trace is unevenly spaced in time, and a hole has to keep its
-# measured width or the picture lies about the recording. Indexed input (the
-# metrics buckets) must map pixel-for-pixel as before.
 
 
 def test_x_is_mapped_by_value_not_by_index() -> None:
@@ -351,13 +292,12 @@ def test_a_hole_keeps_its_measured_width() -> None:
     samples = [
         (0.0, 0.5),
         (1.0, 0.5),
-        (31.0, None),  # the break marker; its x is ignored
+        (31.0, None),
         (31.0, 0.5),
         (32.0, 0.5),
     ]
     runs = polyline_points(samples, choose_scale([0.5]), x0=0.0, x1=32.0, top=0.0, bottom=0.0)
     assert len(runs) == 2
-    # Thirty seconds of dropout occupy thirty seconds of the 0..32 axis.
     assert runs[1][0][0] - runs[0][-1][0] == pytest.approx(30.0)
 
 

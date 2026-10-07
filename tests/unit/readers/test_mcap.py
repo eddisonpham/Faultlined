@@ -1,14 +1,4 @@
-"""MCAP reader tests.
-
-Offline only. Every fixture is written by `scripts/make_mcap_log.py` or by a
-hand-built bag in this module, so the structural rules are asserted against exact
-values with no network: which topic becomes the frame rate, which one motion quality
-is read from, what a non-JSON channel contributes, and what a corrupt file does.
-
-The generator is imported rather than shelled out to because the reader's correctness
-and the benchmark's input are the same artefact; a test that regenerated the log
-differently from the benchmark would be testing a different format than it claims.
-"""
+"""MCAP reader tests."""
 
 from __future__ import annotations
 
@@ -38,9 +28,6 @@ _SECONDS_PER_SECOND = 1_000_000_000
 _START_NANOS = 1_700_000_000 * _SECONDS_PER_SECOND
 
 
-# --------------------------------------------------------------------- dispatch
-
-
 def test_sniff_claims_only_magic_bytes(tmp_path: Path) -> None:
     bag = tmp_path / "log.mcap"
     bag.write_bytes(MAGIC + b"rest")
@@ -67,9 +54,6 @@ def test_registry_error_names_the_formats_it_tried(tmp_path: Path) -> None:
     unknown.write_bytes(b"\x00\x01\x02")
     with pytest.raises(ReaderError, match="mcap, lerobot"):
         read_episode(unknown)
-
-
-# ------------------------------------------------------------------ description
 
 
 def test_describes_a_generated_log_exactly(mcap_log: Any, tmp_path: Path) -> None:
@@ -140,9 +124,6 @@ def test_string_leaves_do_not_stop_a_message_being_scored(tmp_path: Path) -> Non
     assert quality_dims(episode) == ["/joints.position[0]", "/joints.position[1]"]
 
 
-# ------------------------------------------------------------------- selection
-
-
 def test_a_bag_rejects_an_episode_key_it_cannot_satisfy(tmp_path: Path) -> None:
     bag = _bag(tmp_path / "one.mcap", {"/t": (10.0, [{"v": 1.0}])})
     with pytest.raises(ReaderError, match="holds exactly one episode"):
@@ -171,9 +152,6 @@ def test_an_empty_log_is_described_not_rejected(tmp_path: Path) -> None:
     assert episode.channels == ()
 
 
-# ------------------------------------------------------------- undecodable data
-
-
 def test_a_non_json_channel_is_counted_but_not_interpreted(tmp_path: Path) -> None:
     """A guessed CDR layout would put wrong numbers in the catalog."""
     bag = _bag(
@@ -194,7 +172,7 @@ def test_a_corrupt_json_payload_does_not_fail_the_ingest(tmp_path: Path) -> None
     episode = read_episode(bag)
     joints = next(channel for channel in episode.channels if channel.name == "/j")
     assert joints.count == 2
-    assert episode.quality is None  # one dimension only, so nothing to judge
+    assert episode.quality is None
 
 
 def test_messages_with_different_shapes_do_not_produce_ragged_series(tmp_path: Path) -> None:
@@ -204,11 +182,7 @@ def test_messages_with_different_shapes_do_not_produce_ragged_series(tmp_path: P
     )
     episode = read_episode(bag)
     assert episode.quality is not None
-    # The two-dimension message set the reference; the one-field message is dropped.
     assert episode.quality.frame_count == 2
-
-
-# ------------------------------------------------------------------- streaming
 
 
 def test_the_quality_window_is_bounded_however_long_the_log(mcap_log: Any, tmp_path: Path) -> None:
@@ -218,11 +192,8 @@ def test_the_quality_window_is_bounded_however_long_the_log(mcap_log: Any, tmp_p
     assert short.quality is not None and long.quality is not None
     assert short.quality.frame_count == 100
     assert QUALITY_WINDOW < long.quality.frame_count <= 2 * QUALITY_WINDOW
-    assert long.frame_count == 4_840  # 2000 + 2000 joints/gripper, 400 + 400 tf/camera, 40 diag
+    assert long.frame_count == 4_840
     assert long.quality.verdict in {"smooth", "moderate", "jerky"}
-
-
-# --------------------------------------------------------------------- failures
 
 
 def test_a_truncated_bag_is_a_reader_error(tmp_path: Path) -> None:
@@ -246,9 +217,6 @@ def test_a_directory_is_a_reader_error(tmp_path: Path) -> None:
         McapReader().read(tmp_path)
 
 
-# ------------------------------------------------------------------- fixtures
-
-
 def _generated(generator: Any, tmp_path: Path, *, seconds: float) -> Path:
     bag = tmp_path / f"log-{seconds}.mcap"
     generator.write_log(bag, seconds=seconds)
@@ -264,12 +232,7 @@ def _bag(
     topics: dict[str, tuple[Any, ...]],
     default_encoding: str = "json",
 ) -> Path:
-    """One topic per entry; the list is the message bodies, already encoded or not.
-
-    Bodies are spaced at the requested rate, so `len(bodies)` messages span
-    `(len(bodies) - 1) / rate` seconds and the reader's interval-based rate reads back
-    as `rate` exactly.
-    """
+    """One topic per entry; the list is the message bodies, already encoded or not."""
     path.parent.mkdir(parents=True, exist_ok=True)
     writer = Writer(str(path), compression=CompressionType.NONE)
     writer.start(profile="", library="test")
@@ -292,18 +255,7 @@ def _bag(
 def test_a_log_much_longer_than_the_quality_window_is_not_reported_as_gapped(
     tmp_path: Path,
 ) -> None:
-    """The regression that made this signal untrustworthy the first time.
-
-    The clock buffer used to be halved with `[::2]`, in lockstep with the value
-    windows. That is correct for values - their statistics ignore order and
-    spacing - and wrong for a clock: sample 0 survives every halving, so the
-    buffer ended up as one ancient timestamp followed by a dense block of recent
-    ones, and the gap detector read the distance between them as a dropped
-    recording. A clean 50 Hz log was reported as having a 501-second hole.
-
-    Four times the window, so the buffer is trimmed at least three times and the
-    residue has somewhere to go.
-    """
+    """The regression that made this signal untrustworthy the first time."""
     rate = 50.0
     count = 8 * QUALITY_WINDOW
     bodies = [{"position": [j, j, j]} for j in range(count)]
@@ -313,21 +265,13 @@ def test_a_log_much_longer_than_the_quality_window_is_not_reported_as_gapped(
 
     assert quality is not None
     assert quality.integrity == "ok", quality.max_gap_seconds
-    # The whole-log maximum is measured on the raw stream, so it is the true
-    # inter-message interval and not a distance between decimated survivors.
     assert quality.max_gap_seconds == pytest.approx(1 / rate, rel=1e-3)
     assert quality.gap_ratio == 0.0
 
 
 @pytest.mark.unit
 def test_a_real_drop_before_the_retained_window_is_still_reported(tmp_path: Path) -> None:
-    """The bounded window cannot see this; the exact whole-log maximum can.
-
-    A freeze in the first tenth of a long log is discarded by the time the buffer
-    fills. Reporting `ok` there would be the same lie in the opposite direction,
-    so the reader keeps the largest interval it ever saw in constant memory and
-    hands it to the analysis.
-    """
+    """The bounded window cannot see this; the exact whole-log maximum can."""
     rate = 50.0
     count = 8 * QUALITY_WINDOW
     period = round(1e9 / rate)
@@ -353,14 +297,6 @@ def test_a_real_drop_before_the_retained_window_is_still_reported(tmp_path: Path
     assert quality.max_gap_seconds == pytest.approx(30.0, rel=1e-3)
 
 
-# ---------------------------------------------------- compiled flatten plan
-#
-# The plan is a speed trick, and speed tricks are where behaviour quietly
-# changes. The oracle is the dict path the plan replaced: `_observe_dims` is
-# still shipped code (the fallback), so the fast path is held to bit-identical
-# output against the very implementation it stands in for.
-
-
 def _state(topic: Any) -> tuple[Any, ...]:
     stats = topic.stats()
     series = {name: tuple(values) for name, values in topic.quality_series().items()}
@@ -380,23 +316,16 @@ def _state(topic: Any) -> tuple[Any, ...]:
 _EQUIVALENCE_PAYLOADS = [
     {"position": [1.0, 2.0], "velocity": [0.1, 0.2], "name": ["a", "b"]},
     {"position": [1.5, 2.5], "velocity": [0.3, 0.4], "name": ["a", "b"]},
-    # Same keys, different order: traversal order changed, so the plan must
-    # rebuild (floats do not add associatively and the dict path follows order).
     {"name": ["a", "b"], "position": [1.5, 2.5], "velocity": [0.3, 0.4]},
-    # Ragged: missing a reference name.
     {"position": [9.0]},
-    # Extra numeric name beyond the reference set.
     {"position": [2.0, 3.0], "velocity": [0.5, 0.6], "name": ["a", "b"], "effort": [7.0]},
-    # Leaf kind flip: velocity is numeric no more -> ragged again.
     {"position": [2.0, 3.0], "velocity": ["x", "y"], "name": ["a", "b"]},
-    # List length change is a shape change.
     {
         "position": [3.0, 4.0],
         "velocity": [0.7, 0.8],
         "name": ["a", "b"],
         "effort": [8.0, 9.0, 10.0],
     },
-    # Deep nesting, bool/str/None leaves, and a number float cannot hold.
     {"nested": {"a": {"b": [1, 2]}, "c": True}, "s": "str", "n": None, "big": 10**400},
     [1, 2, [3, 4]],
     {"mixed": [{"x": 1}, {"x": 2}]},
@@ -462,12 +391,7 @@ def test_an_unrepresentable_number_survives_the_whole_read(tmp_path: Path) -> No
 
 @pytest.mark.unit
 def test_a_non_finite_sample_is_counted_not_accumulated(tmp_path: Path) -> None:
-    """One `Infinity` must not fail the read, and must not vanish (EXP-0014 D2).
-
-    Before this, the infinite sample made every channel statistic infinite and
-    `register_episode`'s `jsonb` write rejected the whole episode, which the
-    worker classified retryable and retried three times over the same bytes.
-    """
+    """One `Infinity` must not fail the read, and must not vanish (EXP-0014 D2)."""
     bag = _bag(
         tmp_path / "inf.mcap",
         {"/j": (10.0, [{"a": float("inf"), "b": 2.0}, {"a": 4.0, "b": 3.0}])},
@@ -477,12 +401,9 @@ def test_a_non_finite_sample_is_counted_not_accumulated(tmp_path: Path) -> None:
     assert joints.count == 2
     assert joints.nonfinite == 1
     assert joints.max == 4.0
-    # The event reaches the quality signal rather than being silently dropped:
-    # a non-finite value is an absence of a measurement (ADR 0023).
     assert episode.quality is not None
     assert episode.quality.nonfinite == 1
     assert episode.quality.verdict == "unknown"
-    # And nothing about to be written to `jsonb` is non-finite.
     payload = joints.to_dict()
     assert all(
         payload[field] is None or math.isfinite(payload[field])
@@ -503,5 +424,4 @@ def test_finite_or_none_replaces_unrepresentable_statistics() -> None:
     assert finite_or_none(None) is None
     assert finite_or_none(float("inf")) is None
     assert finite_or_none(2.5) == 2.5
-    # A LeRobot published vector is sanitized element-wise, not passed whole.
     assert finite_or_none([0.5, float("inf"), 2.0]) == [0.5, None, 2.0]

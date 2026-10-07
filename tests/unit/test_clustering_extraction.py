@@ -1,16 +1,4 @@
-"""Tests for the engine's task-string clustering.
-
-The behaviour these pin down came out of EXP-2.5-08, which ran the shipped
-sentence-embedding configuration over 1200 labelled strings and found 533 clusters for 48
-object classes. Extract first and the same method gives 47 clusters with every class
-intact. So the extraction is the load-bearing part, and the tests here are about it:
-
-* an axis that is not asked for is not removed, because removing too much merges
-  unrelated tasks and a merge is much harder to notice than a split;
-* a word list that does not recognise a verb leaves the verb in the core rather than
-  silently deleting the wrong words;
-* a confirmed cluster stops moving, which is the promise the whole feature rests on.
-"""
+"""Tests for the engine's task-string clustering."""
 
 from __future__ import annotations
 
@@ -30,8 +18,6 @@ from data_engine.clustering import (
 )
 from data_engine.clustering.online import OnlineCentroids, cosine
 
-# ------------------------------------------------------------------ extraction
-
 
 def test_the_core_drops_the_verb_and_the_colour_when_both_are_ignored() -> None:
     result = extract("pick up the red cube", ignored=Ignored(verb=True, colour=True))
@@ -49,8 +35,6 @@ def test_a_kept_axis_is_kept() -> None:
     assert kept.colours == ()
     kept_verb = extract("pick up the red cube", ignored=Ignored(verb=False, colour=True))
     assert kept_verb.core == "pick up cube"
-    # The verb is still *recorded*: coverage is a fact about the lexicon, not about
-    # which axes this run chose to remove.
     assert kept_verb.verb == "pick up"
 
 
@@ -111,25 +95,14 @@ def test_ignored_parses_a_comma_list_and_describes_itself() -> None:
     assert Ignored.parse("").names() == []
     assert Ignored.parse(None).describe() == "nothing"
     assert Ignored.parse("colour").describe() == "colour"
-    # An unknown axis is ignored rather than raising: a typo should not 500 the page.
     assert Ignored.parse("colour,nonsense").names() == ["colour"]
 
 
 def test_the_field_default_is_not_what_an_empty_checkbox_group_means() -> None:
-    """The two ways of saying "no axes" disagree, and the disagreement is deliberate.
-
-    `Ignored()` drops the verb and the colour, which is the only configuration that
-    produced real groups in the scale experiment. `parse("")` means *nothing* is
-    ignored, because that is what an unchecked Clusters form says. Reading the second as
-    the first would report fragmentation the operator never asked for; reading the first
-    as the second would never produce a group at all.
-    """
+    """The two ways of saying "no axes" disagree, and the disagreement is deliberate."""
     assert Ignored().names() == ["verb", "colour"]
     assert Ignored.parse("").names() == []
     assert Ignored.parse(" verb , colour ").names() == ["verb", "colour"]
-
-
-# -------------------------------------------------------------------- coverage
 
 
 def test_coverage_counts_unmatched_verbs_as_misses() -> None:
@@ -145,9 +118,6 @@ def test_coverage_of_nothing_is_zero_rather_than_an_error() -> None:
     measured = coverage([])
     assert measured.verb_rate == 0.0
     assert measured.as_dict()["strings"] == 0
-
-
-# --------------------------------------------------------------------- vectors
 
 
 def test_token_vectors_are_unit_length_and_stable() -> None:
@@ -166,9 +136,6 @@ def test_unrelated_strings_are_further_apart_than_identical_ones() -> None:
     near = cosine(token_vector("red mug"), token_vector("big red mug"))
     far = cosine(token_vector("red mug"), token_vector("laptop"))
     assert same > near > far
-
-
-# ---------------------------------------------------------------------- online
 
 
 def test_an_unknown_rule_is_refused_rather_than_defaulted() -> None:
@@ -223,9 +190,6 @@ def test_an_unfrozen_cluster_keeps_moving() -> None:
     before = list(model.clusters[0].centroid)
     model.observe("mug with lid")
     assert model.clusters[0].centroid != before
-
-
-# ------------------------------------------------------------------ proposals
 
 
 def _tasks() -> dict[str, int]:

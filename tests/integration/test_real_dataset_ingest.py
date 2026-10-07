@@ -1,14 +1,4 @@
-"""Real LeRobot ingest, end to end, against a real database.
-
-The unit tests prove the reader is internally consistent. This proves the *pipeline*
-is: a genuine Hub dataset goes through the API contract, the job queue, the worker,
-the artifact store, and the catalog, and comes back as a queryable episode with
-correct lineage.
-
-Marked `network`: the dataset is fetched once into gitignored `var/real-data/` and
-reused after that, so a second run is offline. It skips cleanly if the hub is
-unreachable, because a laptop on a train still has to run the suite.
-"""
+"""Real LeRobot ingest, end to end, against a real database."""
 
 from __future__ import annotations
 
@@ -39,11 +29,7 @@ def _settings(tmp_path: Path) -> Settings:
 
 
 def _run(catalog: PostgresCatalog, worker: IngestWorker, job_id: str, limit: int = 100) -> Any:
-    """Drain the shared queue until this job leaves it, then return its row.
-
-    The test database is shared with the rest of the suite, so the worker claims the
-    oldest queued job, not necessarily the one under test.
-    """
+    """Drain the shared queue until this job leaves it, then return its row."""
     for _ in range(limit):
         row = catalog.get_job(job_id)
         if row is None or row["state"] != JobState.QUEUED.value:
@@ -87,13 +73,11 @@ def test_real_v3_dataset_ingests_through_the_pipeline(
     assert episode["metadata"]["dataset"]["codebase_version"] == "v3.0"
     assert "action" in episode["metadata"]["channel_stats"]
 
-    # The artifact is the file the rows came from, and it round-trips byte for byte.
     assert (
         worker.artifacts.get_bytes(episode["artifact_hash"])
         == (root / "data" / "chunk-000" / "file-000.parquet").read_bytes()
     )
 
-    # And the episode records which job produced it.
     assert job["id"] in [edge["to_ref"] for edge in episode["lineage"]]
 
 
@@ -155,7 +139,7 @@ def test_reingesting_the_same_episode_is_idempotent(
 def test_unreadable_source_fails_without_retrying(
     tmp_path: Path, real_lerobot_dataset: Callable[[str], Path]
 ) -> None:
-    """F1: bad data is terminal. Retrying identical bytes cannot change the answer."""
+    """F1: bad data is terminal."""
     settings = _settings(tmp_path)
     catalog = PostgresCatalog(settings)
     root = real_lerobot_dataset("v3")
@@ -199,22 +183,13 @@ def _validate(
     )
     finished = _run(catalog, worker, job["id"])
     assert finished["state"] == JobState.SUCCEEDED.value, finished.get("error")
-    # A validate job reports over its whole selection. These tests each submit
-    # exactly one episode, so unwrap here rather than making every assertion in
-    # every test reach through a shape that exists to describe a batch.
     result = finished["result"]
     assert result["checked"] == 1, result
     return result["episodes"][0]
 
 
 def _results_for(catalog: PostgresCatalog, episode_id: str, profile_name: str) -> list[Any]:
-    """Only the results this test's profile produced.
-
-    Episode identity is content-addressed, so the same dataset yields the same catalog
-    row on every run and the test database accumulates results across runs. Asserting
-    on *all* results for an episode would make the test depend on how many times it had
-    been run before, which is exactly the kind of statefulness this suite avoids.
-    """
+    """Only the results this test's profile produced."""
     return [
         row
         for row in catalog.get_validation_results(episode_id)
@@ -326,9 +301,8 @@ def test_real_episodes_carry_quality_signals(
     assert quality["movement_score"] > 0
     assert 0.0 <= quality["stall_ratio"] <= 1.0
     assert quality["verdict"] in {"smooth", "moderate", "jerky", "unknown"}
-    # A 6-dim arm expands into named per-joint dims.
     assert "action[0]" in {dim["name"] for dim in quality["dims"]}
-    assert quality["length_zscore"] == quality["length_zscore"]  # finite, not NaN
+    assert quality["length_zscore"] == quality["length_zscore"]
 
     summary = catalog.quality_summary()
     assert summary["episode_count"] >= 1
@@ -387,10 +361,6 @@ def test_lineage_and_validation_are_queryable_after_the_run(
     assert "TOO_FEW_FRAMES" in report["validation"]["reason_codes"]
     assert catalog.job_report("no-such-job") is None
 
-    # Fetch the episode itself rather than scanning the quarantined list. That list
-    # is a capped page of a database shared with the rest of the suite, and it has
-    # already grown past 500 rows, so membership in it says nothing about this
-    # episode - it only says how much other tests have left behind.
     listed = catalog.get_episode(episode_id)
     assert listed is not None
     assert listed["state"] == "quarantined"

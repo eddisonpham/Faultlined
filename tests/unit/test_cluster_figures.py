@@ -28,7 +28,7 @@ def test_class_size_view_is_ranked_fluid_and_reports_exact_values() -> None:
     proposals = _proposals()
     html = class_size_view(proposals.ordered())
     assert 'class="de-class-size"' in html
-    assert "width:100%" not in html  # no fixed intrinsic SVG width
+    assert "width:100%" not in html
     assert "episodes</span>" in html
     assert "distinct task strings" in html
     assert "of clustered episodes" in html

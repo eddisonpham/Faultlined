@@ -1,10 +1,4 @@
-"""Benchmarks and Experiments pages: the readers, the rendering, the routes.
-
-Both pages read the repository rather than Postgres, so the interesting failures
-are file-level: a truncated record from an interrupted run, a record whose
-metadata block moved, and a workload name that contains a word the UI's own
-copy is forbidden to use.
-"""
+"""Benchmarks and Experiments pages: the readers, the rendering, the routes."""
 
 from __future__ import annotations
 
@@ -63,9 +57,6 @@ def _result(name: str, *, run_id: str, when: str, p50: float) -> dict[str, Any]:
     }
 
 
-# ---------------------------------------------------------------- the readers
-
-
 @pytest.mark.unit
 def test_the_real_checkout_is_found() -> None:
     """The readers walk up from the module, not from the process CWD."""
@@ -83,7 +74,6 @@ def test_the_repositorys_own_baselines_and_experiments_are_readable() -> None:
     names = {run.name for run in model["baselines"]}
     assert {"synthetic-episode-ingest", "mcap-ingest"} <= names, names
     assert model["result_total"] > 0
-    # The committed MCAP baseline is a real measurement, not a placeholder.
     mcap = next(run for run in model["baselines"] if run.name == "mcap-ingest")
     assert mcap.p50 and mcap.p50 > 0
     assert mcap.source_sha256
@@ -91,9 +81,6 @@ def test_the_repositorys_own_baselines_and_experiments_are_readable() -> None:
     experiments = records.experiments_model()
     ids = [record.exp_id for record in experiments["experiments"]]
     assert ids == sorted(ids, reverse=True)
-    # Every record file on disk is on the page - including sub-lettered campaign
-    # legs (EXP-0010a..e), which are exactly the case a count-based "highest id
-    # equals record count" check gets wrong.
     import re
 
     root = records.repo_root()
@@ -112,8 +99,8 @@ def test_the_repositorys_own_baselines_and_experiments_are_readable() -> None:
 
 @pytest.mark.unit
 def test_a_truncated_record_is_skipped_and_reported(fake_repo: Path) -> None:
-    """A half-written file from an interrupted run must not take the page down,
-    and it must not vanish silently either."""
+    """A half-written file from an interrupted run must not take the page down, and it must not
+    vanish silently either."""
     _write(fake_repo / "benchmarks" / "baselines" / "good.json", _baseline("good", p50=0.5))
     (fake_repo / "benchmarks" / "results" / "cut-off.json").write_text('{"run_id": "x"', "utf-8")
 
@@ -227,9 +214,6 @@ def _write_record(path: Path, text: str) -> None:
     path.write_text(text, encoding="utf-8")
 
 
-# ---------------------------------------------------------------- escaping
-
-
 @pytest.mark.unit
 def test_a_workload_name_from_a_record_cannot_inject_markup(fake_repo: Path) -> None:
     """Names come off disk and are rendered unescaped nowhere."""
@@ -272,9 +256,6 @@ def test_a_missing_repository_says_so_instead_of_rendering_nothing(
         records.experiments_page(records.experiments_model(), "vt220"),
     ):
         assert "repository root not found" in html
-
-
-# ---------------------------------------------------------------- the routes
 
 
 @pytest.mark.unit

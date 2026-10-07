@@ -1,30 +1,4 @@
-"""Online constrained-centroid clustering: the method proposed in the plan.
-
-Leader-follower with refinement, plus the two constraints that make it usable in
-production rather than merely demonstrable.
-
-**Leader-follower.** A new embedding joins the nearest cluster if it is within
-`radius` (in cosine distance, so 0 is identical and 2 is opposite); otherwise it
-becomes a new cluster. So the number of clusters is discovered from the data
-rather than fixed in advance, which is the property k-means cannot offer and the
-reason a fixed-`k` method is the wrong shape for this problem.
-
-**Refinement.** A brand-new cluster's centroid is a single point, which is a noisy
-estimate. As members accumulate the centroid moves toward the mean of what it has
-actually attracted. This is where the centroid rule from `centroids.py` enters:
-it is the only part that decides how the centre moves.
-
-**Freeze.** A cluster a human has confirmed does not move. This is the single
-most important property here, and the reason a plain leader-follower is not
-enough: without it, ingesting a batch of new episodes renames the clusters someone
-curated an hour ago, and every label they confirmed becomes wrong. A confirmed
-cluster is a promise, and freezing is what makes it one.
-
-A consequence worth stating: a frozen cluster cannot absorb a genuinely different
-task, so the assignment is a cost, not a decision. A point that sits within
-`radius` of a frozen cluster is still assigned there, because a human said so.
-The escape hatch is `split`, not silent drift.
-"""
+"""Online constrained-centroid clustering: the method proposed in the plan."""
 
 from __future__ import annotations
 
@@ -38,14 +12,12 @@ from experiments.clustering.centroids import CentroidRule, RunningMean
 
 @dataclass(slots=True)
 class Cluster:
-    """One cluster's mutable state. A rule instance per cluster, not per run."""
+    """One cluster's mutable state."""
 
     centroid: np.ndarray
     rule: CentroidRule
     count: int = 1
     label: str = ""
-    #: Confirmed clusters are frozen: assignments still land in them, but the
-    #: centroid is never updated again.
     frozen: bool = False
     members: list[str] = field(default_factory=list)
 
@@ -62,14 +34,8 @@ class OnlineResult:
 
     labels: tuple[int, ...]
     cluster_count: int
-    #: Mean cosine distance from each member to its own final centroid. A
-    #: cohesion read-out that does not need the gold labels.
     cohesion: float
-    #: Largest cluster by member count, as a fraction. Near 1.0 means the method
-    #: collapsed everything into one cluster, which is a common silent failure.
     dominance: float
-    #: Centroid moves per accepted assignment, total. The cost the centroid
-    #: experiment measures directly.
     centroid_updates: int
 
     def label_of(self, index: int) -> int:
@@ -131,9 +97,6 @@ class OnlineCentroids:
         if len(self._clusters) < self.max_clusters:
             self._spawn(point, text)
             return
-        # At the cap: the nearest cluster absorbs the point even though it is
-        # outside the radius. Dropping it would lose data; opening a new cluster
-        # would break the cap the operator set.
         self._clusters[nearest].absorb(point, text)
         self._updates += 1
 
@@ -152,7 +115,6 @@ class OnlineCentroids:
         if not self._clusters:
             return OnlineResult((), 0, 0.0, 0.0, 0)
         stacked = np.stack([c.centroid for c in self._clusters])
-        # Nearest centroid wins, matching how a point was assigned on the way in.
         labels = tuple(int(i) for i in np.argmax(vectors @ stacked.T, axis=1))
         sizes = np.array([c.count for c in self._clusters], dtype=np.float64)
         total = float(sizes.sum()) or 1.0

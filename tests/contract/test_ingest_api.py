@@ -10,12 +10,7 @@ from data_engine.config import Settings
 
 
 class FakeCatalog:
-    """In-memory stand-in with the repository's idempotency semantics.
-
-    Key reuse replays only an *identical* request; a different request under the
-    same key is a conflict (F4). The identity mirror is kept beside the job map
-    rather than inside the job row, because the row is also the response body.
-    """
+    """In-memory stand-in with the repository's idempotency semantics."""
 
     def __init__(self) -> None:
         self.jobs_by_key: dict[str, dict[str, Any]] = {}
@@ -323,19 +318,11 @@ def test_cancel_endpoint_reports_missing_and_conflicting_jobs() -> None:
     assert "running -> canceled" in body["detail"]
 
 
-#: A shape-valid build hash, built the way the API builds one, so the test cannot
-#: drift from the identity it is asserting. The fixtures here used to be the 10-character
-#: `bld_abc123`, which passed the old 64-character cap and hid the fact that no real
-#: hash could (EXP-0014 follow-up: the export job was unreachable from the API).
 _REAL_BUILD_HASH = "bld_" + "ab" * 32
 
 
 def test_export_job_submits_the_hash_the_api_publishes() -> None:
-    """`export` names a build; the payload is flat, like validate/build.
-
-    The hash is the canonical `bld_<sha256>` (68 characters) that
-    `GET /api/v1/builds` returns, because that is the only value a client can paste.
-    """
+    """`export` names a build; the payload is flat, like validate/build."""
     app = create_app(Settings(_env_file=None), initialize_database=False)
     catalog = FakeCatalog()
     app.state.catalog = catalog
@@ -363,12 +350,7 @@ def test_export_job_rejects_an_empty_build_hash() -> None:
 
 
 def test_export_job_rejects_a_hash_that_is_not_a_build_identity() -> None:
-    """A bare digest is refused at the boundary, not queued to fail as a job.
-
-    It used to be the one value the schema admitted: the job was created, claimed and
-    only then answered `ExportBuildUnknown`, spending a retry budget and an operator's
-    attention on a request the API could have rejected in the first place.
-    """
+    """A bare digest is refused at the boundary, not queued to fail as a job."""
     response = _client().post(
         "/api/v1/jobs", json={"type": "export", "payload": {"build_hash": "ab" * 32}}
     )

@@ -1,15 +1,4 @@
-"""Write batching in the catalog: statement count must not scale with row count.
-
-Two write paths issued one round trip per row - a `build_episodes` insert and a
-`lineage_edges` insert per member, and a `slice_memberships` insert per member on
-*every read* of a slice. Both are invisible at the sizes a demo uses and
-expensive at the sizes a data engine is for: a 10,000-episode build is 20,000
-round trips, and re-reading a slice is 10,000 more.
-
-The behaviour is unchanged - same rows, same `ON CONFLICT DO NOTHING` semantics,
-same transaction - so the assertion is on the number of statements, which is the
-thing that actually scales.
-"""
+"""Write batching in the catalog: statement count must not scale with row count."""
 
 from __future__ import annotations
 
@@ -119,7 +108,6 @@ def test_build_membership_write_does_not_scale_with_episode_count(
     ]
     assert len(per_row) <= 2, f"membership writes are still per-row: {per_row[:6]}"
 
-    # The rows are actually there: this is a batching change, not a dropped write.
     members = catalog.build_episodes(recorded["hash"])
     assert len(members) == 50
     assert {m["episode_id"] for m in members} == {row["id"] for row in rows}

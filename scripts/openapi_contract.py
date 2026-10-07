@@ -1,10 +1,5 @@
 #!/usr/bin/env python3
-"""Export the OpenAPI contract and detect drift against the committed copy (ADR 0009).
-
-`--write` regenerates docs/api/openapi.json. `--check` compares the live application schema
-against the committed contract and exits non-zero when they differ, so CI fails on an
-undocumented API change.
-"""
+"""Export the OpenAPI contract and detect drift against the committed copy (ADR 0009)."""
 
 from __future__ import annotations
 

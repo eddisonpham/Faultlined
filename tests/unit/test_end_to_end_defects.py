@@ -1,18 +1,4 @@
-"""Defects found by driving the real system end to end, not by reading it.
-
-Every test here corresponds to something that shipped and was wrong. They are
-grouped by cause, because the causes are the lesson:
-
-- the same column meant two different things and the coincidence held (**frame
-  count**),
-- a documented promise had no code behind it (**quarantine exclusion**),
-- a field existed, was serialised nowhere, and nobody noticed the value was
-  always empty (**profile content address**),
-- a query selected fewer columns than its response schema declared (**reverse
-  lineage**),
-- and one that is not a data defect but an honesty one: a **terminal** failure
-  spent three attempts.
-"""
+"""Defects found by driving the real system end to end, not by reading it."""
 
 from __future__ import annotations
 
@@ -31,17 +17,8 @@ from data_engine.validation.profile import InvalidProfile, profile_from_dict, pr
 pytestmark = [pytest.mark.unit]
 
 
-# --------------------------------------------------------------------- frame count
-
-
 def test_the_quality_sample_is_not_the_episode_length() -> None:
-    """`episode_quality.frame_count` is how many frames were *analysed*.
-
-    A streaming reader analyses a decimated window, so using that column as the
-    episode's length reported a 72 600-message MCAP log as an 816-frame episode -
-    an 89x under-report on the operator's own screen. The two are equal by
-    coincidence for a non-streaming reader, which is why it survived.
-    """
+    """`episode_quality.frame_count` is how many frames were *analysed*."""
     from data_engine.curation import EPISODE_FRAMES_SQL
 
     assert "metadata->>'frame_count'" in EPISODE_FRAMES_SQL
@@ -49,19 +26,12 @@ def test_the_quality_sample_is_not_the_episode_length() -> None:
 
 
 def test_short_and_long_curation_order_by_the_episode_length() -> None:
-    """`short`/`long` exist to surface the tails of the length distribution.
-
-    Ordering them by the analysed sample would have ranked a 72 600-message log as
-    one of the *shortest* episodes in the catalog.
-    """
+    """`short`/`long` exist to surface the tails of the length distribution."""
     from data_engine.curation import episode_predicates
 
     _where, _params, order = episode_predicates(None, "short", prefix="e.")
     assert "metadata->>'frame_count'" in order
     assert "q.frame_count" not in order
-
-
-# ------------------------------------------------------------------- quarantine
 
 
 class _Catalog:
@@ -80,12 +50,7 @@ class _Catalog:
 
 
 def test_a_default_build_selection_excludes_quarantined_episodes() -> None:
-    """`BuildPayload` promises a failing episode is excluded, not silently included.
-
-    The promise was in the API's own docstring and had no code behind it: both
-    handlers shared one `_selection` that returned every episode regardless of
-    state, so a build over "everything" shipped the quarantined episode.
-    """
+    """`BuildPayload` promises a failing episode is excluded, not silently included."""
     from data_engine.jobs.worker import IngestWorker
 
     catalog = _Catalog(
@@ -98,22 +63,14 @@ def test_a_default_build_selection_excludes_quarantined_episodes() -> None:
     runner.catalog = catalog  # type: ignore[assignment]
 
     assert IngestWorker._selection(runner, {}, field="episode_ids", state="valid") == ["ep-valid"]
-    # Validation still sees everything, which is the point of validating.
     assert IngestWorker._selection(runner, {}, field="episode_ids") == [
         "ep-valid",
         "ep-quarantined",
     ]
 
 
-# --------------------------------------------------------------- profile address
-
-
 def test_a_profile_carries_its_own_content_address() -> None:
-    """`content_hash` was a field that nothing ever set and nothing ever read.
-
-    A build manifest citing `hash: ""` looks like it pinned the policy and pinned
-    nothing, which is worse than citing no policy at all.
-    """
+    """`content_hash` was a field that nothing ever set and nothing ever read."""
     profile = profile_from_dict({"name": "p", "version": "1", "min_frames": 10, "max_fps": 60.0})
     assert profile.content_hash == profile_hash(profile) != ""
     assert profile.to_dict()["hash"] == profile.content_hash
@@ -123,8 +80,6 @@ def test_the_content_address_excludes_itself() -> None:
     """A hash of a document containing its own hash cannot be checked."""
     profile = profile_from_dict({"name": "p", "version": "1"})
     assert "hash" not in json.dumps(sorted(profile.to_dict()))[:-1] or True
-    # Stability is the property that matters: the same policy always resolves to
-    # the same address, and a different one never does.
     assert profile_hash(profile) == profile_hash(profile_from_dict({"name": "p", "version": "1"}))
     other = profile_from_dict({"name": "p", "version": "1", "min_frames": 5})
     assert profile_hash(other) != profile_hash(profile)
@@ -155,27 +110,13 @@ def test_two_policies_over_the_same_episodes_are_two_builds() -> None:
     assert tight.hash != loose.hash
 
 
-# ------------------------------------------------------------------- retry class
-
-
 def test_a_conflicting_profile_is_a_terminal_failure() -> None:
-    """It is a property of the payload, so it fails identically on every attempt.
-
-    Spending the whole retry budget delayed the operator's signal and counted
-    three failures in `jobs_failures_total` for one mistake - which is enough to
-    trip the notifier's repeated-failure rule on the operator's own bad input.
-    """
+    """It is a property of the payload, so it fails identically on every attempt."""
     assert _is_terminal(IdempotencyConflict("so101-staged@1")) is True
 
 
 def test_a_malformed_profile_is_a_terminal_failure_with_its_own_reason_code() -> None:
-    """F3: the profile document rides in the payload, so retrying cannot fix it.
-
-    It used to raise `InvalidProfile` through the generic path: three identical
-    attempts, three `INTERNAL_ERROR` failures counted, and the operator told
-    "internal bug" for their own malformed profile. The documented reason code
-    (`VALIDATION_PROFILE_INVALID`, ADR 0016) was never emitted by a job.
-    """
+    """F3: the profile document rides in the payload, so retrying cannot fix it."""
     with pytest.raises(InvalidProfile):
         profile_from_dict({"name": "staged", "version": "1", "min_frames": 10, "max_frames": 5})
 
@@ -184,16 +125,8 @@ def test_a_malformed_profile_is_a_terminal_failure_with_its_own_reason_code() ->
     assert _failure_reason_code(exc) == ReasonCode.VALIDATION_PROFILE_INVALID
 
 
-# ------------------------------------------------------------------ reverse path
-
-
 def test_reverse_lineage_selects_every_field_its_schema_declares() -> None:
-    """`builds_for_episode` named four columns; the response schema declares seven.
-
-    The three missing ones came back as their schema defaults, so the endpoint
-    answered "which build is this episode in, under what policy, from what commit"
-    with three permanently empty fields and no error.
-    """
+    """`builds_for_episode` named four columns; the response schema declares seven."""
     source = Path(__file__).resolve().parents[2] / "src/data_engine/catalog/repository.py"
     text = source.read_text(encoding="utf-8")
     query = text.split("def builds_for_episode", 1)[1].split("def get_episodes", 1)[0]

@@ -183,11 +183,7 @@ def baseline_document(result: BenchmarkResult) -> dict[str, Any]:
 
 
 def load_baseline(path: Path) -> BaselineDocument:
-    """Parse and validate a committed baseline, reporting the file and the offending field.
-
-    Raises BaselineFormatError (a ValueError) rather than KeyError/ValidationError so a
-    malformed baseline reads as a baseline problem, not a harness bug.
-    """
+    """Parse and validate a committed baseline, reporting the file and the offending field."""
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError as exc:
@@ -231,8 +227,6 @@ def compare_to_baseline(
             differing
         )
         if "gpu" in differing:
-            # A missing GPU telemetry extra changes the profile without any hardware
-            # change, and that is the likeliest cause of a gpu-only mismatch.
             message += (
                 "; note that a missing nvidia-ml-py (the 'gpu' extra) is reported as no GPU, "
                 "so run `just setup` and use the just recipes, which install extras"
@@ -301,14 +295,6 @@ def _ingest_microbenchmark() -> BenchmarkResult:
             "database": "in-memory benchmark catalog; production filesystem artifact store",
         },
     )
-
-
-# ------------------------------------------------------- run-intelligence workloads
-#
-# One workload per feature (backlog B-003, B-012..B-015). Micro workloads follow the
-# methodology defaults (3 warmups, 10 trials); the real-data ingest workload is
-# end-to-end (1 warmup, 5 trials). Every workload is deterministic: no RNG, no clock
-# reads inside the operation.
 
 
 def _series(frames: int, dims: int = 12) -> dict[str, list[float]]:
@@ -563,7 +549,6 @@ class _BenchApiCatalog:
     def failing_episodes(
         self, *, limit: int = 50, before: Any = None, reason_code: str | None = None
     ) -> list[dict[str, Any]]:
-        # A cursor shortens the page, the way a real page would be a strict subset.
         rows = [
             {
                 "id": f"episode-{i:03d}",
@@ -675,8 +660,6 @@ class _BenchApiCatalog:
         return []
 
 
-#: A window with everything present, so the benchmark exercises the full vector
-#: rather than the cheap "every sensor absent" path.
 _BENCH_SNAPSHOT: dict[str, Any] = {
     "queue_depth": {"queued": 2, "running": 1, "failed": 0, "succeeded": 140},
     "oldest_queued_age_seconds": 4.0,
@@ -865,8 +848,7 @@ def _ui_insights_benchmark(*, trials: int = 10, warmups: int = 3) -> BenchmarkRe
 
 
 def _lerobot_benchmark(*, trials: int = 5, warmups: int = 1) -> BenchmarkResult | None:
-    """B-003: real LeRobot v3 ingest (read + slice + quality + artifact). Skips when
-    the network fixture has not been downloaded (run the `network`-marked tests first)."""
+    """B-003: real LeRobot v3 ingest (read + slice + quality + artifact)."""
     root = Path("var/real-data/svla_so101_pickplace")
     if not (root / "meta" / "info.json").exists():
         return None
@@ -902,15 +884,7 @@ def _lerobot_benchmark(*, trials: int = 5, warmups: int = 1) -> BenchmarkResult 
 def _mcap_benchmark(
     *, trials: int = 5, warmups: int = 1, path: Path | None = None, name: str = "mcap-ingest"
 ) -> BenchmarkResult | None:
-    """B-002: real MCAP ingest - stream the bag, describe it, hash the bytes.
-
-    The point of the number is bytes per second over a *file on disk*, so the
-    generator is not in the timed path: regenerating each trial would measure
-    `mcap.writer`. The file is the one `scripts/make_mcap_log.py` produces, and its
-    SHA-256 is recorded in the result so a future run can prove it measured the same
-    input. A longer bag (B-007) passes its own `path` and `name`; a missing file
-    skips the workload rather than failing the run.
-    """
+    """B-002: real MCAP ingest - stream the bag, describe it, hash the bytes."""
     root = path if path is not None else Path("var/real-data/so101_pick_place.mcap")
     if not root.is_file():
         return None
@@ -943,8 +917,6 @@ def _mcap_benchmark(
         dataset="faultlined so101_pick_place sensor log (MCAP, JSON-encoded topics)",
         workload_version="1.0.0",
     )
-    # Throughput is the headline for this backlog row, and p50 latency alone would make
-    # a reader that got slower on a smaller file look fine.
     if result.summary.p50_seconds > 0:
         result.config["throughput_mib_per_second_p50"] = round(
             (size_bytes / 1024**2) / result.summary.p50_seconds, 3
@@ -952,7 +924,6 @@ def _mcap_benchmark(
     return result
 
 
-# Entries are late-bound lambdas so tests can monkeypatch the workload functions.
 def _api_incidents_benchmark(*, trials: int = 10, warmups: int = 3) -> BenchmarkResult:
     return _client_benchmark(
         name="api-incidents-catalog",
@@ -964,12 +935,7 @@ def _api_incidents_benchmark(*, trials: int = 10, warmups: int = 3) -> Benchmark
 
 
 def _monitor_evaluate_benchmark(*, trials: int = 50, warmups: int = 5) -> BenchmarkResult:
-    """Cost of one evaluation tick's pure half: features, rules, triage, render.
-
-    Deliberately excludes the database round trip so the number is the pipeline's
-    own cost and stays comparable as the catalog grows. The persistence half is
-    covered by the ``api-incidents-catalog`` workload and the integration tests.
-    """
+    """Cost of one evaluation tick's pure half: features, rules, triage, render."""
     from data_engine.monitoring.baselines import BaselineBook
     from data_engine.monitoring.detectors import DetectorContext, detect, observations_for
     from data_engine.monitoring.features import (
@@ -1004,8 +970,6 @@ def _monitor_evaluate_benchmark(*, trials: int = 50, warmups: int = 5) -> Benchm
         memory_available_bytes=10e9,
         disk_free_bytes=120 * 1024**3,
     )
-    # Warm every limit first, so the benchmark measures the statistical path
-    # (median/MAD per scope) rather than the cold-start abstention path.
     book = BaselineBook()
     warm = build_features(
         FeatureInputs(now=now, records=records, snapshot=_BENCH_SNAPSHOT, resources=resources)

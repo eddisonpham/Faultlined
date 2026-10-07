@@ -64,7 +64,6 @@ class TestColumns:
 class TestPagedRows:
     def test_pages_until_a_short_page(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(download, "PAGE_SIZE", 1)
-        # Newest first, like every list read the pager walks.
         stamps = [datetime(2026, 10, 1, hour=h, tzinfo=UTC) for h in (3, 2, 1)]
         calls: list[dict[str, Any]] = []
 

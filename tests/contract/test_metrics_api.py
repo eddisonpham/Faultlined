@@ -99,8 +99,6 @@ def test_metrics_endpoint_summarizes_the_sink(tmp_path: Path) -> None:
     assert run_time["mean"] == pytest.approx(3.0)
     assert run_time["p95"] == pytest.approx(4.0)
 
-    # The middleware records this request after the response is built, so it lands
-    # in the sink but not in this response's summaries.
     assert "jobs_run_time_seconds" in body["series"]
     assert body["series"]["jobs_run_time_seconds"][0]["count"] == 2
 
@@ -155,7 +153,6 @@ def test_request_latency_uses_route_templates_not_raw_paths(tmp_path: Path) -> N
     }
     assert by_route["/api/v1/jobs/{job_id}"]["status_class"] == "4xx"
     assert by_route["unmatched"]["status_class"] == "4xx"
-    # Raw paths and IDs never appear as labels.
     assert not any("some-long-uuid-value" in key for key in by_route)
 
     counters = [
