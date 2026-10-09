@@ -14,7 +14,8 @@ no rationale/Args/Returns; rationale stays in `agents/` (ADRs, experiments, arch
 ## Findings
 
 ### F-1 multi-statement docstrings — 0 remaining
-36 project-owned multi-statement docstrings (12 scripts + 20 src/tests/exp) rewritten to
+36 project-owned multi-statement docstrings (15 in `scripts/` — 12 module docstrings plus
+3 in `scale_campaign.py` — and 21 across `src/`, `tests/`, `experiments/`) rewritten to
 single-line summary. Ruff format normalized spacing. No rationale/Args/Returns remains.
 
 ### F-2 non-directive comments — 0
